@@ -213,7 +213,7 @@ function VerifyCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () =>
       {delivery?.review && <span className="dt-verify-review">{delivery.review}</span>}
       {delivery?.lease.length ? <span className="dt-verify-scope">{t('verifyFiles', { count: delivery.lease.length })}</span> : null}
     </div>}
-    {proof && <div className="dt-verify-proof"><VerificationChecks text={proof} /></div>}
+    {proof && <div className="dt-verify-proof"><VerificationChecks text={proof} collapsible /></div>}
     <footer className="dt-verify-foot">
       {(proof || delivery?.lease.length || delivery?.review) && <ConfirmButton variant="primary" icon="review"
         label={backlog ? t('verifyBackfillMark') : t('verifyPass')}
@@ -241,11 +241,14 @@ function VerifyCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () =>
 /**
  * A delivered ticket being followed through its review and pipeline. A blocked one that needs a person sits at the top of
  * the lane; a running one is still moving, so the card leans on the last check and the review link instead of a verdict.
+ * `manual` separates "only your approval or submit remains" (a gold wait, not a failure) from a real block.
  */
 function PipelineCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () => Promise<void> }) {
   const { t, call, notify, navigate } = usePanel()
-  const blocked = ticket.stage === 'pipeline' && ticket.action === 'blocked'
   const pipeline = ticket.pipeline
+  const blockedStage = ticket.stage === 'pipeline' && ticket.action === 'blocked'
+  const waiting = blockedStage && !!pipeline?.manual
+  const blocked = blockedStage && !pipeline?.manual
   const delivery = ticket.delivery
   const open = () => navigate(ticketRoute(ticket.id))
   const resume = async () => {
@@ -253,9 +256,9 @@ function PipelineCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
     notify(t('pipelineResumedNotice'))
     await onChanged()
   }
-  return <article className="dt-pipeline-card" data-blocked={blocked || undefined}>
+  return <article className="dt-pipeline-card" data-blocked={blocked || undefined} data-waiting={waiting || undefined}>
     <header className="dt-pipeline-head">
-      <Tag tone={blocked ? 'danger' : 'info'}>{t(blocked ? 'pipelineBlocked' : 'pipelineRunning')}</Tag>
+      <Tag tone={waiting ? 'warning' : blocked ? 'danger' : 'info'}>{t(waiting ? 'pipelineWaiting' : blocked ? 'pipelineBlocked' : 'pipelineRunning')}</Tag>
       <span className="dt-pipeline-age"><When at={pipeline?.at ?? ticket.updatedAt} /></span>
     </header>
     <button type="button" className="dt-pipeline-title" onClick={open}>{ticket.title}</button>
@@ -263,13 +266,14 @@ function PipelineCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
     {!pipeline?.reason && pipeline?.check && <p className="dt-pipeline-check">{pipeline.check}</p>}
     <div className="dt-pipeline-facts">
       {delivery?.changelist !== undefined && <span className="dt-verify-cl">CL {delivery.changelist}</span>}
+      {pipeline?.reason && pipeline?.check && <span className="dt-pipeline-chip" title={pipeline.check}>{pipeline.check}</span>}
       {pipeline?.url && <a className="dt-pipeline-link" href={pipeline.url} target="_blank" rel="noreferrer"
         onClick={event => event.stopPropagation()}>{t('pipelineOpenReview')}</a>}
       {delivery?.review && !pipeline?.url && <span className="dt-pipeline-review">{delivery.review}</span>}
     </div>
     <footer className="dt-pipeline-foot">
-      <Button variant={blocked ? 'primary' : 'outline'} size="sm" onClick={open}>{t(blocked ? 'pipelineHandle' : 'pipelineOpen')}</Button>
-      {blocked && <Button variant="ghost" size="sm" onClick={() => { void resume() }}>{t('pipelineResume')}</Button>}
+      <Button variant={blockedStage ? 'primary' : 'outline'} size="sm" onClick={open}>{t(blockedStage ? 'pipelineHandle' : 'pipelineOpen')}</Button>
+      {blockedStage && <Button variant="ghost" size="sm" onClick={() => { void resume() }}>{t('pipelineResume')}</Button>}
     </footer>
   </article>
 }
@@ -398,7 +402,8 @@ export function OverviewPage() {
   const person = data.person
   const verification = data.verification ?? []
   const pipeline = data.pipeline ?? []
-  const blockedPipeline = pipeline.filter(ticket => ticket.stage === 'pipeline' && ticket.action === 'blocked').length
+  const blockedPipeline = pipeline.filter(ticket => ticket.stage === 'pipeline' && ticket.action === 'blocked'
+    && !ticket.pipeline?.manual).length
   const working = data.working ?? []
   const idle = data.idle ?? []
   const ended = data.ended ?? []
@@ -485,9 +490,9 @@ export function OverviewPage() {
         empty={t('boardPipelineEmpty')}
         action={pipeline.length ? <button type="button" className="dt-board-more" onClick={() => navigate({ page: 'execution', query: { filter: 'pipeline' } })}>
           {t('boardAllNeeds', { count: pipeline.length })} →</button> : undefined}>
-        {blockedPipeline > 0 && <div className="dt-pipeline-alert">
-          <p>{t('pipelineBlockedNow', { count: blockedPipeline })}</p>
-          <p className="dt-pipeline-alert-sub">{t('pipelineBlockedSub')}</p>
+        {blockedPipeline > 0 && <div className="dt-pipeline-alert" role="status">
+          <Tag tone="danger">{t('pipelineBlockedCount', { count: blockedPipeline })}</Tag>
+          <span className="dt-pipeline-alert-sub">{t('pipelineBlockedSub')}</span>
         </div>}
         <div className="dt-board-stack">{pipeline.map(ticket => <PipelineCard key={ticket.id} ticket={ticket} onChanged={reload} />)}</div>
       </Lane>

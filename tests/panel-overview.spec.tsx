@@ -68,7 +68,7 @@ it('shows the editor row in each state, keeping an unreadable probe on the safe 
 it('pins a blocked pipeline at the top of its lane and offers the review and a new follow-up', async () => {
   server.pipeline = [
     ticketSummary({ id: 'p1', title: '流水线阻塞', pipeline: { state: 'blocked', at: '2026-09-23T00:00:00Z', reason: 'P4_Check 缺少 TAPD 单号',
-      url: 'https://swarm.example/reviews/9', manual: true }, delivery: { lease: [], changelist: 9001 } }, { stage: 'pipeline', action: 'blocked' }),
+      url: 'https://swarm.example/reviews/9', manual: false, check: 'P4_Check 失败' }, delivery: { lease: [], changelist: 9001 } }, { stage: 'pipeline', action: 'blocked' }),
     ticketSummary({ id: 'p2', title: '流水线在跑', pipeline: { state: 'running', at: '2026-09-23T00:00:00Z', check: 'ClangTidy 已过' },
       delivery: { lease: [], changelist: 9002 } }, { stage: 'pipeline', action: 'running' }),
   ]
@@ -77,10 +77,31 @@ it('pins a blocked pipeline at the top of its lane and offers the review and a n
   const cards = all('.dt-pipeline-card')
   expect(cards.map(card => card.querySelector('.dt-pipeline-title')?.textContent)).toEqual(['流水线阻塞', '流水线在跑'])
   expect(cards[0]!.hasAttribute('data-blocked')).toBe(true)
+  expect(cards[0]!.hasAttribute('data-waiting')).toBe(false)
+  expect(cards[0]!.querySelector('.dt-tag')?.textContent).toBe(zh.pipelineBlocked)
+  expect(cards[0]!.querySelector('.dt-pipeline-chip')?.textContent).toBe('P4_Check 失败')
   expect(cards[0]!.textContent).toContain('P4_Check 缺少 TAPD 单号')
   expect(cards[0]!.querySelector<HTMLAnchorElement>('.dt-pipeline-link')?.href).toBe('https://swarm.example/reviews/9')
   await click(find(zh.pipelineResume, '.dt-pipeline-card button'))
   expect(server.requests.some(request => request.path === 'tickets/p1/pipeline/check' && request.method === 'POST')).toBe(true)
+})
+
+it('shows a pipeline that only awaits a person as a gold wait, not a red block', async () => {
+  server.pipeline = [
+    ticketSummary({ id: 'w1', title: '只差你确认', pipeline: { state: 'blocked', at: '2026-09-23T00:00:00Z',
+      reason: '全部 11 项流水线 pass、AI 评审无建议；需要人工审批并 p4 submit', manual: true, check: '11/11 testruns pass',
+      url: 'https://swarm.example/reviews/11' }, delivery: { lease: [], changelist: 9003 } }, { stage: 'pipeline', action: 'blocked' }),
+  ]
+  await mount()
+  const card = all('.dt-pipeline-card')[0]!
+  expect(card.hasAttribute('data-blocked')).toBe(false)
+  expect(card.hasAttribute('data-waiting')).toBe(true)
+  expect(card.querySelector('.dt-tag')?.textContent).toBe(zh.pipelineWaiting)
+  expect(card.querySelector('.dt-tag')?.getAttribute('data-tone')).toBe('warning')
+  expect(card.querySelector('.dt-pipeline-chip')?.textContent).toBe('11/11 testruns pass')
+  // Only a real block raises the lane's red intervention alert.
+  expect(all('.dt-pipeline-alert')).toHaveLength(0)
+  expect(server.misuse).toEqual([])
 })
 
 it('finds a Ticket from the Overview and opens it, with the field that matched', async () => {
@@ -110,6 +131,27 @@ it('passes delivered work from its verification card, or sends it back with a no
   await click(zh.verifyReturnSubmit)
   expect(server.requests.some(request => request.path === 'tickets/t8/rework' && request.method === 'POST'
     && JSON.stringify(request.body).includes('PIE 里 Q 技能仍然会卡住'))).toBe(true)
+})
+
+it('labels every verification row with a fixed pill and folds past three rows', async () => {
+  const proof = ['Compile Result: Succeeded', 'Automation 1/2 failed', 'P4_Check 未运行',
+    'p4 shelve -f -c 581411: 5 个文件 shelve'].join('\n')
+  server.verification = [ticketSummary({ id: 'v1', title: '气泡验证', delivery: { lease: [], changelist: 581411,
+    review: 'Swarm 1', verification: proof }, verification: { at: '2026-09-23T00:00:00Z', state: 'pending' } },
+  { stage: 'person', action: 'verify' })]
+  await mount()
+  await openOverview()
+  const card = all('.dt-verify-card')[0]!
+  const rows = () => [...card.querySelectorAll('.dt-checks li')]
+  expect(card.querySelector('.dt-checks-summary')?.textContent).toBe('1 已检查 · 1 失败 · 1 没跑 · 1 已确认')
+  expect(rows().map(row => row.querySelector('.dt-tag')?.textContent)).toEqual(['已检查', '失败', '没跑'])
+  expect(rows().map(row => row.getAttribute('data-state'))).toEqual(['pass', 'fail', 'skip'])
+  await click(card.querySelector('.dt-checks-more') as HTMLElement)
+  expect(rows()).toHaveLength(4)
+  expect(rows()[3]!.querySelector('.dt-tag')?.textContent).toBe('已确认')
+  expect(rows()[3]!.getAttribute('data-state')).toBe('note')
+  await click(card.querySelector('.dt-checks-more') as HTMLElement)
+  expect(rows()).toHaveLength(3)
 })
 
 it('answers a question, retries a failure and stops a Ticket from its decision card', async () => {
