@@ -25,21 +25,27 @@ const trigger = {
   url: 'https://applink.feishu.cn/client/message/open?message_id=om_1',
 }
 const context = (lark: ReturnType<typeof vi.fn>, retarget: ReturnType<typeof vi.fn>,
-  describe: ReturnType<typeof vi.fn> = vi.fn(), patch: ReturnType<typeof vi.fn> = vi.fn()): SourceContext => ({
+  describe: ReturnType<typeof vi.fn> = vi.fn(), patch: ReturnType<typeof vi.fn> = vi.fn(),
+  notify: ReturnType<typeof vi.fn> = vi.fn()): SourceContext => ({
     config: () => ({ topicChat: 'oc_topic' }),
     triggers: { get: () => trigger },
     commands: { lark },
     tickets: { retarget },
     threads: { describe, patch },
+    notify,
   }) as unknown as SourceContext
 
 describe('Feishu ticket topics', () => {
   it('opens a topic named after the ticket and moves its replies there', async () => {
-    const lark = vi.fn(async (_args: string[]) => ({ message_id: 'om_topic', thread_id: 'omt_topic' }))
+    const lark = vi.fn(async (args: string[]) => args[1] === '+messages-send'
+      ? { message_id: 'om_topic', thread_id: 'omt_topic' }
+      : { data: { messages: [{ message_id: 'om_topic', thread_id: 'omt_topic',
+        message_app_link: 'https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic' }] } })
     const retarget = vi.fn()
     const describe = vi.fn()
     const patch = vi.fn()
-    await openFeishuTopic(context(lark, retarget, describe, patch), ticket())
+    const notify = vi.fn()
+    await openFeishuTopic(context(lark, retarget, describe, patch, notify), ticket())
 
     const args = lark.mock.calls[0]![0] as string[]
     expect(args.slice(0, 7)).toEqual(['im', '+messages-send', '--chat-id', 'oc_topic', '--msg-type', 'post', '--content'])
@@ -55,6 +61,26 @@ describe('Feishu ticket topics', () => {
     expect(describe).toHaveBeenCalledWith('feishu:oc_topic:om_topic',
       expect.objectContaining({ label: '「把话题改成工单简述」· 工单 8b4722eb', url: trigger.url }))
     expect(patch).toHaveBeenCalledWith('feishu:oc_topic:om_topic', { threadId: 'omt_topic' })
+    // The original thread gets a back-link, so the person who wrote there finds the topic.
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'topic-link-8b4722eb84a73a17d2b889adf1b7d43f',
+      channel: trigger.channel,
+      text: '已开话题：https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic',
+      kind: 'reply',
+      ticketId: ticket().id,
+    }))
+  })
+
+  it('keeps the topic when the link lookup fails, and skips only the back-link', async () => {
+    const lark = vi.fn(async (args: string[]) => {
+      if (args[1] === '+messages-send') return { message_id: 'om_topic', thread_id: 'omt_topic' }
+      throw new Error('lookup failed')
+    })
+    const retarget = vi.fn()
+    const notify = vi.fn()
+    await openFeishuTopic(context(lark, retarget, vi.fn(), vi.fn(), notify), ticket())
+    expect(retarget).toHaveBeenCalled()
+    expect(notify).not.toHaveBeenCalled()
   })
 
   it('leaves a ticket alone once its replies were moved, so a repeated event creates no second topic', async () => {
