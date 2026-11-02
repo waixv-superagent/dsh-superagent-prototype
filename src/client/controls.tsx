@@ -114,7 +114,7 @@ export function SegmentedTabs<V extends string>({ items, value, onChange, label,
   </div>
 }
 export function SegmentedControl<V extends string>({ options, value, onChange, label, disabled, className }: {
-  options: readonly { value: V; label: string; title?: string }[]; value: V; onChange: (next: V) => void; label: string; disabled?: boolean
+  options: readonly { value: V; label: ReactNode; title?: string }[]; value: V; onChange: (next: V) => void; label: string; disabled?: boolean
   className?: string
 }) {
   return <div role="tablist" aria-label={label} className={cx('dt-segmented', className)}

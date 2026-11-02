@@ -15,7 +15,7 @@ interface FieldBase { key: string; label: Localized; hint?: Localized; advanced?
  */
 export type FieldSpec =
   | FieldBase & { type: 'switch' }
-  | FieldBase & { type: 'select'; options: { value: string; label: Localized }[] }
+  | FieldBase & { type: 'select'; options: { value: string; label: Localized; emoji?: string }[] }
   | FieldBase & { type: 'number'; min: number; max: number }
   | FieldBase & { type: 'text'; pattern?: string; readonly?: boolean; choose?: Localized }
   | FieldBase & { type: 'fact'; settings?: 'deployment' }
