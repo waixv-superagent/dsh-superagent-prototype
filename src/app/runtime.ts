@@ -161,6 +161,16 @@ export class Runtime extends Service implements SourceHost {
           const gate = followed ? store.triggers.disposition(triggerId)?.acked?.length : 0
           const followup = followed && !gate ? followupNotice(store, sources, triggerId) : undefined
           if (followup) sessions.relay(followup.id, followup.text)
+          // A Source may open its own conversation for the new ticket, such as a Feishu topic, and move its replies there.
+          if (event.type === 'ticket.created') {
+            const ticket = store.tickets.get(event.data.ticketId)
+            const kind = ticket ? sources.kind(store.triggers.get(ticket.origin.triggerId)?.source ?? '') : undefined
+            if (ticket && kind?.opened) {
+              void Promise.resolve(kind.opened(this.context(kind), ticket)).catch(error => {
+                ctx.logger.warn('dsh-superagent: could not open a conversation for ticket %s: %s', ticket.id, String(error))
+              })
+            }
+          }
           // Notify the ticket's conversations whenever it ends via a pull request.
           const ended = event.type === 'ticket.ended' ? store.tickets.get(event.data.ticketId) : undefined
           if (ended && setup.configured()) {
