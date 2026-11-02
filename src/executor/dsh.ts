@@ -113,7 +113,10 @@ export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutco
     : note.trim()
   // Under the p4 backend the worker delivers by shelving a changelist, because the mainline is read-only for it.
   const delivery = settings.executor.backend === 'p4'
-    ? '\nDeliver as one shelved changelist: p4 change -i, p4 reopen -c <CL> for the edits, p4 shelve -c <CL>, '
+    ? '\nBefore implementing, confirm the work targets the depot this workspace maps. A ticket whose target is another '
+      + 'repository, such as the superagent source itself, must report blocked at P1 naming that repository and the git channel it '
+      + 'needs, so a person can move it there; never implement it in the p4 workspace. '
+      + 'Deliver as one shelved changelist: p4 change -i, p4 reopen -c <CL> for the edits, p4 shelve -c <CL>, '
       + 'then p4 describe -S <CL> and open the Swarm review. Reshelve with -f after review comments or a red pipeline. '
       + 'After shelving, keep your files and edits in the workspace: do not p4 revert them, so the change stays available for the '
       + 'person to test and for the next round. Once a person has submitted the changelist (p4 describe -S <CL> no longer says '
