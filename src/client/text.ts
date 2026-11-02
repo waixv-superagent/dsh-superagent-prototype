@@ -69,8 +69,14 @@ export interface CheckLine { text: string; state: 'pass' | 'fail' | 'skip' | 'no
  * link "not run" would misreport work the worker actually did.
  */
 export function checkLines(text: string): CheckLine[] {
-  return text.split(/\r?\n|；|;/).map(line => line.trim()).filter(Boolean).slice(0, 8).map(line => ({ text: line.slice(0, 200),
-    state: /未运行|未跑|没有跑|未执行|未测|没测|not run|skipped|unable to run/i.test(line) ? 'skip'
-      : /失败|未通过|不通过|\bfail(?:ed|ure)?\b|✗|×/i.test(line) ? 'fail'
-      : /通过|成功|已检查|已验证|\bpass(?:ed)?\b|\bsucceed(?:ed)?\b|✓/i.test(line) ? 'pass' : 'note' })) as CheckLine[]
+  return text.split(/\r?\n|；|;/).map(line => line.trim()).filter(Boolean).slice(0, 8).map(line => {
+    // "0 failed" reports a clean run; strip it before the failure test so the count cannot flip the verdict.
+    const failures = line.replace(/\b0\s+fail(?:ed|ures?)\b/gi, '')
+    return { text: line.slice(0, 200),
+      state: /未运行|未跑|没有跑|未执行|未测|没测|not run|unable to run/i.test(line) ? 'skip'
+        : /失败|未通过|不通过|\bfail(?:ed|ure)?\b|✗|×/i.test(failures) ? 'fail'
+        : /通过|成功|已检查|已验证|\bpass(?:ed)?\b|\bsucceed(?:ed)?\b|✓|exit\s*(?:code\s*)?0\b|\b(\d+)\/\1\b|\bbuild complete\b|\b0\s+errors?\b/i.test(line)
+          ? 'pass'
+          : /skipped/i.test(line) ? 'skip' : 'note' }
+  }) as CheckLine[]
 }

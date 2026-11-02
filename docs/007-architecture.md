@@ -472,6 +472,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/live-activity.spec.tsx` | The current-tool buffer and its bounded recent trail on fake host events, MCP name parsing, and the Ticket page's "now" card: current tool, latest progress, next step, and no reasoning or speed |
 | `tests/panel-settings.spec.tsx`, `panel-prompts.spec.tsx`, `panel-deployment.spec.tsx`, `panel-panel.spec.tsx` | The settings groups, drafts and history, the prompts, the Deployment page, and the panel's search, glossary and route memory |
 | `tests/draft.spec.ts`, `tests/prompt-config.spec.ts`, `tests/markdown.spec.ts`, `tests/marks.spec.ts` | Draft states, merges and the save bar's line; the prompt configuration by section and the line diff; the Markdown subset and its links; the mark of every state the views classify |
+| `tests/check-lines.spec.ts` | How a worker's free-text verification line reads as checked, failed, not run, or a recorded fact |
 | `tests/locales.spec.ts`, `tests/styles.spec.ts` | The copy in both languages, the stylesheet |
 | `tests/class-docs.spec.ts` | Every class in `src` has a JSDoc block before it |
 | `tests/docs.spec.ts` | Numbered documents link only to earlier ones, every local link resolves, no document has merge conflict markers, and this document's tables list every module and every test |

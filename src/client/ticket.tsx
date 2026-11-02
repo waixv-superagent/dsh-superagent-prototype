@@ -406,27 +406,33 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
 }
 /**
  * The follow-up after local verification: a delivered change is tracked through its review and pipeline until it is in the
- * mainline. A blocked pipeline says what a person must do; an already merged one completes the Ticket instead of asking
- * for another check.
+ * mainline. A blocked pipeline says what a person must do; a waiting-only pipeline (manual) is a person's approval or
+ * submit, not a failure, so it reads as a gold wait. An already merged one completes the Ticket instead of asking for
+ * another check.
  */
 function PipelineGate({ ticket, onChanged }: { ticket: TicketPageView; onChanged: () => Promise<void> }) {
   const { t, call, notify } = usePanel()
   const pipeline = ticket.pipeline
   if (!pipeline || ticket.state === 'ended') return null
-  const blocked = pipeline.state === 'blocked'
+  const blocked = pipeline.state === 'blocked' && !pipeline.manual
+  const waiting = pipeline.state === 'blocked' && !!pipeline.manual
   const review = pipeline.url ?? ticket.delivery?.review
   const reviewHref = review && /^https?:\/\//i.test(review) ? review : undefined
-  return <section className="dt-pipeline-gate" data-blocked={blocked || undefined} aria-labelledby="dt-pipeline-gate-title">
+  return <section className="dt-pipeline-gate" data-blocked={blocked || undefined} data-waiting={waiting || undefined}
+    aria-labelledby="dt-pipeline-gate-title">
     <header className="dt-pipeline-gate-head">
       <span className="dt-pipeline-gate-icon" aria-hidden="true"><Icon name="review" size={15} /></span>
       <div className="dt-pipeline-gate-titles">
-        <h2 id="dt-pipeline-gate-title" className="dt-pipeline-gate-title">{t(blocked ? 'pipelineGateBlockedTitle' : 'pipelineGateTitle')}</h2>
-        <p className="dt-pipeline-gate-sub">{t(blocked ? 'pipelineGateBlockedSub' : 'pipelineGateSub')}</p>
+        <h2 id="dt-pipeline-gate-title" className="dt-pipeline-gate-title">{t(waiting ? 'pipelineGateWaitingTitle'
+          : blocked ? 'pipelineGateBlockedTitle' : 'pipelineGateTitle')}</h2>
+        <p className="dt-pipeline-gate-sub">{t(waiting ? 'pipelineGateWaitingSub'
+          : blocked ? 'pipelineGateBlockedSub' : 'pipelineGateSub')}</p>
       </div>
-      <Tag tone={blocked ? 'danger' : 'info'}>{t(blocked ? 'pipelineBlocked' : 'pipelineRunning')}</Tag>
+      <Tag tone={waiting ? 'warning' : blocked ? 'danger' : 'info'}>{t(waiting ? 'pipelineWaiting'
+        : blocked ? 'pipelineBlocked' : 'pipelineRunning')}</Tag>
     </header>
     <dl className="dt-pipeline-gate-facts">
-      <div><dt>{t('pipelineState')}</dt><dd>{valueLabel(t, 'pipelineState', pipeline.state)}</dd></div>
+      <div><dt>{t('pipelineState')}</dt><dd>{waiting ? t('pipelineWaiting') : valueLabel(t, 'pipelineState', pipeline.state)}</dd></div>
       <div><dt>{t('pipelineLastCheck')}</dt><dd>{pipeline.check || t('pipelineNoCheck')}</dd></div>
       <div><dt>CL</dt><dd>{ticket.delivery?.changelist !== undefined ? ticket.delivery.changelist : t('empty')}</dd></div>
       <div><dt>review</dt><dd>{reviewHref ? <a href={reviewHref} target="_blank" rel="noreferrer">{reviewLabel(review!)}</a>
@@ -438,7 +444,7 @@ function PipelineGate({ ticket, onChanged }: { ticket: TicketPageView; onChanged
         message={t('pipelineMarkMergedConfirm', { title: ticket.title })}
         onConfirm={async () => { await call('POST tickets/:id/pipeline', { id: ticket.id, body: { state: 'merged',
           ...(review ? { url: review } : {}) } }); notify(t('pipelineMergedNotice')); await onChanged() }} />
-      {blocked && <Button variant="outline" size="sm" onClick={async () => {
+      {pipeline.state === 'blocked' && <Button variant="outline" size="sm" onClick={async () => {
         await call('POST tickets/:id/pipeline/check', { id: ticket.id })
         notify(t('pipelineResumedNotice')); await onChanged()
       }}>{t('pipelineResume')}</Button>}
