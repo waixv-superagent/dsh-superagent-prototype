@@ -321,7 +321,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/passes.ts` | Passes, the pass scheduler |
 | `src/app/outbox.ts` | The Outbox: the Engine's `Outbox` port, the receipts and the `reply` effects that send them |
 | `src/app/notices.ts` | The main Session's notices and relays: `eventNotice`, `reportRelay`, `resultRelay` and `followupRelay` |
-| `src/app/plan.ts` | `notifyChat` and `notifyPlan`: sends a Ticket's P1 plan card to the private chat that decides it, and remembers which card asked about which plan |
+| `src/app/plan.ts` | `notifyChat` and `notifyPlan`: sends a Ticket's P1 plan card to the ticket's Feishu conversation — the topic its replies moved to, else the chat it started in — or the private chat that decides it, and remembers which card asked about which plan |
 | `src/app/store.ts` | The Store, and `Receipt`, a message of the outbox |
 | `src/app/store-read.ts` | `storeReads`: the Store's read queries for the views, the tools and the Sources' polls, which never write |
 | `src/app/migration.ts` | The schema 11 migration: one step from schema 10 that writes every stored record in its current shape |
@@ -382,7 +382,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/feishu-loops.ts` | The Feishu loops: the message and card-action event consumers, history recovery, chat names and polling of subscribed topics |
 | `src/sources/feishu-channel.ts` | The Feishu Channel: topic replies, `sent` or `gone` |
 | `src/sources/feishu-topic.ts` | Opens a ticket's Feishu topic: the root message carries the ticket brief, short id and original message link, the ticket's replies move there (`Ticket.replyChannel`, `Tickets.retarget`), and the original thread gets a back-link to the topic |
-| `src/sources/feishu-card.ts` | Feishu interactive cards: the decision-brief P1 plan card, the direction form, the recorded answer, the text fallback and `sendCard` |
+| `src/sources/feishu-card.ts` | Feishu interactive cards: the decision-brief P1 plan card, the direction form, the recorded answer, the text fallback and `sendCard` to a chat or into a thread |
 | `src/sources/feishu-cards.ts` | `card.action.trigger` handling: a button or form answer decides a waiting plan without a Trigger or Eval, then replaces the card in place |
 | `src/sources/feishu-read.ts` | The `feishu/` reads of a Trigger's message, its root, parent and topic, and `feishuThreadContext`, which gives them to assessments with their images |
 | `src/sources/admission-context.ts` | The bounded window an assessment starts from: the first pages of a Trigger's Thread, read through its kind, and the messages around the Trigger |
@@ -460,7 +460,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/feishu-cards.spec.ts` | A card callback decides its own plan through the button or form, answers a stale card, and ignores anyone but the ticket actor |
 | `tests/feishu-channel.spec.ts` | The outbound reply payload: Markdown as one post content JSON with no literal newline, and the reply's thread and idempotency arguments |
 | `tests/feishu-topic.spec.ts` | Opening a ticket's Feishu topic: the root brief and link, the retargeted reply channel and thread, the back-link in the original thread, a failed link lookup, idempotence, and the config requiring a receive-all topic chat |
-| `tests/plan-host.spec.ts` | Where a plan card goes: the configured private chat, the direct chat a ticket started in, and what a send failure reports |
+| `tests/plan-host.spec.ts` | Where a plan card goes: the ticket's topic reply channel, the configured private chat, the direct chat a ticket started in, and what a send failure reports |
 | `tests/deployment.spec.ts`, `tests/environment.spec.ts`, `tests/index.spec.ts` | The plugin configuration and setup, the agent's process environment, the plugin entry |
 | `tests/service-script.spec.ts` | `scripts/dsh-superagent` against fake `ps`, `tmux` and `dsh` |
 | `tests/client.spec.tsx`, `tests/navigation.spec.ts`, `tests/controls.spec.tsx` | The client plugin's registration and polling, Session navigation and route memory, the local controls, and the panel's imports, which have no cycle |

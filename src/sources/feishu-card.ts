@@ -163,13 +163,16 @@ export async function messageLink(host: CardHost, messageId: string): Promise<st
   return messageUrlOf(await host.commands.lark(['im', '+messages-mget', '--message-ids', messageId]))
 }
 /**
- * Sends a card to `chat` and falls back to its markdown text when Feishu rejects the card, so a gate question always reaches
- * the person; the idempotency key keeps a retried send from posting twice.
+ * Sends a card to `chat`, or into the thread that `replyTo` belongs to, and falls back to its markdown text when Feishu
+ * rejects the card, so a gate question always reaches the person; the idempotency key keeps a retried send from posting twice.
  * @returns the sent message's `message_id`, card or fallback text alike, when Feishu returned one.
  */
-export async function sendCard(host: CardHost, chat: string, message: CardMessage, idempotencyKey: string): Promise<string | undefined> {
+export async function sendCard(host: CardHost, chat: string, message: CardMessage, idempotencyKey: string, replyTo?: string): Promise<string | undefined> {
   const send = (flag: '--content' | '--markdown', content: string, type?: 'interactive' | 'post'): Promise<unknown> =>
-    host.commands.lark(['im', '+messages-send', '--chat-id', chat, ...type ? ['--msg-type', type] : [], flag, content, '--idempotency-key', idempotencyKey])
+    replyTo
+      ? host.commands.lark(['im', '+messages-reply', '--message-id', replyTo, ...type ? ['--msg-type', type] : [], flag, content,
+        '--reply-in-thread', '--idempotency-key', idempotencyKey])
+      : host.commands.lark(['im', '+messages-send', '--chat-id', chat, ...type ? ['--msg-type', type] : [], flag, content, '--idempotency-key', idempotencyKey])
   try {
     return messageIdOf(await send('--content', JSON.stringify(message.card), 'interactive'))
   } catch {
