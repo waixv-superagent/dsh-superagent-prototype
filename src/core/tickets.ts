@@ -75,6 +75,20 @@ export class Tickets extends EnginePart {
     return ticket
   }
   /**
+   * Moves a ticket's replies to `channel` and subscribes it to `thread`, so a Source can open its own conversation for
+   * the ticket, such as a topic, and send its later replies there; `channels` keeps the messages it was accepted from.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  retarget(ticketId: string, channel: ChannelRef, thread: ThreadRef): Ticket {
+    if (!liveTicket(this.require(ticketId))) throw new UserError('ticketEnded')
+    const ticket = this.require(ticketId)
+    ticket.replyChannel = channel
+    ticket.updatedAt = this.now()
+    this.repo.tickets.save(ticket)
+    this.subscribe(ticketId, thread)
+    return ticket
+  }
+  /**
    * Record that a Thread open tickets follow closed, and end each one done with its Threads (see `followsDone`), unless its
    * work has not finished (see `unfinished`); such work ends the ticket once it reports ready.
    */

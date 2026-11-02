@@ -295,8 +295,10 @@ export interface Ticket {
   mandate: Mandate
   /** 这张单是缺陷还是需求；只有从 escalation 建出来的单才有，直接在路由里接的单不填。 */
   category?: 'bug' | 'feature'
-  /** The Channels of the messages it was accepted from, which its replies go to. */
+  /** The Channels of the messages it was accepted from. */
   channels: ChannelRef[]
+  /** Where its replies go now; a Source may move them to a conversation it opened, such as a topic. */
+  replyChannel?: ChannelRef
   /** When, by whom, and how the ticket ended, with a person's or the host's reason beyond the outcome; an open ticket has none. */
   ended?: { at: string; by: TicketEndBy; outcome: TicketOutcome; reason?: string }
   /** Open question for a person; cleared by the executor or when the ticket ends. */

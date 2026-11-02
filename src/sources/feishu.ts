@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { FeishuBotSchema } from '../deployment.ts'
 import { feishuLink, sendFeishu } from './feishu-channel.ts'
 import { feishuThreadContext } from './feishu-read.ts'
+import { openFeishuTopic } from './feishu-topic.ts'
 import { refreshChatNames, runFeishu } from './feishu-loops.ts'
 import { SOURCE, feishuTriggerId } from './feishu-trigger.ts'
 import { sourceContext } from './host.ts'
@@ -29,9 +30,13 @@ const FeishuConfigSchema = FeishuBotSchema.extend({
   /** The private chat that intervention cards (P1 plan, P4 delivery) go to; empty uses the direct chat a ticket started in. */
   notifyChat: z.string().regex(/^(oc_[a-zA-Z0-9]+)?$/).default(''),
   otherChats: z.enum(['none', 'mentions']).default('none'),
+  /** A topic chat (chat_mode=topic) where each accepted ticket gets its own topic; empty keeps replies in the source chat. */
+  topicChat: z.string().regex(/^(oc_[a-zA-Z0-9]+)?$/).default(''),
   activeTopicHours: z.number().int().min(0).max(168).default(24),
   ackEmoji: z.enum(['OnIt', 'Typing', 'THINKING', 'DONE', 'SMILE', 'none']).default('OnIt'),
-}).strict()
+}).strict().refine(config => !config.topicChat
+  || config.chats.some(chat => chat.chatId === config.topicChat && chat.listen === 'all'),
+  { message: 'The topic chat must be listed in chats with "All"', path: ['topicChat'] })
 export type FeishuConfig = z.infer<typeof FeishuConfigSchema>
 export const feishuKind: SourceKind<FeishuConfig> = {
   kind: SOURCE,
@@ -53,6 +58,8 @@ export const feishuKind: SourceKind<FeishuConfig> = {
     { key: 'directMessages', type: 'switch', label: { zh: '接收私聊', en: 'Direct messages' } },
     { key: 'notifyChat', type: 'text', label: { zh: '介入卡片私聊', en: 'Intervention card chat' }, pattern: '(oc_[a-zA-Z0-9]+)?',
       hint: { zh: 'P1 方案确认、P4 交付确认这类需要人拍板的卡片发到这个私聊；留空时发到工单来源的私聊。', en: 'Cards that need a person\'s decision, such as the P1 plan and P4 delivery gates, go to this private chat; empty uses the direct chat a ticket started in.' } },
+    { key: 'topicChat', type: 'text', label: { zh: '话题群', en: 'Topic chat' }, pattern: '(oc_[a-zA-Z0-9]+)?',
+      hint: { zh: '一个话题群（chat_mode=topic），且在上面的群列表里设为“全部消息”。工单被接下后，机器人会在该群开一个以工单简述命名的话题，工单的后续回复和卡片发到话题里；留空保持现状。', en: 'A topic chat (chat_mode=topic) listed above with "All". After a ticket is accepted, the bot opens a topic named after the ticket brief and sends the ticket\'s later replies and cards there; empty keeps the current behavior.' } },
     { key: 'activeTopicHours', type: 'number', advanced: true, min: 0, max: 168, label: { zh: '话题活跃时长 / 小时', en: 'Active topic lifetime / hours' },
       hint: { zh: '一条 @ 机器人的消息（或私聊）之后，同一个话题里多久之内的后续消息不再需要 @ 也算对机器人的请求；0 表示关闭。', en: 'After a message that mentions the bot (or a direct message), later messages in the same topic count as requests without a mention for this long; 0 turns it off.' } },
     { key: 'ackEmoji', type: 'select', advanced: true, label: { zh: '收到消息时的表情', en: 'Receipt reaction' },
@@ -78,6 +85,7 @@ export const feishuKind: SourceKind<FeishuConfig> = {
     send: sendFeishu, link: feishuLink,
   },
   threadContext: feishuThreadContext,
+  opened: (ctx, ticket) => openFeishuTopic(ctx, ticket),
   find: query => ({ threads: [], terms: [...new Set(query.match(/om_[A-Za-z0-9_-]+/g) ?? [])] }),
   // A message's Trigger is named after the message, so the one it answers is named after its parent.
   repliesTo: trigger => typeof trigger.meta.parentId === 'string' ? feishuTriggerId(trigger.meta.parentId) : undefined,

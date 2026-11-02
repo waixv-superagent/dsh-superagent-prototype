@@ -61,6 +61,14 @@ export class Engine {
     return this.repo.atomic(() => this.tickets.bind(ticketId, thread, own))
   }
   /**
+   * A Source's request to move an open ticket's replies to `channel` and subscribe it to `thread`, such as a topic the
+   * Source opened for the ticket; the ticket keeps the Channels it was accepted from.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  retarget(ticketId: string, channel: ChannelRef, thread: ThreadRef): Ticket {
+    return this.repo.atomic(() => this.tickets.retarget(ticketId, channel, thread))
+  }
+  /**
    * A Source's fact that a Thread closed, such as its pull request's merge, at the time it happened. An open ticket that
    * follows it ends once it is done with the Threads it follows, unless work resumed since the close has not finished, or
    * its worker took up a person's message the ticket decides after its latest report.
@@ -325,7 +333,7 @@ export class Engine {
 }
 
 /** What Sources ask and tell the Engine. */
-export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThread' | 'threadClosed' | 'decidePlan'>
+export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThread' | 'retarget' | 'threadClosed' | 'decidePlan'>
 /** What the main Session asks of the Engine. */
 export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'>
 /** What people ask of the Engine, through the panel or the main Session. */

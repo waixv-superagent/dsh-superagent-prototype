@@ -62,6 +62,8 @@ export interface SourceContext {
     open(): Ticket[]
     /** Binds an open ticket to follow a Source Thread (`own` when opened by the ticket) so the Thread's close, not a ready report, ends the ticket. */
     bindThread(id: string, thread: ThreadRef, own: boolean): void
+    /** Moves an open ticket's replies to `channel` and subscribes it to `thread`, such as a topic the Source opened for it. */
+    retarget(id: string, channel: ChannelRef, thread: ThreadRef): void
     /** Reports that a followed Thread closed at `at`; each open ticket following it ends once no `own` Thread remains open and no resumed work is still running. */
     threadClosed(thread: ThreadRef, outcome: 'merged' | 'closed', at: string): void
   }

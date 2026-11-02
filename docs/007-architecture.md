@@ -381,6 +381,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/feishu-trigger.ts` | Feishu messages as Triggers, by one rule for live events, history pages and topic pages |
 | `src/sources/feishu-loops.ts` | The Feishu loops: the message and card-action event consumers, history recovery, chat names and polling of subscribed topics |
 | `src/sources/feishu-channel.ts` | The Feishu Channel: topic replies, `sent` or `gone` |
+| `src/sources/feishu-topic.ts` | Opens a ticket's Feishu topic: the root message carries the ticket brief, short id and original message link, and the ticket's replies move there (`Ticket.replyChannel`, `Tickets.retarget`) |
 | `src/sources/feishu-card.ts` | Feishu interactive cards: the decision-brief P1 plan card, the direction form, the recorded answer, the text fallback and `sendCard` |
 | `src/sources/feishu-cards.ts` | `card.action.trigger` handling: a button or form answer decides a waiting plan without a Trigger or Eval, then replaces the card in place |
 | `src/sources/feishu-read.ts` | The `feishu/` reads of a Trigger's message, its root, parent and topic, and `feishuThreadContext`, which gives them to assessments with their images |
@@ -458,6 +459,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/feishu-card.spec.ts` | The P1 plan card's decision brief, folded evidence and buttons, the direction form and recorded answer, its text fallback, and sending it with an idempotency key |
 | `tests/feishu-cards.spec.ts` | A card callback decides its own plan through the button or form, answers a stale card, and ignores anyone but the ticket actor |
 | `tests/feishu-channel.spec.ts` | The outbound reply payload: Markdown as one post content JSON with no literal newline, and the reply's thread and idempotency arguments |
+| `tests/feishu-topic.spec.ts` | Opening a ticket's Feishu topic: the root brief and link, the retargeted reply channel and thread, idempotence, and the config requiring a receive-all topic chat |
 | `tests/plan-host.spec.ts` | Where a plan card goes: the configured private chat, the direct chat a ticket started in, and what a send failure reports |
 | `tests/deployment.spec.ts`, `tests/environment.spec.ts`, `tests/index.spec.ts` | The plugin configuration and setup, the agent's process environment, the plugin entry |
 | `tests/service-script.spec.ts` | `scripts/dsh-superagent` against fake `ps`, `tmux` and `dsh` |
