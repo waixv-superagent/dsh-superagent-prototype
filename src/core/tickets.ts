@@ -214,7 +214,7 @@ export class Tickets extends EnginePart {
       // completes at once, which is the "already in the mainline" case a person must not be asked to verify again. A git
       // backend has no Swarm/Jenkins pipeline, so its local check is the last gate and the ticket completes there.
       const delivered = ticket.execution?.changelist !== undefined || !!ticket.execution?.review
-      if (ticket.pipeline?.state === 'merged' || !delivered || !this.followsPipeline()) {
+      if (ticket.pipeline?.state === 'merged' || !delivered || !this.followsPipeline(ticket)) {
         this.repo.tickets.save(ticket)
         this.end(ticketId, 'human', 'completed', at, '人已本地验证')
       } else {
@@ -232,7 +232,7 @@ export class Tickets extends EnginePart {
     return this.require(ticketId)
   }
   /** Whether a delivered change has a pipeline to follow: the p4 backend does, a git backend's change is done at the local check. */
-  private followsPipeline(): boolean { return this.options.pipelineFollowup?.() ?? true }
+  private followsPipeline(ticket: Ticket): boolean { return this.options.pipelineFollowup?.(ticket) ?? true }
   /**
    * Records a pipeline observation from a follow-up worker or a person. `merged` completes the ticket immediately, since
    * the change is already in the mainline; a `blocked` observation keeps the ticket open and puts it at the top of the
@@ -493,7 +493,9 @@ export class Tickets extends EnginePart {
     // The p4 pipeline gates code changes behind the P1 plan; a git dispatch drops that gate and keeps any later phase.
     if (backend === 'p4') ticket.phase = 'plan'
     else if (ticket.phase === undefined || ticket.phase === 'plan') ticket.phase = 'implement'
-    ticket.execution = { ...(ticket.execution ?? { name: '', directory: '', assignment: '' }), backend }
+    // The previous environment's delivery instructions are dropped, so the next launch reads only the new channel's.
+    ticket.execution = this.options.reprepareTicket?.(ticket, backend)
+      ?? { ...(ticket.execution ?? { name: '', directory: '', assignment: '' }), backend }
     ticket.updatedAt = at
     const assignment = this.newAssignment(ticket)
     const input: TicketInput = { id: key('input', ticket.id, 'redispatch', at), kind: 'text', at,

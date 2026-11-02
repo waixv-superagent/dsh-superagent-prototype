@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { EXECUTOR_VARIABLES, environmentOf, p4Client, p4Prepare } from '../src/app/execution-environment.ts'
-import { deliveryInstructions, ticketExecution } from '../src/executor/dsh.ts'
+import { baseAssignment, deliveryInstructions, sharingInstructions, ticketExecution } from '../src/executor/dsh.ts'
 import { ExecutorConfigSchema, SettingsSchema } from '../src/policy.ts'
 import type { SourceRegistry } from '../src/sources/registry.ts'
 import { testDeployment } from './fixtures/deployment.ts'
@@ -131,6 +131,17 @@ describe('p4 delivery instructions', () => {
     const execution = ticketExecution(ticket, gitAccept, settingsWith({ backend: 'p4' }), '/state')
     expect(execution.backend).toBe('git')
     expect(execution.assignment + deliveryInstructions(execution.backend ?? 'git')).not.toContain('p4 shelve')
+  })
+  it('strip the old environment instructions when a ticket is moved, leaving what the accept wrote', () => {
+    // A ticket accepted before the move carries the p4 instructions, and its shared-workspace rules, inside its assignment.
+    const settings = settingsWith({ backend: 'p4', workspaces: [{ id: 'sun', directory: 'E:/workspace' }] })
+    const old = 'the typo' + deliveryInstructions('p4') + sharingInstructions(settings, 'p4')
+    expect(old).toContain('You share this workspace')
+    expect(old).toContain('report blocked at P1')
+    expect(baseAssignment(old)).toBe('the typo')
+    // A git assignment already has neither block, so it comes back unchanged.
+    const git = ticketExecution(ticket, accept, settingsWith({}), '/state').assignment
+    expect(baseAssignment(git)).toBe(git)
   })
 })
 

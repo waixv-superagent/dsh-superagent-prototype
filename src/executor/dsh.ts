@@ -113,15 +113,7 @@ export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutco
     : note.trim()
   // Shared workspaces are the task center's, so the worker learns its lease from its environment and its peers from the
   // launch message (see 011 Task center).
-  const sharing = settings.executor.workspaces.length
-    ? '\nYou share this workspace, and its p4 client, with other tickets. Write only under your lease: DSH_SUPERAGENT_LEASE holds '
-      + 'its paths, and the launch message\'s `peers` names who else is here and what they write. Read anything. If the change needs '
-      + 'a file outside your lease, do not take it: report the need and stop, so the work can be widened or split.'
-      + (backend === 'p4'
-        ? ' Keep your edits in a changelist of your own and never touch a peer\'s: p4 change -i, then p4 reopen -c <your CL> for the '
-          + 'files you edit. Never run p4 sync of the whole workspace, p4 revert without -c, or a revert of another changelist. Shelving '
-          + 'leaves your edits in the shared tree: keep them there.' : '')
-    : ''
+  const sharing = sharingInstructions(settings, backend)
   const lease = (outcome.paths ?? []).map(normalizePath).filter(Boolean)
   return { name, directory: join(executionRoot(settings, stateDir), name), assignment: assignment + sharing, lease, backend }
 }
@@ -149,6 +141,32 @@ export function deliveryInstructions(backend: Backend): string {
       + 'Report the delivery\'s facts with the report: changelist=<CL>, swarm_review=<id or URL>, and verification=<what you ran and '
       + 'how it ended>; a ready report without verification is not evidence.'
     : ''
+}
+/** The prefix every sharing instruction block starts with, so a moved ticket can drop the previous one. */
+const SHARING_PREFIX = '\nYou share this workspace'
+/**
+ * The task center's sharing rules for a worker in a shared workspace, which learns its lease from its environment and its
+ * peers from the launch message (see 011 Task center). Under p4 it also keeps to a changelist of its own.
+ */
+export function sharingInstructions(settings: Settings, backend: Backend): string {
+  if (!settings.executor.workspaces.length) return ''
+  return SHARING_PREFIX + ', and its p4 client, with other tickets. Write only under your lease: DSH_SUPERAGENT_LEASE holds '
+    + 'its paths, and the launch message\'s `peers` names who else is here and what they write. Read anything. If the change needs '
+    + 'a file outside your lease, do not take it: report the need and stop, so the work can be widened or split.'
+    + (backend === 'p4'
+      ? ' Keep your edits in a changelist of your own and never touch a peer\'s: p4 change -i, then p4 reopen -c <your CL> for the '
+        + 'files you edit. Never run p4 sync of the whole workspace, p4 revert without -c, or a revert of another changelist. Shelving '
+        + 'leaves your edits in the shared tree: keep them there.' : '')
+}
+/**
+ * Removes the delivery and sharing instructions a launch appends, leaving what the accept wrote, so a ticket moved to another
+ * delivery environment reads only that environment's instructions on its next launch.
+ */
+export function baseAssignment(text: string): string {
+  const sharing = text.indexOf(SHARING_PREFIX)
+  const withoutSharing = sharing < 0 ? text : text.slice(0, sharing)
+  const delivery = withoutSharing.indexOf(deliveryInstructions('p4'))
+  return delivery < 0 ? withoutSharing : withoutSharing.slice(0, delivery)
 }
 /** Character limits for inline assignment and trigger text in worker messages; longer text is read via its resource. */
 const ASSIGNMENT_CHARS = 1500, TRIGGER_CHARS = 600
@@ -291,6 +309,14 @@ export class DshExecutor implements Executor {
     // The p4 pipeline gates code changes behind the P1 plan: its tickets start in the plan phase (docs/012). The GitHub path
     // keeps the phases it had, so an upgrade does not change how its workers report.
     return backend === 'p4' ? { ...prepared, phase: 'plan' as const } : prepared
+  }
+  /**
+   * Rebuilds the Execution of a ticket a person moved to another delivery environment: its assignment keeps what the accept
+   * wrote and drops the instructions of the environment it left, so its next launch composes the new one's.
+   */
+  rePrepare(ticket: Ticket, backend: Backend): Execution {
+    return { ...(ticket.execution ?? { name: '', directory: '', assignment: '' }),
+      assignment: baseAssignment(ticket.execution?.assignment ?? ''), backend }
   }
   /**
    * Runs the configured `executor.prepare` command for a new workspace in its parent directory with the ticket's execution

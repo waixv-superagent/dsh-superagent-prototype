@@ -11,9 +11,10 @@ function trigger(id: string, overrides: Partial<Trigger> = {}): Trigger {
 interface Hooks {
   emit?: (event: { type: string; data: Record<string, unknown> }) => void
   prepareTicket?: EngineOptions['prepareTicket']
+  reprepareTicket?: EngineOptions['reprepareTicket']
   pipelineFollowup?: EngineOptions['pipelineFollowup']
 }
-function harness(policyOverrides: Partial<Policy> = {}, { emit, prepareTicket, pipelineFollowup }: Hooks = {}) {
+function harness(policyOverrides: Partial<Policy> = {}, { emit, prepareTicket, reprepareTicket, pipelineFollowup }: Hooks = {}) {
   const repo = new MemoryRepositories()
   const outbox: OutboundMessage[] = []
   const withdrawn: string[] = []
@@ -42,7 +43,8 @@ function harness(policyOverrides: Partial<Policy> = {}, { emit, prepareTicket, p
     withdraw: id => { withdrawn.push(id) },
   }
   const engine = new Engine({ repo, scope, policy: () => policy, assessor, executor, outbox: queued,
-    ...emit ? { emit } : {}, ...prepareTicket ? { prepareTicket } : {}, ...pipelineFollowup ? { pipelineFollowup } : {},
+    ...emit ? { emit } : {}, ...prepareTicket ? { prepareTicket } : {}, ...reprepareTicket ? { reprepareTicket } : {},
+    ...pipelineFollowup ? { pipelineFollowup } : {},
     now: () => new Date(Date.UTC(2026, 8, 23, 0, 0, clock)).toISOString() })
   /** Simulate the executor starting queued assignments (unless `launch` is false) and delivering pending ticket inputs. */
   function settle({ launch = true } = {}) {
@@ -2026,7 +2028,6 @@ describe('P1 plan gate', () => {
   })
 })
 
-
 describe('redispatch', () => {
   it('moves a stalled ticket into another delivery environment and starts a new assignment there', () => {
     const h = harness()
@@ -2054,5 +2055,13 @@ describe('redispatch', () => {
     const other = accepted(h, '2').ticketId!
     h.engine.redispatchTicket(other, 'p4')
     expect(h.repo.tickets.get(other)!.phase).toBe('plan')
+  })
+  it('rebuilds the assignment through the executor hook when one is wired', () => {
+    // The executor owns the environment instructions that the assignment carries, so it rebuilds them for the move.
+    const h = harness({}, { reprepareTicket: (ticket, backend) => ({
+      ...(ticket.execution ?? { name: '', directory: '', assignment: '' }), assignment: 'base', backend }) })
+    const ticketId = accepted(h).ticketId!
+    h.engine.redispatchTicket(ticketId, 'git')
+    expect(h.repo.tickets.get(ticketId)!.execution).toMatchObject({ assignment: 'base', backend: 'git' })
   })
 })
