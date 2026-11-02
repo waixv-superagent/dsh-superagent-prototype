@@ -11,8 +11,9 @@ function trigger(id: string, overrides: Partial<Trigger> = {}): Trigger {
 interface Hooks {
   emit?: (event: { type: string; data: Record<string, unknown> }) => void
   prepareTicket?: EngineOptions['prepareTicket']
+  pipelineFollowup?: EngineOptions['pipelineFollowup']
 }
-function harness(policyOverrides: Partial<Policy> = {}, { emit, prepareTicket }: Hooks = {}) {
+function harness(policyOverrides: Partial<Policy> = {}, { emit, prepareTicket, pipelineFollowup }: Hooks = {}) {
   const repo = new MemoryRepositories()
   const outbox: OutboundMessage[] = []
   const withdrawn: string[] = []
@@ -41,7 +42,8 @@ function harness(policyOverrides: Partial<Policy> = {}, { emit, prepareTicket }:
     withdraw: id => { withdrawn.push(id) },
   }
   const engine = new Engine({ repo, scope, policy: () => policy, assessor, executor, outbox: queued,
-    ...emit ? { emit } : {}, ...prepareTicket ? { prepareTicket } : {}, now: () => new Date(Date.UTC(2026, 8, 23, 0, 0, clock)).toISOString() })
+    ...emit ? { emit } : {}, ...prepareTicket ? { prepareTicket } : {}, ...pipelineFollowup ? { pipelineFollowup } : {},
+    now: () => new Date(Date.UTC(2026, 8, 23, 0, 0, clock)).toISOString() })
   /** Simulate the executor starting queued assignments (unless `launch` is false) and delivering pending ticket inputs. */
   function settle({ launch = true } = {}) {
     for (;;) {
@@ -332,6 +334,21 @@ describe('subscription fan-out', () => {
     expect(merged.confirmed).toBeUndefined()
     expect(() => h.engine.verifyTicket(id)).toThrow(/already recorded local verification/)
     expect(() => h.engine.reworkTicket(id, 'again')).toThrow(/Ticket has ended/)
+  })
+  it('completes a git-backed delivery at the local check instead of following a pipeline', () => {
+    const h = harness({}, { pipelineFollowup: () => false })
+    const id = accepted(h).ticketId!
+    h.repo.tickets.save({ ...h.repo.tickets.get(id)!, execution: { name: 'w', directory: '/w', assignment: '' } })
+    h.engine.report(id, { state: 'ready', summary: 'committed and pushed',
+      delivery: { review: 'https://github.com/owner/repo/pull/7', verification: 'pnpm test: 42 passed' } })
+    const waiting = h.repo.tickets.get(id)!
+    expect(waiting.verification).toEqual({ at: expect.any(String), state: 'pending' })
+    const verified = h.engine.verifyTicket(id)
+    // The git backend has no Swarm/Jenkins pipeline: the person's local check is the last gate, so no follow-up starts.
+    expect(verified.pipeline).toBeUndefined()
+    expect(verified.ended).toMatchObject({ by: 'human', outcome: 'completed' })
+    expect(verified.verification).toMatchObject({ at: expect.any(String), state: 'passed', by: 'person' })
+    expect(h.executor.start).toHaveBeenCalledTimes(1)
   })
   it('records a person\'s local verification on a completed ticket that ended before the gate existed', () => {
     const h = harness()

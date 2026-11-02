@@ -197,11 +197,13 @@ export class Tickets extends EnginePart {
     ticket.updatedAt = at
     if (liveTicket(ticket)) {
       // A delivered change does not end at the local check: it moves to the pipeline follow-up. A change already merged
-      // completes at once, which is the "already in the mainline" case a person must not be asked to verify again.
-      if (ticket.pipeline?.state === 'merged') {
+      // completes at once, which is the "already in the mainline" case a person must not be asked to verify again. A git
+      // backend has no Swarm/Jenkins pipeline, so its local check is the last gate and the ticket completes there.
+      const delivered = ticket.execution?.changelist !== undefined || !!ticket.execution?.review
+      if (ticket.pipeline?.state === 'merged' || !delivered || !this.followsPipeline()) {
         this.repo.tickets.save(ticket)
         this.end(ticketId, 'human', 'completed', at, '人已本地验证')
-      } else if (ticket.execution?.changelist !== undefined || ticket.execution?.review) {
+      } else {
         ticket.pipeline ??= { state: 'running', at, ...(ticket.execution?.review ? { url: ticket.execution.review } : {}) }
         // The worker's deliver Assignment is over once a person has checked its work, even if its last report left it
         // pending in a test or a crashed turn; the follow-up gets a fresh Assignment of its own.
@@ -209,15 +211,14 @@ export class Tickets extends EnginePart {
         if (previous && previous.state !== 'ended') this.endAssignment(ticket, previous, 'pipelineFollowup')
         this.repo.tickets.save(ticket)
         this.startPipelineFollowup(ticket)
-      } else {
-        this.repo.tickets.save(ticket)
-        this.end(ticketId, 'human', 'completed', at, '人已本地验证')
       }
     } else {
       this.repo.tickets.save(ticket)
     }
     return this.require(ticketId)
   }
+  /** Whether a delivered change has a pipeline to follow: the p4 backend does, a git backend's change is done at the local check. */
+  private followsPipeline(): boolean { return this.options.pipelineFollowup?.() ?? true }
   /**
    * Records a pipeline observation from a follow-up worker or a person. `merged` completes the ticket immediately, since
    * the change is already in the mainline; a `blocked` observation keeps the ticket open and puts it at the top of the

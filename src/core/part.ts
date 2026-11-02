@@ -17,6 +17,8 @@ export interface EngineOptions {
   pipelineSkill?: string
   /** The Swarm base URL, so a follow-up gets a review link from a bare review id. */
   swarmUrl?: () => string
+  /** Whether delivered work goes on to the pipeline follow-up: the p4 backend has one, a git backend has no Swarm/Jenkins stage. */
+  pipelineFollowup?: () => boolean
   now?: () => string
   emit?: (event: DomainEvent) => void
 }

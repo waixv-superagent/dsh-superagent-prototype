@@ -146,6 +146,7 @@ export class Runtime extends Service implements SourceHost {
       const policy = () => settingsPolicy(store.settings(), sources)
       const engine = this.engine = new Engine({ repo: store, scope: sources, policy, assessor, executor,
         outbox, pipelineSkill: machine.pipelineSkill, swarmUrl: () => store.settings().executor.p4.swarmUrl,
+        pipelineFollowup: () => store.settings().executor.backend === 'p4',
         prepareTicket: (ticket, outcome) => executor.prepare(ticket, outcome), emit: event => {
           // Notify the main Session only about domain events it did not initiate itself.
           const notice = this.quiet ? undefined : eventNotice(event, id => store.tickets.get(id))
