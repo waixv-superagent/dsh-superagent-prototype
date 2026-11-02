@@ -1,0 +1,123 @@
+/** Ticket list, ticket detail, mandate basis formatting, and executor load views. */
+import { liveTicket, pendingPlan, planLines, threadKey, ticketStage, type AcceptMode, type AdmissionCell, type MandateBasis, type Ticket,
+  type TicketStage } from '../../core/index.ts'
+import { workerSessionId } from '../../executor/dsh.ts'
+import { KV } from '../../kv.ts'
+import type { Store } from '../store.ts'
+import { channelLink, decisionView, delivered, newestFirst, page, snapshot, threadSummary, ticketLine, type Snapshot,
+  type ViewHost } from './records.ts'
+import { markdown, preview } from './text.ts'
+
+export type BasisFact =
+  | { name: 'addressed'; value: 'mention' | 'direct' } | { name: 'followup' } | { name: 'admission'; value: AdmissionCell } | { name: 'observation' }
+  | { name: 'mode'; value: AcceptMode } | { name: 'rules'; value: { id: string; name: string }[] } | { name: 'sender'; value: string }
+  | { name: 'legacyAuthority'; value: string } | { name: 'bot' }
+/**
+ * Extracts displayable mandate admission facts in reading order (omitting the receiving scope, which is stored
+ * only for re-validation), marking pre-scope records that only have `authority` as `legacy`.
+ */
+export function basisFacts(basis: MandateBasis, rule: Snapshot['rule']): { facts: BasisFact[]; legacy: boolean } {
+  const facts: BasisFact[] = []
+  if (basis.sender) facts.push({ name: 'sender', value: basis.sender })
+  if (basis.via === 'bot') facts.push({ name: 'bot' })
+  if (basis.via !== 'followup' && basis.addressed) facts.push({ name: 'addressed', value: basis.addressed })
+  // Imported bases already record their follow-up in `authority`.
+  if (basis.via === 'followup' && !basis.authority) facts.push({ name: 'followup' })
+  if (basis.via === 'admission') facts.push({ name: 'admission', value: basis.cell })
+  const observation = basis.via === 'admission' || basis.via === 'listed' || basis.via === 'bot' ? basis.observation : undefined
+  // Listed bot messages are inferred candidates regardless of where received, so only the accept mode is shown from `observation`.
+  if (observation && basis.via !== 'bot') facts.push({ name: 'observation' })
+  if (observation?.mode) facts.push({ name: 'mode', value: observation.mode })
+  if (basis.rules?.length) facts.push({ name: 'rules', value: basis.rules.map(rule) })
+  const authority = basis.via === 'followup' || basis.via === 'listed' ? basis.authority : undefined
+  if (authority) facts.push({ name: 'legacyAuthority', value: authority })
+  return { facts, legacy: authority !== undefined }
+}
+export function ticketList(host: ViewHost, stage: 'open' | TicketStage['stage'] | 'verify' | 'unverified', offset: number, limit: number) {
+  const view = snapshot(host)
+  const { store } = view
+  const shown = (ticket: Ticket) => {
+    if (stage === 'open') return liveTicket(ticket)
+    if (stage === 'unverified' || stage === 'verify') {
+      // Verification work is both a live gate and delivered Tickets that ended before the gate existed.
+      const waiting = ticket.verification?.state !== 'passed' && delivered(ticket)
+      const own = ticketStage(ticket)
+      return stage === 'unverified' ? !liveTicket(ticket) && ticket.ended?.outcome === 'completed' && waiting
+        : own.stage === 'person' && own.action === 'verify' || !liveTicket(ticket) && ticket.ended?.outcome === 'completed' && waiting
+    }
+    const own = ticketStage(ticket)
+    return own.stage === stage
+  }
+  const tickets = (stage === 'ended' || stage === 'unverified' || stage === 'verify' ? store.tickets.list() : store.tickets.open()).filter(shown).sort(newestFirst)
+  const result = page(tickets, offset, limit)
+  return { ...result, items: result.items.map(ticket => ticketRow(view, ticket)) }
+}
+export type TicketListView = ReturnType<typeof ticketList>
+/** The message a plan card asked from: its own link, so the panel opens the question rather than the chat's latest message. */
+function questionUrl(view: Snapshot, ticket: Pick<Ticket, 'id'>): string | undefined {
+  const cards = view.store.get(KV.feishu.cards) ?? {}
+  return Object.values(cards).find(ref => ref.ticketId === ticket.id && ref.url)?.url
+}
+/** Where a person answers a ticket waiting on them: the question's message when known, else its chat. */
+function answerLink(view: Snapshot, ticket: Ticket, stage: TicketStage['stage']) {
+  if (stage !== 'person') return undefined
+  const channel = ticket.channels[0]
+  const link = channel ? channelLink(view, channel) : undefined
+  const url = questionUrl(view, ticket)
+  if (url) return link ? { ...link, url } : { source: 'feishu' as const, url, label: { zh: '飞书消息', en: 'Feishu message' } }
+  return link
+}
+export function ticketRow(view: Snapshot, ticket: Ticket) {
+  const line = ticketLine(view, ticket)
+  const reply = answerLink(view, ticket, line.stage)
+  return { ...line, ...reply ? { reply } : {} }
+}
+/** Executor slot utilization: `running` worker Sessions in an active turn (which occupy slots and are interrupted by a restart), and tickets `queued` for a slot. */
+export interface ExecutorLoad { running: number; queued: number }
+export function executorLoad(store: Store, running: number): ExecutorLoad {
+  const queued = (ticket: Ticket) => { const stage = ticketStage(ticket); return stage.stage === 'working' && stage.action === 'queued' }
+  return { running, queued: store.tickets.open().filter(queued).length }
+}
+/** The plan a ticket carries, split into lines so the panel can lead with the decision and keep the evidence behind one fold. */
+function planView(ticket: Ticket) {
+  const plan = ticket.plan
+  if (!plan) return undefined
+  return { text: plan.text, lines: planLines(plan.text), at: plan.at, waiting: !!pendingPlan(ticket),
+    ...plan.deadline ? { deadline: plan.deadline } : {}, ...plan.approved ? { approved: plan.approved } : {},
+    ...plan.feedback?.length ? { feedback: plan.feedback } : {} }
+}
+export function ticketDetail(host: ViewHost, id: string) {
+  const { store } = host
+  const ticket = store.tickets.get(id)
+  if (!ticket) return undefined
+  const view = snapshot(host)
+  const { stage } = ticketStage(ticket)
+  const decision = store.decisions.get(ticket.decisionId)
+  const input = (value: Ticket['inputs'][number]) => {
+    const trigger = value.kind === 'trigger' ? store.triggers.get(value.triggerId) : undefined
+    const handback = trigger && store.triggers.disposition(trigger.id)?.handbacks?.find(item => item.ticketId === id)
+    const shown = trigger && { id: trigger.id, actor: view.actor(trigger.actor, trigger.human), human: trigger.human,
+      preview: preview(trigger.text), thread: threadKey(trigger.threads[0]!),
+      ...handback ? { handback: { reason: handback.reason, at: handback.at } } : {} }
+    const text = (value.kind === 'text' || value.kind === 'note' || value.kind === 'session-resume') && value.text
+      ? { text: markdown(value.text) } : {}
+    return { ...value, ...text, delivered: !ticket.undelivered.includes(value.id), ...shown ? { trigger: shown } : {} }
+  }
+  // Pass `human = false` for bot-originated mandates so the Source kind still labels the actor as a bot if removed from the policy list.
+  const human = ticket.mandate.basis.via !== 'bot'
+  return { ...ticketLine(view, ticket), mandate: { ...ticket.mandate, actor: view.actor(ticket.mandate.actor, human) },
+    basis: basisFacts(ticket.mandate.basis, view.rule), paused: store.settings().paused,
+    channels: ticket.channels.map(channel => channelLink(view, channel)),
+    reply: answerLink(view, ticket, stage),
+    plan: planView(ticket),
+    decision: decision ? decisionView(view, decision) : undefined,
+    // Every started Assignment ran in the ticket's one worker Session. A running assignment whose worker reported a non-progress state has finished its turn unless a human response resumed the ticket.
+    assignments: ticket.assignments.map(assignment => ({ ...assignment, ...assignment.startedAt ? { ref: workerSessionId(ticket.id) } : {},
+      ...assignment.state === 'running' && assignment.report && assignment.report.state !== 'progress' && stage !== 'working'
+        ? { turnEndedAt: assignment.report.at } : {} })),
+    inputs: ticket.inputs.slice().reverse().map(input),
+    // Threads followed for context only (e.g., related issues) grant no authority and are marked with `context: true`.
+    threads: view.threadsOf(id).map(thread => ({ ...threadSummary(view, thread),
+      ...thread.context?.includes(id) ? { context: true as const } : {} })) }
+}
+export type TicketDetailView = NonNullable<ReturnType<typeof ticketDetail>>

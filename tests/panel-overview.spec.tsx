@@ -1,0 +1,197 @@
+﻿// @vitest-environment jsdom
+// The overview: the duty desk.
+import { expect, it } from 'vitest'
+import { en, zh } from '../src/client/locales.ts'
+import { usePanel, mount, remount, all, find, tab, click, text, type } from './fixtures/panel.tsx'
+import { server, ticketSummary, threadSummary } from './fixtures/panel-server.ts'
+
+usePanel()
+it('leads with a verdict and a four-lane board: decisions, verification, running work and recently ended Tickets', async () => {
+  await mount()
+  expect(tab(zh['tab.overview']).getAttribute('aria-selected')).toBe('true')
+  expect(all('[role="tab"]').map(tab => tab.textContent)).toEqual(['概览', '来源', '触发', '评估', '执行', '设置'])
+  expect(document.querySelector('.dt-verdict-title')?.textContent).toBe('2件等你验证·2件等你决定')
+  expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('2 件在跑')
+  expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('最久的交付已经等了')
+  expect(all('.dt-figure').map(figure => figure.textContent)).toEqual(['今日到达12', '已评估5', '接单1', '执行中2 / 3'])
+  expect(all('.dt-board-col-title').map(title => title.textContent)).toEqual(['待你决定', '正在跑', '待你验证', '最近结束'])
+  expect(all('.dt-board-col-count').map(count => count.textContent)).toEqual(['2', '2', '2', '1'])
+  expect(all('.dt-deck-card-title').map(title => title.textContent)).toEqual(['修复回归', '截图工具'])
+  expect(all('.dt-deck-card-kind').map(kind => kind.textContent)).toEqual(['待回答', '待处理失败'])
+  expect(all('.dt-deck-card-body').map(body => body.textContent)).toEqual(['需要确认按钮颜色',
+    'LlmError: no adapter registered for provider "provider-a"'])
+  expect(all('.dt-verify-title').map(title => title.textContent)).toEqual(['修复移动普攻后接 Q 技能无法起飞', 'README 更新'])
+  expect(all('.dt-verify-cl').map(item => item.textContent)).toEqual(['CL 123456', 'CL 123456'])
+  expect(document.querySelector('.dt-backlog-line')?.textContent).toBe('1 张历史交付待补验')
+  expect(all('.dt-run-title').map(title => title.textContent)).toEqual(['补 i18n 文案', '升级依赖'])
+  expect(all('.dt-ended2-title').map(title => title.textContent)).toEqual(['旧工单'])
+  expect(all('.dt-ended2-outcome').map(outcome => outcome.textContent)).toEqual(['人工停止'])
+  expect(all('.dt-ended2-meta .dt-tag')).toEqual([])
+  // The historical delivery keeps only the pass action; there is no worker turn left to send it back to.
+  expect(all('.dt-verify-card')[1]!.querySelectorAll('.dt-verify-foot button').length).toBe(2)
+})
+
+it('passes delivered work from its verification card, or sends it back with a note', async () => {
+  await mount()
+  const card = all('.dt-verify-card')[0]!
+  expect(card.querySelector('.dt-checks-summary')).toBeNull()
+  expect(card.querySelector('.dt-verify-proof')?.textContent).toContain('Compile Result: Succeeded')
+  expect(card.querySelector('.dt-verify-proof')?.textContent).toContain('Automation 19/19 passed')
+  await click(find(zh.verifyPass, '.dt-verify-foot button'))
+  await click(zh.confirm)
+  expect(server.requests.some(request => request.path === 'tickets/t8/verify' && request.method === 'POST')).toBe(true)
+
+  await click(find(zh.verifyReturn, '.dt-verify-foot button'))
+  const input = all('.dt-verify-return-input')[0] as HTMLTextAreaElement
+  await type(input, 'PIE 里 Q 技能仍然会卡住')
+  await click(zh.verifyReturnSubmit)
+  expect(server.requests.some(request => request.path === 'tickets/t8/rework' && request.method === 'POST'
+    && JSON.stringify(request.body).includes('PIE 里 Q 技能仍然会卡住'))).toBe(true)
+})
+
+it('answers a question, retries a failure and stops a Ticket from its decision card', async () => {
+  await mount()
+  // The answer card keeps the Channel link and its primary action opens the Ticket.
+  expect(all('.dt-deck-card-foot a').map(link => [link.textContent, link.getAttribute('href')])).toEqual([['去飞书回答',
+    'https://applink.feishu.cn/client/chat/open?openChatId=oc_1']])
+  await click(zh.boardAnswer)
+  expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('修复回归')
+  await click(tab(zh['tab.overview']))
+  await click(find(zh.retry, '.dt-deck-card-foot button'))
+  await click(zh.confirm)
+  expect(server.requests.some(request => request.path === 'tickets/t4/retry' && request.method === 'POST')).toBe(true)
+  const failed = all('.dt-deck-card').find(card => card.querySelector('.dt-deck-card-title')?.textContent === '截图工具')!
+  await click([...failed.querySelectorAll<HTMLElement>('.dt-deck-card-foot button')].find(button => button.textContent === zh.stop)!)
+  await click(zh.confirm)
+  expect(server.requests.some(request => request.path === 'tickets/t4/stop' && request.method === 'POST')).toBe(true)
+})
+
+it('opens a Ticket from its card title and from the running lane', async () => {
+  await mount()
+  await click('修复回归')
+  expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('修复回归')
+  await click(tab(zh['tab.overview']))
+  await click('补 i18n 文案')
+  expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('补 i18n 文案')
+})
+
+it('marks a running Ticket that has not reported for ten minutes, and says which Tickets wait for a Trigger', async () => {  server.working = [ticketSummary({ id: 't5', title: '补 i18n 文案', summary: '第 12 步',
+    updatedAt: new Date(Date.now() - 31 * 60_000).toISOString() })]
+  server.idle = [ticketSummary({ id: 't8', title: '等新消息', summary: '' }, { stage: 'idle' })]
+  await mount()
+  expect(text()).toContain('31 分钟没有更新，可能卡住')
+  expect(all('.dt-run').map(row => row.dataset.state)).toEqual(['working', 'idle'])
+  expect(all('.dt-run-title').map(title => title.textContent)).toEqual(['补 i18n 文案', '等新消息'])
+})
+
+it('goes quiet when nothing needs a person and nothing is running', async () => {
+  server.person = []
+  server.verification = []
+  server.working = []
+  server.idle = []
+  server.ended = []
+  await mount()
+  expect(document.querySelector('.dt-verdict-title')?.textContent).toBe('现在没有需要你的事')
+  expect(text()).toContain(zh.boardDecisionEmpty)
+  expect(text()).toContain(zh.boardVerifyEmpty)
+  expect(text()).toContain(zh.boardRunningEmpty)
+  expect(text()).toContain(zh.boardEndedEmpty)
+})
+
+it('links the verdict figures to the records behind them', async () => {
+  await mount()
+  const figures = all('.dt-figure button')
+  expect(figures.map(button => button.textContent)).toEqual(['5', '1', '2 / 3'])
+  await click(figures[0]!)
+  expect(tab(zh['tab.eval']).getAttribute('aria-selected')).toBe('true')
+  await click(tab(zh['tab.overview']))
+  await click(all('.dt-figure button')[2]!)
+  expect(tab(zh['tab.execution']).getAttribute('aria-selected')).toBe('true')
+})
+
+it('lists the problems that need a person and lets them requeue or dismiss an unjudged Eval', async () => {
+  await mount()
+  expect(all('.dt-problem-title').map(item => item.textContent)).toEqual(['飞书 来源异常', '评估未完成：这个文案好奇怪'])
+  await click(zh.requeue)
+  expect(server.requests.some(request => request.path === 'triggers/e3/requeue' && request.method === 'POST')).toBe(true)
+  await click(zh.dismiss)
+  expect(server.requests.some(request => request.path === 'decisions/u1/dismiss' && request.method === 'POST')).toBe(true)
+  expect(server.requests.filter(request => request.path === 'overview').length).toBeGreaterThan(2)
+})
+
+it('offers the step that fixes a settings problem, and says the Executor waits for setup', async () => {
+  server.settings = { ...server.settings, policy: { ...server.settings.policy, sources: {
+    feishu: { allowed: [], admission: {} }, github: { allowed: [], admission: {} } } } }
+  await mount()
+  expect(text()).toContain(zh.problemNoAllowed)
+  await click(zh.actionAddAllowed)
+  expect(tab(zh['tab.settings']).getAttribute('aria-selected')).toBe('true')
+  expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(zh['term.eval'])
+})
+
+it('shows the duty desk in English', async () => {
+  await mount(en)
+  expect(document.querySelector('.dt-verdict-title')?.textContent).toBe('2 to verify·2 waiting on you')
+  expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('2 running')
+  expect(all('.dt-board-col-title').map(title => title.textContent)).toEqual(['Needs your decision', 'Running', 'To verify', 'Recently ended'])
+  expect(all('.dt-deck-card-kind').map(kind => kind.textContent)).toEqual([en['stage.answer'], en['stage.failed']])
+  expect(all('.dt-deck-card-foot button').map(button => button.textContent)).toContain(en.retry)
+  expect(all('.dt-verify-badge').map(badge => badge.textContent)).toEqual([en.verifyWorkerBadge, en.verifyWorkerBadge])
+})
+
+it('says when no Source is on, an Eval is past its deadline or a message keeps failing, each with the way to it', async () => {
+  for (const kind of ['feishu', 'github']) server.settings.sources[kind] = { ...server.settings.sources[kind]!, enabled: false }
+  server.threads = [threadSummary({ key: 'github:9', title: '#9 迟迟未决', stage: 'evaluating',
+    evaluating: { id: 'v9', triggers: 1, strength: 'inferred', startedAt: '2026-08-31T23:58:00Z', deadline: '2026-09-01T00:00:00Z' } })]
+  server.failing = [{ id: 'm1', channel: { source: 'github', thread: 'github:42', address: { number: '42' } },
+    text: '已修复', attempts: 4, error: 'HTTP 502 from GitHub', refused: false }]
+  await mount()
+  const titles = () => all('.dt-problem-title').map(item => item.textContent)
+  expect(titles()).toEqual([zh.problemNoSource, '评估超时未决定：#9 迟迟未决', '评估未完成：这个文案好奇怪', 'GitHub 回复发送失败（已重试 4 次）'])
+  expect(text()).toContain('HTTP 502 from GitHub')
+  await click(zh.actionOpenSources)
+  expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(zh['settingsGroup.source'])
+  await click(tab(zh['tab.overview']))
+  await click('评估超时未决定：#9 迟迟未决')
+  expect(server.requests.some(request => request.path.startsWith('threads/github:9'))).toBe(true)
+})
+
+it('offers retrying or withdrawing a refused reply, which it confirms first, instead of a retry count', async () => {
+  server.failing = [{ id: 'm2', channel: { source: 'feishu', thread: 'feishu:oc_1', address: { chatId: 'oc_1', messageId: 'om_1' } },
+    text: '全量校准仍保留在「收集&更新」', attempts: 1, error: '--content is not valid JSON', refused: true }]
+  await mount()
+  expect(all('.dt-problem-title').map(item => item.textContent)).toContain('飞书 拒绝了一条回复的参数，已停止自动重试')
+  expect(text()).toContain(zh.problemReplyRefusedHint)
+  await click(find(zh.retry, '.dt-problem-actions button'))
+  expect(server.requests.some(request => request.method === 'POST' && request.path === 'outbox/m2/retry')).toBe(true)
+  await click(find(zh.withdrawReply, '.dt-problem-actions button'))
+  expect(server.requests.some(request => request.path === 'outbox/m2/withdraw')).toBe(false)
+  await click(zh.confirm)
+  expect(server.requests.some(request => request.method === 'POST' && request.path === 'outbox/m2/withdraw')).toBe(true)
+  expect(all('.dt-problem-title').map(item => item.textContent)).not.toContain('飞书 拒绝了一条回复的参数，已停止自动重试')
+})
+
+it('names a failing part of dsh-superagent itself by its label', async () => {
+  server.health = { launch: { state: 'error', detail: 'spawn failed' }, relay: { state: 'ready', detail: 'Nothing waiting' } }
+  await mount()
+  expect(all('.dt-problem-title').map(item => item.textContent)).toContain(zh.problemRuntime.replace('{name}', zh['health.launch']))
+  expect(text()).toContain('spawn failed')
+})
+
+it('words a refused retry in the interface language by its code', async () => {
+  await mount()
+  server.person = server.person.map(ticket => ticket.id === 't4' ? { ...ticket, actions: { ...ticket.actions, retry: false } } : ticket)
+  await click(find(zh.retry, '.dt-deck-card-foot button'))
+  await click(zh.confirm)
+  expect(document.querySelector('.dt-toast')?.textContent).toBe(zh['userError.notRetryable'])
+})
+
+it('shows paused processing as a system problem with its resume action', async () => {
+  server.settings = { ...server.settings, paused: true }
+  await mount()
+  expect(text()).toContain(zh.problemPaused)
+  await click(find(zh.resumeProcessing, '.dt-problem-actions button'))
+  await click(zh.confirm)
+  expect(server.requests.find(request => request.path === 'executor/pause')).toMatchObject({ method: 'POST', body: { paused: false } })
+})
+
