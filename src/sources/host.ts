@@ -76,7 +76,13 @@ export interface SourceContext {
    * a Decision, or an Eval, since the person's act is the authorization and the plan already carries the evidence.
    * @throws UserError when the ticket is unknown or its plan no longer waits.
    */
-  decidePlan(ticketId: string, decision: PlanDecision, note?: string, via?: PlanVia): Ticket
+  decidePlan(ticketId: string, decision: PlanDecision, note?: string, via?: PlanVia, option?: string): Ticket
+  /**
+   * A person's click on one of the choices a question card offers: the answer becomes the person's message to the worker
+   * and the question closes.
+   * @throws UserError when the ticket is unknown or ended, the question is gone, or the option is not offered.
+   */
+  answerAttention(ticketId: string, attentionId: string, option: string): Ticket
   /** Reports the state of one of this kind's declared health entries; throws for undeclared entry names. */
   report(entry: string, health: Health): void
 }

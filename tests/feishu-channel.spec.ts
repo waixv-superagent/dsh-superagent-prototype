@@ -49,4 +49,41 @@ describe('Feishu outbound replies', () => {
     expect(JSON.parse(content).zh_cn.content[0][0].text)
       .toBe('收集＆更新飘带动画List，进度 50％，2＾3，好了！')
   })
+  it('sends a question with choices as a card, and remembers its message id for the callback', async () => {
+    const lark = vi.fn(async (_args: string[]) => '{"data":{"message_id":"om_card"}}')
+    const saved: Record<string, unknown> = {}
+    const host = { commands: { lark }, state: { get: () => undefined, set: (key: string, value: unknown) => { saved[key] = value } } } as never
+    const asked = { ...message('先上 A 还是先上 B？'), attention: { ticketId: 't1', attentionId: 'att-1', options: ['先上 A', '先上 B'] } }
+    expect(await sendFeishu(host, asked)).toBe('sent')
+    const args = lark.mock.calls[0]![0] as string[]
+    expect(args[args.indexOf('--msg-type') + 1]).toBe('interactive')
+    const card = JSON.parse(args[args.indexOf('--content') + 1]!)
+    expect(JSON.stringify(card)).toContain('先上 A 还是先上 B？')
+    expect(JSON.stringify(card)).toContain('att-1')
+    expect(saved['feishu-attention-cards']).toMatchObject({ om_card: { ticketId: 't1', attentionId: 'att-1' } })
+  })
+  it('carries the worker\'s context sections onto the question card', async () => {
+    const lark = vi.fn(async (_args: string[]) => '{"data":{"message_id":"om_card"}}')
+    const host = { commands: { lark }, state: { get: () => undefined, set: () => {} } } as never
+    const asked = { ...message('这个取舍能不能定？'), attention: { ticketId: 't1', attentionId: 'att-1', options: ['能定', '再改改'],
+      sections: [{ label: '现状', text: '两个方案都能过测试' }] } }
+    expect(await sendFeishu(host, asked)).toBe('sent')
+    const args = lark.mock.calls[0]![0] as string[]
+    const card = JSON.parse(args[args.indexOf('--content') + 1]!)
+    expect(JSON.stringify(card)).toContain('**现状**')
+    expect(JSON.stringify(card)).toContain('两个方案都能过测试')
+  })
+  it('falls back to the text reply when Feishu rejects the question card', async () => {
+    const lark = vi.fn(async (args: string[]) => {
+      if (args[args.indexOf('--msg-type') + 1] === 'interactive') throw new Error('bad card')
+      return '{}'
+    })
+    const host = { commands: { lark }, state: { get: () => undefined, set: () => {} } } as never
+    const asked = { ...message('先上 A 还是先上 B？'), attention: { ticketId: 't1', attentionId: 'att-1', options: ['先上 A', '先上 B'] } }
+    expect(await sendFeishu(host, asked)).toBe('sent')
+    expect(lark).toHaveBeenCalledTimes(2)
+    const args = lark.mock.calls[1]![0] as string[]
+    expect(args[args.indexOf('--msg-type') + 1]).toBe('post')
+    expect(JSON.parse(args[args.indexOf('--content') + 1]!).zh_cn.content[0][0].text).toContain('先上 A 还是先上 B？')
+  })
 })

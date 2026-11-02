@@ -61,5 +61,7 @@ export const KV = {
     receipts: record<Record<string, ReceiptReaction>>('feishu-receipts'),
     /** Plan card `message_id` to the ticket, plan and message link it asks about, so a button click decides without a Trigger. */
     cards: record<Record<string, { ticketId: string; planAt: string; url?: string }>>('feishu-plan-cards'),
+    /** Question card `message_id` to the ticket and attention it answers, so a click records the answer without a Trigger. */
+    attentionCards: record<Record<string, { ticketId: string; attentionId: string; at: string }>>('feishu-attention-cards'),
     seen: family<string[], [thread: string]>('thread-seen:'), initialized: family<boolean, [thread: string]>('thread-initialized:') },
 }
