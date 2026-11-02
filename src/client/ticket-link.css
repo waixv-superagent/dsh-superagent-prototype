@@ -1,3 +1,9 @@
 /* Header action next to the Session title; mirrors DSH's own icon actions instead of the browser default button. */
 .dt-header-ticket { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 3px 6px; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-tertiary); font-family: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
 .dt-header-ticket:hover, .dt-header-ticket:focus-visible { background: var(--dsw-alias-fill-l1); color: var(--dsw-alias-label-secondary); }
+
+/* The copy action beside it keeps the same footprint; its short confirmation takes the icon slot before the label. */
+.dt-header-copy { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 3px 5px; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-tertiary); font-family: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
+.dt-header-copy:hover, .dt-header-copy:focus-visible { background: var(--dsw-alias-fill-l1); color: var(--dsw-alias-label-secondary); }
+.dt-header-copy[data-outcome='copied'] { color: var(--dsw-alias-state-success-primary); }
+.dt-header-copy[data-outcome='failed'] { color: var(--dsw-alias-state-error-primary); }

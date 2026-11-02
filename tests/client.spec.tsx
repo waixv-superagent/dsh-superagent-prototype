@@ -49,17 +49,36 @@ const serve = () => vi.stubGlobal('fetch', vi.fn(async (url: string) => {
 }))
 afterEach(() => { vi.unstubAllGlobals() })
 
-it('registers a localized main panel, sidebar entry, worker-Session ticket links and Plugin Manager row page, and no settings section', () => {
+it('registers a localized main panel, sidebar entry, worker-Session ticket link and Session-id copy action, and Plugin Manager row page, and no settings section', () => {
   const { entries, dictionaries, main, nav } = fixture([])
   expect(entries.map(entry => entry.options.name)).toEqual(['main', 'sidebar.panellist', 'sidebar.session.row.leading',
-    'conversation.session.header.actions', 'plugins.row.config'])
+    'conversation.session.header.actions', 'conversation.session.header.actions', 'plugins.row.config'])
   expect(entries[2]!.options).toMatchObject({ id: 'dsh-superagent:ticket', order: 40, locale: 'dshSuperagent' })
   expect(entries[3]!.options).toMatchObject({ id: 'dsh-superagent:ticket', order: 40, locale: 'dshSuperagent' })
-  expect(entries[4]!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
+  expect(entries[4]!.options).toMatchObject({ id: 'dsh-superagent:copy-session', order: 41, locale: 'dshSuperagent' })
+  expect(entries[5]!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
   expect(Object.keys(dictionaries)).toEqual(['dshSuperagent'])
   expect(main.options).toMatchObject({ key: 'dsh-superagent', locale: 'dshSuperagent' })
   expect(nav.options).toMatchObject({ id: 'dsh-superagent', order: 10, locale: 'dshSuperagent' })
   expect(nav.options.label?.()).toBe('Superagent')
+})
+
+it('copies a worker Session id from the Session header beside the Ticket link', async () => {
+  const writes: string[] = []
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { writes.push(text) } } })
+  const { entries } = fixture([])
+  const copy = entries.find(entry => entry.options.id === 'dsh-superagent:copy-session')!
+  // A Session that executes no Ticket has nothing to copy, so the button does not exist for it.
+  const normal = await render(copy, { sessionId: 'master', t })
+  expect(normal.container.innerHTML).toBe('')
+  normal.dispose()
+  const worker = await render(copy, { sessionId: 'worker-t1', t })
+  const button = worker.container.querySelector<HTMLButtonElement>('button')!
+  expect(button.title).toBe(zh.copySession)
+  await act(async () => { button.click() })
+  expect(writes).toEqual(['worker-t1'])
+  expect(worker.container.textContent).toContain(zh.copied)
+  worker.dispose()
 })
 
 it('opens a listed Session through the workspace from the main panel', async () => {

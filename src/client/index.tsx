@@ -1,5 +1,5 @@
 /** Browser plugin entry point registering the sidebar icon, main management panel, and Plugin Manager config view. */
-import { type ReactElement, useCallback, useEffect, useRef } from 'react'
+import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { SidebarPanelIconOwnerProps } from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -80,6 +80,35 @@ function TicketLink({ ctx, sessionId, t }: { ctx: ClientContext; sessionId: Sess
   </button>
 }
 
+/** How long a header action keeps its copy confirmation; the panel's toast is not mounted outside the panel. */
+const COPY_CONFIRMATION_MS = 1600
+
+/** Header action on a worker Session: copy its Session id, for locating the Session elsewhere in DSH. */
+function CopySessionId({ sessionId, t }: { sessionId: SessionId; t: T }) {
+  if (!ticketOf(sessionId)) return null
+  return <CopySessionIdButton sessionId={String(sessionId)} t={t} />
+}
+/** The copy button, split from the Ticket check so its confirmation timer only exists on a worker Session. */
+function CopySessionIdButton({ sessionId, t }: { sessionId: string; t: T }) {
+  const [outcome, setOutcome] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+  const settle = (next: 'copied' | 'failed') => {
+    setOutcome(next)
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => setOutcome('idle'), COPY_CONFIRMATION_MS)
+  }
+  const label = outcome === 'copied' ? t('copied') : outcome === 'failed' ? t('copySessionFailed') : t('copySession')
+  return <button type="button" className="dt-header-copy" data-outcome={outcome} title={label} aria-label={t('copySession')}
+    onClick={() => {
+      const write = navigator.clipboard?.writeText(sessionId)
+      void (write ?? Promise.reject(new Error('clipboard unavailable'))).then(() => settle('copied'), () => settle('failed'))
+    }}>
+    <Icon name={outcome === 'failed' ? 'alert' : outcome === 'copied' ? 'check' : 'copy'} size={14} />
+    {outcome !== 'idle' && <span role="status">{label}</span>}
+  </button>
+}
+
 /** Sidebar row marker on a worker Session: the same jump, reachable from the Session list. */
 function TicketMarker({ ctx, sessionId, t }: { ctx: ClientContext; sessionId: SessionId; t: T }) {
   const ticketId = ticketOf(sessionId)
@@ -92,7 +121,7 @@ function TicketMarker({ ctx, sessionId, t }: { ctx: ClientContext; sessionId: Se
 }
 
 export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace', 'layout']
-/** Registers the panel, sidebar icon, worker-Session ticket link, and Plugin Manager config view; `configForms` is optional (without it, machine settings are read-only). */
+/** Registers the panel, sidebar icon, worker-Session header actions (its Ticket, its Session id), and Plugin Manager config view; `configForms` is optional (without it, machine settings are read-only). */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-superagent: dictionaries')
   const t = ctx.locale.bind(NS)
@@ -110,6 +139,9 @@ export function apply(ctx: ClientContext): void {
   slots.inject('conversation.session.header.actions', () => slots.register({
     name: 'conversation.session.header.actions', id: `${ENTRY}:ticket`, order: 40, locale: NS,
   }, (props: { sessionId: SessionId; t: T }) => <TicketLink ctx={ctx} sessionId={props.sessionId} t={props.t} />))
+  slots.inject('conversation.session.header.actions', () => slots.register({
+    name: 'conversation.session.header.actions', id: `${ENTRY}:copy-session`, order: 41, locale: NS,
+  }, (props: { sessionId: SessionId; t: T }) => <CopySessionId sessionId={props.sessionId} t={props.t} />))
   ctx.slots.inject('plugins.row.config', () => ctx.slots.register({ name: 'plugins.row.config', key: `${ENTRY}#${ENTRY}`, locale: NS },
     (props: PluginConfigViewProps & { t: T }) => <PluginConfig t={props.t} view={props.view} form={props.form} />))
 }
