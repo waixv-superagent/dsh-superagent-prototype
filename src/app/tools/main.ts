@@ -57,6 +57,10 @@ const RouteItemSchema = z.object({
   paths: z.array(z.string()).nullish().describe('accept: the repository paths the change is expected to touch, at most 20, '
     + 'such as a directory ("Source/Game/Tests/Performance/") or a file. The task center leases them so another ticket may '
     + 'work beside this one in the same workspace; leave it out when the change could touch anything, which makes this ticket run alone.'),
+  backend: z.enum(['git', 'p4']).nullish().describe('accept: the delivery environment the work belongs in — `git` when the '
+    + 'change belongs to this deployment\'s own source repository (the GitHub repository its GitHub Source watches), `p4` when it '
+    + 'belongs to files in its Perforce depot. Leave it out when unsure: the deployment\'s configured backend then applies and the '
+    + 'worker checks the target before implementing.'),
   reason: z.string().nullish().describe('chat, ignore and stop: why, at most 500 characters; an ignore needs it.'),
 }).strict()
 type RouteItem = z.infer<typeof RouteItemSchema>
@@ -72,6 +76,7 @@ const FIELDS: Record<Field, { check: z.ZodType; reads: readonly Kind[]; needs: r
   escalation: { check: EscalationSchema, reads: ['chat'], needs: [] },
   note: { check: RoutingNoteSchema, reads: ['accept', 'attach'], needs: [] },
   paths: { check: z.array(z.string().trim().min(1).max(300)).max(20), reads: ['accept'], needs: [] },
+  backend: { check: z.enum(['git', 'p4']), reads: ['accept'], needs: [] },
   reason: { check: z.string().max(500), reads: ['chat', 'ignore', 'stop'], needs: ['ignore'] },
 }
 /** Why an item cannot run: a field its kind needs is missing, or one it reads breaks its limit. */
@@ -104,7 +109,8 @@ function route(host: MainToolsHost, item: RouteItem, decided: ReadonlyMap<string
     case 'accept': {
       const before = host.store.triggers.disposition(item.trigger_id)?.decisionId
       const decision = host.engine.decide(item.trigger_id, { kind: 'accept', title: item.title!, scope: item.title!, reason: { code: 'explicitRouted' },
-        acknowledgement: item.acknowledgement!, name: item.worktree_name!, ...note, ...(item.paths?.length ? { paths: item.paths } : {}) })
+        acknowledgement: item.acknowledgement!, name: item.worktree_name!, ...note, ...(item.paths?.length ? { paths: item.paths } : {}),
+        ...(item.backend ? { backend: item.backend } : {}) })
       // A Decision that created no ticket is the item's refusal; one that existed before keeps what it was accepted with.
       if (decision.kind !== 'accept' || !decision.ticketId) return { refused: `Ticket was not created: ${reasonText(decision.reason)}` }
       if (decision.id === before) {

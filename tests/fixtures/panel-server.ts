@@ -412,6 +412,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     server.tickets.open = []; server.person = server.person.filter(ticket => ticket.id !== params.id)
     return { stopped: true }
   } },
+  'POST tickets/:id/redispatch': { body: true, answer: ({ params }) => ticketOf(params.id) ? { redispatched: true } : refuse(404, 'Ticket not found') },
   'POST tickets/:id/confirm': { answer: ({ params }) => {
     const ticket = ticketOf(params.id)
     if (!ticket) return refuse(404, 'Ticket not found')

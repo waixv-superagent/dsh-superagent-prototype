@@ -355,7 +355,12 @@ export interface Follow { thread: string; own: boolean; closed?: { at: string; o
  * facts — `changelist`, `review`, `verification` — are what its latest report said it delivered.
  */
 export interface Execution { name: string; directory: string; assignment: string; workspace?: string; lease?: string[]
+  /** The delivery environment this ticket's work belongs in; absent keeps the deployment's configured backend. */
+  backend?: Backend
   changelist?: number; review?: string; verification?: string }
+
+/** A delivery environment: this deployment's git source repository, or its Perforce depot. */
+export type Backend = 'git' | 'p4'
 
 /** Where a delivered ticket stands with the person's local check: waiting, passed, or returned for rework. */
 export interface TicketVerification {

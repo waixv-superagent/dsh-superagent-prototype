@@ -2,7 +2,7 @@
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, latestReport, liveTicket, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
-import type { Assignment, ChannelRef, Evaluation, Follow, Mandate, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketEndBy, TicketInput, TicketOutcome,
+import type { Assignment, Backend, ChannelRef, Evaluation, Follow, Mandate, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketEndBy, TicketInput, TicketOutcome,
   TicketPipeline, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
@@ -476,6 +476,34 @@ export class Tickets extends EnginePart {
     this.options.executor.stop(ticket, latest, 'retried')
     this.options.executor.start(ticket, assignment)
     return ticket
+  }
+  /**
+   * Re-dispatches an open ticket into another delivery environment: records `backend` on its execution, ends the
+   * assignment that stalled, and starts a new one whose input names the channel its work belongs in. The worker continues
+   * in the ticket's existing workspace, so a ticket accepted under the wrong environment finishes where it belongs
+   * without being ended and accepted again.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  redispatch(ticketId: string, backend: Backend): Ticket {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    const at = this.now()
+    const current = latestAssignment(ticket)
+    if (current && (current.state === 'running' || current.state === 'pending')) this.endAssignment(ticket, current, 'redispatched')
+    // The p4 pipeline gates code changes behind the P1 plan; a git dispatch drops that gate and keeps any later phase.
+    if (backend === 'p4') ticket.phase = 'plan'
+    else if (ticket.phase === undefined || ticket.phase === 'plan') ticket.phase = 'implement'
+    ticket.execution = { ...(ticket.execution ?? { name: '', directory: '', assignment: '' }), backend }
+    ticket.updatedAt = at
+    const assignment = this.newAssignment(ticket)
+    const input: TicketInput = { id: key('input', ticket.id, 'redispatch', at), kind: 'text', at,
+      text: `人确认把这张单改派到 ${backend === 'git' ? 'git 通道（本部署的源码仓库）' : 'p4 通道（depot 工作区）'}：`
+        + '按该通道的准备和交付方式继续这张单的工作，交付时按对应要求报告。' }
+    ticket.inputs.push(input); ticket.undelivered.push(input.id)
+    this.repo.tickets.save(ticket)
+    if (current) this.options.executor.stop(ticket, current, 'redispatched')
+    this.options.executor.start(ticket, assignment)
+    return this.require(ticketId)
   }
   /**
    * Drops a ticket's Subscription to a Thread its worker found unrelated, and hands back, with `reason`, the person's messages there that the ticket decides.

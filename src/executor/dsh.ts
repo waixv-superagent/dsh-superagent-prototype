@@ -5,7 +5,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { mkdir, rmdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
-import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
+import type { AssessmentOutcome, Assignment, Backend, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
   from '../core/index.ts'
 import type { Machine } from '../deployment.ts'
 import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
@@ -96,9 +96,9 @@ export function mandateInstructions(mandate: Pick<Mandate, 'strength'>): string 
     + 'internal to one module within the accepted rule scope. If it requires public-interface or behavior changes, new interaction, product '
     + 'decisions or clarification, stop and report dropped; do not expand scope.' : ''
 }
-/** Builds a newly accepted ticket's Execution metadata: its worktree name, workspace directory, and assignment text. */
+/** Builds a newly accepted ticket's Execution metadata: its worktree name, workspace directory, delivery environment, and assignment text. */
 export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>, settings: Settings,
-  stateDir: string): Execution {
+  stateDir: string, backend: Backend = outcome.backend ?? settings.executor.backend): Execution {
   // escalation 建的单可能没有英文短名：按类别取一个，目录名仍由票号后缀保证唯一。
   const name = ticketWorktreeName(outcome.name ?? (ticket.category === 'bug' ? 'fix' : 'feature'), ticket.id)
   const source = ticket.origin.triggerId
@@ -111,8 +111,27 @@ export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutco
   const assignment = ticket.mandate.strength === 'inferred' && ruleIds
     ? `Proactively accepted under ${ruleIds.join(', ')}. Scope: ${outcome.scope}.${precedence}${note}`
     : note.trim()
-  // Under the p4 backend the worker delivers by shelving a changelist, because the mainline is read-only for it.
-  const delivery = settings.executor.backend === 'p4'
+  // Shared workspaces are the task center's, so the worker learns its lease from its environment and its peers from the
+  // launch message (see 011 Task center).
+  const sharing = settings.executor.workspaces.length
+    ? '\nYou share this workspace, and its p4 client, with other tickets. Write only under your lease: DSH_SUPERAGENT_LEASE holds '
+      + 'its paths, and the launch message\'s `peers` names who else is here and what they write. Read anything. If the change needs '
+      + 'a file outside your lease, do not take it: report the need and stop, so the work can be widened or split.'
+      + (backend === 'p4'
+        ? ' Keep your edits in a changelist of your own and never touch a peer\'s: p4 change -i, then p4 reopen -c <your CL> for the '
+          + 'files you edit. Never run p4 sync of the whole workspace, p4 revert without -c, or a revert of another changelist. Shelving '
+          + 'leaves your edits in the shared tree: keep them there.' : '')
+    : ''
+  const lease = (outcome.paths ?? []).map(normalizePath).filter(Boolean)
+  return { name, directory: join(executionRoot(settings, stateDir), name), assignment: assignment + sharing, lease, backend }
+}
+/**
+ * The delivery instructions a worker gets for its ticket's environment, composed at each launch so a ticket moved to
+ * another environment (see `Tickets.redispatch`) reads the channel it now belongs in. Under p4 the worker delivers by
+ * shelving a changelist, because the mainline is read-only for it.
+ */
+export function deliveryInstructions(backend: Backend): string {
+  return backend === 'p4'
     ? '\nBefore implementing, confirm the work targets the depot this workspace maps. A ticket whose target is another '
       + 'repository, such as the superagent source itself, must report blocked at P1 naming that repository and the git channel it '
       + 'needs, so a person can move it there; never implement it in the p4 workspace. '
@@ -130,19 +149,6 @@ export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutco
       + 'Report the delivery\'s facts with the report: changelist=<CL>, swarm_review=<id or URL>, and verification=<what you ran and '
       + 'how it ended>; a ready report without verification is not evidence.'
     : ''
-  // Shared workspaces are the task center's, so the worker learns its lease from its environment and its peers from the
-  // launch message (see 011 Task center).
-  const sharing = settings.executor.workspaces.length
-    ? '\nYou share this workspace, and its p4 client, with other tickets. Write only under your lease: DSH_SUPERAGENT_LEASE holds '
-      + 'its paths, and the launch message\'s `peers` names who else is here and what they write. Read anything. If the change needs '
-      + 'a file outside your lease, do not take it: report the need and stop, so the work can be widened or split.'
-      + (settings.executor.backend === 'p4'
-        ? ' Keep your edits in a changelist of your own and never touch a peer\'s: p4 change -i, then p4 reopen -c <your CL> for the '
-          + 'files you edit. Never run p4 sync of the whole workspace, p4 revert without -c, or a revert of another changelist. Shelving '
-          + 'leaves your edits in the shared tree: keep them there.' : '')
-    : ''
-  const lease = (outcome.paths ?? []).map(normalizePath).filter(Boolean)
-  return { name, directory: join(executionRoot(settings, stateDir), name), assignment: assignment + delivery + sharing, lease }
 }
 /** Character limits for inline assignment and trigger text in worker messages; longer text is read via its resource. */
 const ASSIGNMENT_CHARS = 1500, TRIGGER_CHARS = 600
@@ -279,10 +285,12 @@ export class DshExecutor implements Executor {
   /** Populates a newly accepted ticket's `execution` attributes (worktree name, workspace directory, and assignment text). */
   prepare(ticket: Ticket, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>): Ticket {
     const settings = this.host.store.settings()
-    const prepared = { ...ticket, execution: ticketExecution(ticket, outcome, settings, this.host.machine.stateDir) }
+    // The accept may name the delivery environment its work belongs in; otherwise the deployment's configured backend applies.
+    const backend = outcome.backend ?? settings.executor.backend
+    const prepared = { ...ticket, execution: ticketExecution(ticket, outcome, settings, this.host.machine.stateDir, backend) }
     // The p4 pipeline gates code changes behind the P1 plan: its tickets start in the plan phase (docs/012). The GitHub path
     // keeps the phases it had, so an upgrade does not change how its workers report.
-    return settings.executor.backend === 'p4' ? { ...prepared, phase: 'plan' as const } : prepared
+    return backend === 'p4' ? { ...prepared, phase: 'plan' as const } : prepared
   }
   /**
    * Runs the configured `executor.prepare` command for a new workspace in its parent directory with the ticket's execution
@@ -297,7 +305,7 @@ export class DshExecutor implements Executor {
     const settings = this.host.store.settings()
     // A custom prepare command always wins; under the p4 backend an empty one means "make the workspace a Perforce one",
     // which only applies to a pooled workspace. A Ticket outside the pool has no p4 client, so it just gets its directory.
-    const command = settings.executor.prepare.trim() || (settings.executor.backend === 'p4' && pooled ? p4Prepare() : '')
+    const command = settings.executor.prepare.trim() || (this.backendOf(ticket) === 'p4' && pooled ? p4Prepare() : '')
     const env = Object.fromEntries(this.host.environment(ticket).map(variable => [variable.key, variable.value]))
     if (pooled) Object.assign(env, { DSH_SUPERAGENT_DIR: directory,
       DSH_SUPERAGENT_P4_CLIENT: workspaceClient(pooled, settings.executor.p4.clientTemplate) })
@@ -539,7 +547,7 @@ export class DshExecutor implements Executor {
     const told = later && await this.host.sessions.holds(sessionId, first)
     if (!current()) return
     const retried = ticket.assignments.at(-2)?.endedReason === 'retried' ? { note: RETRIED } : {}
-    const assignmentText = ticket.execution?.assignment ?? ''
+    const assignmentText = (ticket.execution?.assignment ?? '') + deliveryInstructions(this.backendOf(ticket))
     const { text: brief, chars, read } = capped(assignmentText, ASSIGNMENT_CHARS, `ticket/${ticket.id}/assignment`)
     const card = told || !source ? undefined : await this.triggerCard(ticket, source.id)
     if (!current()) return
@@ -554,6 +562,8 @@ export class DshExecutor implements Executor {
       () => { this.host.engine.assignmentStarted(ticket.id, assignment.id) })
     this.host.engine.assignmentStarted(ticket.id, assignment.id)
   }
+  /** The delivery environment a ticket's work belongs in: what its execution recorded, else the deployment's configured backend. */
+  private backendOf(ticket: Ticket): Backend { return ticket.execution?.backend ?? this.host.store.settings().executor.backend }
   /** Returns the stored ticket for `agent` when it is a worker session, or undefined otherwise. */
   private ticketOf(agent: Agent): Ticket | undefined {
     const ticketId = ticketOfSession(agent.id)

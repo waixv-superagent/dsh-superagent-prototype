@@ -1,6 +1,6 @@
 /** Execution environment variables exposed to prepare commands and documented in worker Session instructions; never contains credentials. */
 import { join } from 'node:path'
-import type { Ticket, Trigger } from '../core/index.ts'
+import type { Backend, Ticket, Trigger } from '../core/index.ts'
 import type { Deployment } from '../deployment.ts'
 import type { Settings } from '../policy.ts'
 import type { Localized, VariableSpec } from '../sources/kind.ts'
@@ -73,9 +73,11 @@ export function declaredVariables(sources: SourceRegistry, settings?: Settings):
 }
 
 export function environmentOf(input: { deployment: Deployment; sources: SourceRegistry; settings: Settings;
-  ticket?: { id: string; name: string; directory: string; workspace?: string; lease?: string[] }; trigger?: Trigger }): Variable[] {
+  ticket?: { id: string; name: string; directory: string; workspace?: string; lease?: string[]; backend?: Backend }; trigger?: Trigger }): Variable[] {
   const { deployment, sources, settings, ticket, trigger } = input
-  const { backend, p4 } = settings.executor
+  const { backend: configured, p4 } = settings.executor
+  // A ticket records the delivery environment its work belongs in; without one the deployment's configured backend applies.
+  const backend = ticket?.backend ?? configured
   const executor: Record<string, string> = {
     DSH_SUPERAGENT_BLOCKED_COMMANDS: settings.executor.blockedCommands.join(' '),
     DSH_SUPERAGENT_BACKEND: backend,
@@ -103,7 +105,7 @@ export function environmentOf(input: { deployment: Deployment; sources: SourceRe
 export function ticketEnvironment(input: { deployment: Deployment; sources: SourceRegistry; settings: Settings; ticket: Ticket; trigger?: Trigger }) {
   const { ticket, trigger, ...rest } = input
   const values = { id: ticket.id, name: ticket.execution?.name ?? '', directory: ticket.execution?.directory ?? '',
-    workspace: ticket.execution?.workspace, lease: ticket.execution?.lease }
+    workspace: ticket.execution?.workspace, lease: ticket.execution?.lease, backend: ticket.execution?.backend }
   return environmentOf({ ...rest, ticket: values, ...trigger ? { trigger } : {} })
 }
 export function environmentLines(variables: Variable[]): string {

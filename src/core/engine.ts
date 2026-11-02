@@ -1,7 +1,7 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
 import { isoTime, liveTicket } from './model.ts'
-import type { ChannelRef, Decision, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketPipeline, Trigger } from './model.ts'
+import type { Backend, ChannelRef, Decision, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketPipeline, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
 import type { PlanDecision, PlanOption, PlanVia } from './plan.ts'
@@ -181,6 +181,12 @@ export class Engine {
    */
   retryTicket(ticketId: string): Ticket { return this.repo.atomic(() => this.tickets.retry(ticketId)) }
   /**
+   * A person moves a ticket's work to another delivery environment: its stalled assignment ends and a new one starts with
+   * `backend` recorded, so its worker continues in the channel the ticket belongs in.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  redispatchTicket(ticketId: string, backend: Backend): Ticket { return this.repo.atomic(() => this.tickets.redispatch(ticketId, backend)) }
+  /**
    * Records a person's confirmation that a delivered ticket may be submitted. It never submits: the person runs the submit.
    * @throws UserError when the ticket is unknown, ended, did not report a changelist, or was already confirmed.
    */
@@ -346,7 +352,7 @@ export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThre
 /** What the main Session asks of the Engine. */
 export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'>
 /** What people ask of the Engine, through the panel or the main Session. */
-export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'confirmTicket' | 'verifyTicket' | 'recordPipeline' | 'resumePipeline'
+export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'redispatchTicket' | 'confirmTicket' | 'verifyTicket' | 'recordPipeline' | 'resumePipeline'
   | 'reworkTicket' | 'decidePlan' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
 /** What Settings tells the Engine. */
 export type EngineForSettings = Pick<Engine, 'policyChanged'>

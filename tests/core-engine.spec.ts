@@ -2026,3 +2026,33 @@ describe('P1 plan gate', () => {
   })
 })
 
+
+describe('redispatch', () => {
+  it('moves a stalled ticket into another delivery environment and starts a new assignment there', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.engine.report(ticketId, { state: 'waiting', summary: 'waiting for the channel decision' })
+    vi.mocked(h.executor.start).mockClear()
+    const before = h.repo.tickets.get(ticketId)!.assignments.length
+    h.engine.redispatchTicket(ticketId, 'git')
+    const ticket = h.repo.tickets.get(ticketId)!
+    expect(ticket.execution?.backend).toBe('git')
+    expect(ticket.assignments).toHaveLength(before + 1)
+    expect(ticket.assignments.at(-1)!.state).toBe('pending')
+    expect(ticket.assignments.at(-2)).toMatchObject({ state: 'ended', endedReason: 'redispatched' })
+    expect(ticket.phase).toBe('implement')
+    expect(h.executor.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: ticketId }), expect.objectContaining({ state: 'pending' }))
+    expect(ticket.undelivered).toHaveLength(1)
+    expect(ticket.inputs.at(-1)).toMatchObject({ kind: 'text', text: expect.stringContaining('git 通道') })
+  })
+  it('refuses an unknown ticket, an ended one, and gates a p4 dispatch behind the plan phase', () => {
+    const h = harness()
+    expect(() => h.engine.redispatchTicket('nope', 'git')).toThrow(new UserError('unknownTicket'))
+    const ticketId = accepted(h).ticketId!
+    h.engine.stopTicket(ticketId)
+    expect(() => h.engine.redispatchTicket(ticketId, 'git')).toThrow(new UserError('ticketEnded'))
+    const other = accepted(h, '2').ticketId!
+    h.engine.redispatchTicket(other, 'p4')
+    expect(h.repo.tickets.get(other)!.phase).toBe('plan')
+  })
+})
