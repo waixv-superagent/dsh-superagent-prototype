@@ -29,6 +29,8 @@ describe('ticketStage', () => {
       { stage: 'person', action: 'answer' }],
     ['a blocked pipeline', ticket({ pipeline: { state: 'blocked', at: '', manual: true }, assignments: [assignment({ state: 'ended' })] }),
       { stage: 'pipeline', action: 'blocked' }],
+    // A merged pipeline ended the ticket once; a person's later message may resume it for a round that is not pipeline work.
+    ['a merged pipeline a person\'s message resumed', ticket({ pipeline: { state: 'merged', at: '' } }), { stage: 'working' }],
     ['an ended pipeline', ticket({ pipeline: { state: 'merged', at: '' }, ended }), { stage: 'ended' }],
     ['a blocked Report a person answered since', ticket({ ...answered, assignments: [reportedAt('blocked')] }), { stage: 'working' }],
     ['no Assignment', ticket({ assignments: [] }), { stage: 'working', action: 'queued' }],

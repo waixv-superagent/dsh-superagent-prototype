@@ -484,6 +484,46 @@ describe('resume and stop', () => {
     expect(h.executor.stop).toHaveBeenCalledOnce()
   })
 })
+describe('a merged pipeline after a resume', () => {
+  /** A ticket whose delivered work passed the local check and whose pipeline a person then marked merged. */
+  function merged(h: ReturnType<typeof harness>) {
+    const id = accepted(h).ticketId!
+    h.repo.tickets.save({ ...h.repo.tickets.get(id)!, execution: { name: 'w', directory: '/w', assignment: '' } })
+    h.engine.report(id, { state: 'ready', summary: 'shelved', delivery: { changelist: 123456, review: 'https://review.test/9' } })
+    h.engine.verifyTicket(id)
+    return h.engine.recordPipeline(id, { state: 'merged', url: 'https://review.test/9' })
+  }
+  it('is history once a person\'s message resumes the ticket, not pipeline work again', () => {
+    const h = harness()
+    const ended = merged(h)
+    expect(ended.ended).toMatchObject({ outcome: 'completed', reason: '流水线已入库' })
+    h.engine.receive(trigger('2', { actor: guest }))
+    const resumed = h.repo.tickets.get(ended.id)!
+    expect(resumed).not.toHaveProperty('ended')
+    expect(resumed.pipeline).toMatchObject({ state: 'merged' })
+    // The round queues its new Assignment: pipeline/running is not what the stage reports any more.
+    expect(ticketStage(resumed)).toEqual({ stage: 'working', action: 'queued' })
+  })
+  it('ends the resumed round on a report that delivers nothing new, and reopens the local check for new work', () => {
+    const h = harness()
+    const id = merged(h).id
+    h.engine.receive(trigger('2', { actor: guest }))
+    h.engine.report(id, { state: 'ready', summary: 'answered the question' })
+    const answered = h.repo.tickets.get(id)!
+    expect(answered.ended).toMatchObject({ by: 'executor', outcome: 'completed' })
+    expect(answered.verification).toMatchObject({ state: 'passed' })
+    expect(answered.pipeline).toMatchObject({ state: 'merged' })
+
+    // A later round that delivers new work drops the merged observation and waits for the person's local check again.
+    h.engine.receive(trigger('3', { actor: guest }))
+    h.engine.report(id, { state: 'ready', summary: 'fixed more', delivery: { changelist: 654321 } })
+    const redelivered = h.repo.tickets.get(id)!
+    expect(redelivered).not.toHaveProperty('ended')
+    expect(redelivered).not.toHaveProperty('pipeline')
+    expect(redelivered.verification).toMatchObject({ state: 'pending' })
+    expect(ticketStage(redelivered)).toEqual({ stage: 'person', action: 'verify' })
+  })
+})
 describe('follow-ups', () => {
   it('takes a follow-up an older version queued out of the queue without a Decision, and keeps one sent to Eval again', () => {
     const h = harness()

@@ -151,6 +151,18 @@ it('names who verified delivered work, and never reads "completed" as verified b
   store.tickets.save({ ...store.tickets.get('t1')!, execution: { name: 'w', directory: '/w', assignment: '' } })
   expect(ticketSummary(store.tickets.get('t1')!)).toMatchObject({ provenance: 'auto', actions: { verify: false } })
 })
+it('does not offer a merged pipeline gate again after a person\'s message resumed the ticket', () => {
+  const host = views()
+  live('t1')
+  store.tickets.save({ ...store.tickets.get('t1')!, execution: { name: 'w', directory: '/w', assignment: '', changelist: 42 },
+    verification: { at, state: 'passed', by: 'person' }, pipeline: { state: 'merged', at } })
+  const resumed = ticketSummary(store.tickets.get('t1')!)
+  expect(resumed).toMatchObject({ state: 'open' })
+  expect(resumed).not.toHaveProperty('pipeline')
+  // An ended ticket keeps the observation for its record; the panel hides the gate on an ended ticket anyway.
+  store.tickets.save({ ...store.tickets.get('t1')!, ended: { at, by: 'executor', outcome: 'completed' } })
+  expect(ticketSummary(store.tickets.get('t1')!)).toMatchObject({ stage: 'ended', pipeline: { state: 'merged' }, provenance: 'person' })
+})
 it('does not show a follow-up that reached a ticket as waiting for an Eval, though an older version queued it', () => {
   const host = views()
   live('t1')

@@ -130,7 +130,9 @@ export function ticketSummary(ticket: Ticket) {
         : 'auto' as const
     : undefined
   return { id: ticket.id, title: ticket.title, state, ...stage, ...note ? { note } : {},
-    ...ticket.pipeline ? { pipeline: ticket.pipeline } : {},
+    // A live Ticket whose pipeline merged was resumed by a person's later message: that round is not pipeline work, so the
+    // panel must not offer the merge gate again. An ended Ticket keeps the observation for its record.
+    ...ticket.pipeline && !(liveTicket(ticket) && ticket.pipeline.state === 'merged') ? { pipeline: ticket.pipeline } : {},
     actions: { retry: canRetry(ticket), stop: liveTicket(ticket), confirm: canConfirm(ticket), verify: canVerify(ticket),
       rework: canRework(ticket) }, strength: ticket.mandate.strength, ended: ticket.ended,
     ...ticket.verification ? { verification: ticket.verification } : {}, ...provenance ? { provenance } : {},

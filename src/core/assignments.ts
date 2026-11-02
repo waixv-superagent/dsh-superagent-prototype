@@ -157,6 +157,12 @@ export class Assignments extends EnginePart {
     // where the ticket waits for the person who can run the build or PIE check. Analysis tickets, with no such delivery, end
     // as before. This is the fact the board shows as "待你验证", and it is why the ticket is not silently closed.
     const deliveredWork = ticket.execution?.changelist !== undefined || !!ticket.execution?.review
+    // A merged pipeline is history: it ended the Ticket once, so this Assignment runs the round a person's later message
+    // resumed (docs/003). That round does not repeat the merged delivery: a result that delivers nothing new ends it, and
+    // one that delivers new work drops the observation so the local check and a fresh follow-up run as usual.
+    const merged = ticket.pipeline?.state === 'merged'
+    if (merged && delivered) { delete ticket.pipeline; this.repo.tickets.save(ticket) }
+    else if (merged && outcome) { this.tickets.end(ticketId, 'executor', outcome, at); return this.require(ticketId) }
     // A pipeline follow-up may report a result after the local gate already passed: a ready report must not reopen the
     // verification gate, because there is nothing new for the person to check. The pipeline tool, not this report, ends it.
     const followup = ticket.verification?.state === 'passed' && !!ticket.pipeline

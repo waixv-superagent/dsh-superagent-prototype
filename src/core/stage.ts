@@ -12,7 +12,9 @@ export function ticketStage(ticket: Ticket): TicketStage {
   if (ticket.delivery) return { stage: 'person', action: 'delivery' }
   if (awaitsVerification(ticket)) return { stage: 'person', action: 'verify' }
   if (ticket.attention) return { stage: 'person', action: 'answer' }
-  if (ticket.pipeline) return { stage: 'pipeline', action: ticket.pipeline.state === 'blocked' ? 'blocked' : 'running' }
+  // A merged pipeline is history: it completed the Ticket once, and a person's later message may resume the Ticket for a
+  // follow-up round, which is not pipeline work again (docs/003).
+  if (ticket.pipeline && ticket.pipeline.state !== 'merged') return { stage: 'pipeline', action: ticket.pipeline.state === 'blocked' ? 'blocked' : 'running' }
   const assignment = latestAssignment(ticket)
   const report = assignment?.report?.state
   if (report === 'ready') return { stage: 'person', action: 'review' }
