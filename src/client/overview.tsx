@@ -1,6 +1,6 @@
 /** Overview: the duty desk. One verdict, decision cards for Tickets waiting on a person, a running lane, and recently ended work. */
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { usePoll, type Problem, type TicketRow, type TicketSearchView } from './api.ts'
+import { usePoll, type EditorRow, type Problem, type TicketRow, type TicketSearchView } from './api.ts'
 import { Button, Icon, Input, Tag } from './controls.tsx'
 import { ticketMark } from './marks.ts'
 import { useAction, usePanel, usePanelData } from './provider.tsx'
@@ -8,6 +8,29 @@ import { ThreadChip } from './rows.tsx'
 import { setupPage, settingsRoute, type Route } from './route.ts'
 import { healthText, localized, reasonLabel, valueLabel, readableMarkers, type T } from './text.ts'
 import { CheckSetupButton, ConfirmButton, LoadState, SetupMessage, VerificationChecks, When } from './widgets.tsx'
+
+/** "22:30" in the viewer's own clock; the row says since when, not a relative age that needs mental arithmetic. */
+function clock(at: string | null): string {
+  if (!at) return ''
+  const date = new Date(at)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+/** The editor row: the only place the panel says who holds the shared editor before an agent fights for it. */
+function EditorLine({ editor }: { editor: EditorRow }) {
+  const { t } = usePanel()
+  const line = editor.holder === 'person' ? t('editorPerson')
+    : editor.holder === 'agent' ? t('editorAgent')
+    : editor.holder === 'none' ? (editor.activity === 'building' ? t('editorEmptyBuilding') : t('editorEmpty'))
+    : t('editorUnknown')
+  const since = editor.holder === 'person' || editor.holder === 'agent' ? clock(editor.since) : ''
+  return <p className="dt-editor-line" data-holder={editor.holder} title={editor.detail}>
+    {line}
+    {since && <span className="dt-editor-since"> · {t('editorSince', { time: since })}</span>}
+    {editor.holder !== 'none' && editor.activity === 'building' && <span className="dt-editor-since"> · {t('editorBuilding')}</span>}
+  </p>
+}
 
 function ProblemLine({ problem, onChanged }: { problem: Problem; onChanged: () => Promise<void> }) {
   const { t, call, navigate } = usePanel()
@@ -407,6 +430,7 @@ export function OverviewPage() {
           {needs === 0 && t('boardAllClear')}
         </h2>
         <p className="dt-verdict-sub">{needs ? note || t('boardRunningEmpty') : t('boardAllClearSub', { count: running })}</p>
+        {data.editor && <EditorLine editor={data.editor} />}
       </div>
       <dl className="dt-figures">
         <Figure label={t('boardReceivedStat')} value={data.flow.received} />

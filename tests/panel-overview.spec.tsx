@@ -13,6 +13,9 @@ it('leads with a verdict and a five-lane board: decisions, verification, pipelin
   expect(document.querySelector('.dt-verdict-title')?.textContent).toBe('2件等你验证·2件等你决定')
   expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('2 件在跑')
   expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('最久的交付已经等了')
+  // The editor row sits under the verdict, before the lanes: it is the one fact an agent must read before it builds.
+  expect(document.querySelector('.dt-editor-line')?.getAttribute('data-holder')).toBe('person')
+  expect(document.querySelector('.dt-editor-line')?.textContent).toContain('编辑器：你正在用')
   expect(all('.dt-figure').map(figure => figure.textContent)).toEqual(['今日到达12', '已评估5', '接单1', '执行中2 / 3'])
   expect(all('.dt-board-col-title').map(title => title.textContent)).toEqual(['待你决定', '正在跑', '待你验证', '流水线', '最近结束'])
   expect(all('.dt-board-col-count').map(count => count.textContent)).toEqual(['2', '2', '2', '0', '1'])
@@ -29,6 +32,29 @@ it('leads with a verdict and a five-lane board: decisions, verification, pipelin
   expect(all('.dt-ended2-meta .dt-tag')).toEqual([])
   // The historical delivery keeps only the pass action; there is no worker turn left to send it back to.
   expect(all('.dt-verify-card')[1]!.querySelectorAll('.dt-verify-foot button').length).toBe(2)
+})
+
+it('shows the editor row in each state, keeping an unreadable probe on the safe side', async () => {
+  server.editor = { holder: 'none', activity: 'unknown', since: null, pid: null, at: '2026-09-22T08:10:00.000Z' }
+  await mount()
+  expect(document.querySelector('.dt-editor-line')?.getAttribute('data-holder')).toBe('none')
+  expect(document.querySelector('.dt-editor-line')?.textContent).toContain('编辑器：空着')
+
+  server.editor = { holder: 'agent', activity: 'building', since: new Date(Date.now() - 3_600_000).toISOString(), pid: 2,
+    at: '2026-09-22T08:10:00.000Z' }
+  await remount()
+  expect(document.querySelector('.dt-editor-line')?.textContent).toContain('编辑器：agent 在用')
+  expect(document.querySelector('.dt-editor-line')?.textContent).toContain('构建中')
+  expect(document.querySelector('.dt-editor-line')?.textContent).toContain('起')
+
+  server.editor = { holder: 'unknown', activity: 'unknown', since: null, pid: null, at: '2026-09-22T08:10:00.000Z',
+    detail: '读取进程表失败，按人在用' }
+  await remount()
+  expect(document.querySelector('.dt-editor-line')?.textContent).toContain('编辑器：无法确认，按人在用')
+
+  server.editor = null
+  await remount()
+  expect(document.querySelector('.dt-editor-line')).toBeNull()
 })
 
 it('pins a blocked pipeline at the top of its lane and offers the review and a new follow-up', async () => {

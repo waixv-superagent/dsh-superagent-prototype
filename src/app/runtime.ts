@@ -38,6 +38,7 @@ import { HealthBoard } from '../infra/health.ts'
 import { Outbox } from './outbox.ts'
 import { Passes } from './passes.ts'
 import { Setup } from './setup.ts'
+import { Editor } from './editor.ts'
 import { notifyPlan as sendPlanCard } from './plan.ts'
 import { feishuSettings } from '../sources/feishu.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
@@ -69,6 +70,7 @@ export class Runtime extends Service implements SourceHost {
   readonly settings: Settings
   readonly executor: DshExecutor
   readonly activity: Activity
+  readonly editor: Editor
   readonly assessor: MasterAssessor
   readonly outbox: Outbox
   readonly engine: Engine
@@ -132,6 +134,7 @@ export class Runtime extends Service implements SourceHost {
         lifetime: this.lifetime, sessions, closing: () => this.closing(), paused: () => this.paused(), environment, sourceLink: link,
         repliedTo: trigger => repliedTo({ store, sources }, trigger) })
       this.activity = new Activity(ctx)
+      this.editor = new Editor({ warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       this.assessor = new MasterAssessor({ get engine() { return runtime.engine }, commands, get deployment() { return setup.deployment }, effects,
         settings: () => store.settings(), paused: () => this.paused(), threadContext: trigger => sources.threadContext(trigger),
         deliver: (id, text) => sessions.prompt(masterId, id, text, 'steer'), candidateCard: candidate => candidateCard(links, candidate) })
@@ -229,8 +232,8 @@ export class Runtime extends Service implements SourceHost {
   }
   private httpHost(): HttpHost {
     const runtime = this
-    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, health, machine, masterId, ready, sourceLinks, setup, passes } = this
-    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, health, machine, masterId, ready, sourceLinks,
+    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, health, machine, masterId, ready, sourceLinks, setup, passes } = this
+    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, health, machine, masterId, ready, sourceLinks,
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
@@ -251,6 +254,7 @@ export class Runtime extends Service implements SourceHost {
       this.executor.dispose()
       this.sessions.dispose()
       this.activity.dispose()
+      this.editor.dispose()
       for (const dispose of this.disposers.reverse()) dispose()
       await this.ctx.sessionPersistence.flush()
     } finally {

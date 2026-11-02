@@ -186,6 +186,13 @@ it('archives completed Tickets from the board after seven days but keeps them in
 })
 
 const load = { running: 0, queued: 0 }
+// The overview carries the editor row when the host has probed it; the panel hides the row while it is null.
+it('carries the editor occupancy row into the overview', () => {
+  const host = views()
+  expect(overview(host, {}, 'v1', load).editor).toBeNull()
+  expect(overview(host, {}, 'v1', load, undefined, { holder: 'person', activity: 'editing', since: at, pid: 7, at }).editor)
+    .toMatchObject({ holder: 'person', pid: 7, since: at })
+})
 const problems = (host: ReturnType<typeof views>, health: Parameters<typeof overview>[1] = {}) =>
   overview(host, health, 'v1', load).problems
 

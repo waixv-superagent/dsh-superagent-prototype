@@ -2,6 +2,7 @@
 import { completedArchived, reasonText, ticketStage, type Decision, type Thread } from '../../core/index.ts'
 import type { Health } from '../../sources/host.ts'
 import type { SetupProblem } from '../../setup.ts'
+import type { EditorView } from '../editor.ts'
 import { anyoneAllowed } from '../../policy.ts'
 import type { Store } from '../store.ts'
 import { awaitingEval, dayAgo, delivered, newestFirst, ownersOf, snapshot, threadSummary, type ViewHost } from './records.ts'
@@ -34,8 +35,10 @@ export function evalsHealth(store: Store, now = Date.now()): Health {
 /**
  * Builds the operator overview: active system problems, tickets awaiting human action, executor load, and 24-hour trigger flow.
  * @param setup - Setup problem to surface first (where setup stopped, or a Source paused by setup).
+ * @param editor - The editor occupancy row, null until the first process probe finishes.
  */
-export function overview(host: ViewHost, health: HealthMap, policyVersionValue: string, load: ExecutorLoad, setup?: SetupProblem) {
+export function overview(host: ViewHost, health: HealthMap, policyVersionValue: string, load: ExecutorLoad, setup?: SetupProblem,
+  editor?: EditorView | null) {
   const { store, sources } = host
   const view = snapshot(host)
   const settings = store.settings()
@@ -109,6 +112,7 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
     executor: { ...load, maxWorkers: settings.executor.maxWorkers, idle: open.filter(ticket => ticketStage(ticket).stage === 'idle').length },
     flow: { received, filtered, triggers: received - filtered, judged: judgement.judged, accepted: judgement.accepted,
       evaluating: evaluating.length, dropped: store.read.droppedSince(since) },
+    editor: editor ?? null,
     policyVersion: policyVersionValue,
   }
 }

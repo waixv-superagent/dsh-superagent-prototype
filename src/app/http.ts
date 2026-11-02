@@ -9,6 +9,7 @@ import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types
 import { PromptConflict, SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, builtInParts, defaultPrompts, savePrompts, type Prompts }
   from './prompts.ts'
 import type { Activity } from './activity.ts'
+import type { Editor } from './editor.ts'
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
@@ -43,6 +44,8 @@ export interface HttpHost {
   readonly executor: Pick<DshExecutor, 'activeCount'>
   /** Live worker activity the ticket page reads; only the bounded summary and reasoning text, never the transcript. */
   readonly activity: Pick<Activity, 'read'>
+  /** Cached editor occupancy the overview reads; null until the first process probe finishes. */
+  readonly editor: Pick<Editor, 'read'>
   readonly health: Record<string, Health>
   readonly machine: Machine
   readonly masterId: string
@@ -167,7 +170,7 @@ function routes(runtime: HttpHost): Routes {
   return {
     'GET state': () => stateView(runtime),
     'GET overview': () => overview(views(runtime), runtime.health, policyVersion(store.settings()),
-      executorLoad(store, runtime.executor.activeCount()), runtime.setupProblem ?? runtime.feishuProblem),
+      executorLoad(store, runtime.executor.activeCount()), runtime.setupProblem ?? runtime.feishuProblem, runtime.editor.read()),
     'GET search': ({ query }) => search(views(runtime), query.q ?? '', runtime.sourceLinks),
     'GET sources': () => sourcesStatus(views(runtime), runtime.health, setupState(runtime)),
     'GET settings': () => settingsView(store, runtime.sources, runtime.health, setupState(runtime), runtime.machine.stateDir),

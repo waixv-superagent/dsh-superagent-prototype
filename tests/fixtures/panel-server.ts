@@ -93,6 +93,8 @@ export interface PanelServer {
   tickets: { open: TicketRow[]; ended: TicketRow[] }; ticketDetails: Record<string, TicketPageView>
   /** Live worker activity the Ticket page polls; tests replace it to simulate a running worker. */
   activity: (ticketId: string) => ActivityView | undefined
+  /** Editor occupancy the Overview reads; tests replace it to simulate a person, an agent or an unreadable probe. */
+  editor: ApiResponse<'GET overview'>['editor']
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; verification: TicketRow[]; working: TicketRow[]; idle: TicketRow[]; pipeline: TicketRow[]; ended: TicketRow[]
@@ -207,6 +209,7 @@ const overviewView = (): ApiResponse<'GET overview'> => {
     executor: { running: 2, queued: 0, maxWorkers: server.settings.executor.maxWorkers, idle: 1 },
     flow: { received: 12, filtered: 2, triggers: 10, judged: 5, accepted: 1, evaluating: 0,
       dropped: server.dropped.filter(item => item.dropped.at >= dayAgo()).length },
+    editor: server.editor,
     policyVersion: 'abcdef1234567890',
   }
 }
@@ -264,6 +267,7 @@ function initial(): PanelServer {
   const defaults = { revision: 0, previousRevision: null, savedAt: '', source: 'defaults' }
   return {
     health: {}, down: false, pending: 0, opened: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
+    editor: { holder: 'person', activity: 'editing', since: '2026-09-22T00:00:00Z', pid: 4242, at: '2026-09-22T00:00:00Z' },
     setup: { machine: MACHINE, problem: null, feishuProblem: null,
       accounts: { repository: 'acme/widgets', agent: 'agent-bot', feishu: { appId: 'cli_bot', brand: 'feishu', botId: 'ou_bot',
         name: 'Widgets Bot' } } },

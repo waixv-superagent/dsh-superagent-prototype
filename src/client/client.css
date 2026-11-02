@@ -408,6 +408,12 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-verdict-dec { margin-right: 6px; font-size: 26px; line-height: 30px; font-weight: 600; letter-spacing: -.02em; color: var(--dsw-alias-label-primary); font-variant-numeric: tabular-nums; }
 .dt-verdict-sep { margin: 0 10px; font-size: 20px; font-weight: 400; color: var(--dsw-alias-label-caption); }
 .dt-verdict-sub { margin: 8px 0 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-tertiary); }
+.dt-editor-line { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-caption); }
+.dt-editor-line::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-label-caption); opacity: .75; }
+.dt-editor-line[data-holder='person']::before { background: var(--dsw-alias-state-warn-primary); }
+.dt-editor-line[data-holder='agent']::before { background: var(--dsw-alias-state-business-primary); }
+.dt-editor-line[data-holder='none']::before { background: var(--dsw-alias-state-success-primary); }
+.dt-editor-since { color: var(--dsw-alias-label-caption); }
 .dt-figures { display: flex; gap: 26px; margin: 0; padding-bottom: 3px; }
 .dt-figure { display: flex; flex-direction: column; gap: 2px; min-width: 46px; }
 .dt-figure dt { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); }
