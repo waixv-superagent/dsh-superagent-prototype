@@ -11,6 +11,7 @@ import { snapshot, threadSummary, ticketSummary, triggerView } from '../src/app/
 import { basisFacts, ticketDetail, ticketRow, ticketSearch } from '../src/app/views/tickets.ts'
 import { threadDetail } from '../src/app/views/threads.ts'
 import { droppedReplies, sourcesStatus } from '../src/app/views/sources.ts'
+import { editorPage, editorUse, shortTitle } from '../src/app/views/editor.ts'
 import { overview } from '../src/app/views/overview.ts'
 import { markdown, plain } from '../src/app/views/text.ts'
 import { policyHistory } from '../src/app/settings-history.ts'
@@ -204,6 +205,57 @@ it('carries the editor occupancy row into the overview', () => {
   expect(overview(host, {}, 'v1', load).editor).toBeNull()
   expect(overview(host, {}, 'v1', load, undefined, { holder: 'person', activity: 'editing', since: at, pid: 7, at }).editor)
     .toMatchObject({ holder: 'person', pid: 7, since: at })
+})
+
+it('lists the working Tickets with their live tool on the editor page, live first, and keeps verification out of decisions', () => {
+  const host = views()
+  const recent = new Date(Date.now() - 10 * 60_000).toISOString()
+  const running = { id: 'a1', state: 'running' as const, createdAt: recent, startedAt: recent }
+  live('queued')
+  live('quiet'); store.tickets.save({ ...store.tickets.get('quiet')!, assignments: [running] })
+  live('build'); store.tickets.save({ ...store.tickets.get('build')!, assignments: [running] })
+  live('asks'); store.tickets.save({ ...store.tickets.get('asks')!, attention: { id: 'q1', question: 'Which colour?' } })
+  live('check'); store.tickets.save({ ...store.tickets.get('check')!, assignments: [running],
+    execution: { name: 'w', directory: '/w', assignment: '', changelist: 42 }, verification: { at, state: 'pending' } })
+  const tools: Record<string, { name: string; digest: string }> = { build: { name: 'Bash', digest: 'E:/game/CompileSunGame.bat -target' },
+    quiet: { name: 'Read', digest: 'src/app/editor.ts' } }
+  const activity = { read: (id: string) => {
+    if (id === 'queued') throw new Error('no buffer')
+    const tool = tools[id]
+    return tool ? { live: id === 'build', updatedAt: 1, tool: { ...tool, elapsed: 1000 }, recent: [] }
+      : { live: false, updatedAt: 0, tool: null, recent: [] }
+  } }
+  const editor = { holder: 'person' as const, activity: 'editing' as const, since: recent, pid: 7, at }
+  const page = editorPage(host, activity, editor, { running: 1, queued: 1, maxWorkers: 3 })
+  expect(page.editor).toBe(editor)
+  expect(page.executor).toEqual({ running: 1, queued: 1, maxWorkers: 3 })
+  expect(page.counts).toEqual({ working: 3, queued: 1, person: 1, verification: 1 })
+  expect(page.working.map(row => [row.ticket.id, row.queued, row.usesEditor])).toEqual([['build', false, true], ['quiet', false, false],
+    ['queued', true, false]])
+  expect(page.working.map(row => row.use)).toEqual(['uses', 'not', 'unknown'])
+  // The last-hour timeline is built from the editor's process start and the workers' recorded runs.
+  expect(page.timeline.editor.map(band => band.tone)).toEqual(['person'])
+  expect(page.timeline.workers.map(row => row.id)).toEqual(['build', 'quiet'])
+  expect(page.timeline.workers.map(row => row.short)).toEqual(['build', 'quiet'])
+  expect(page.timeline.workers.find(row => row.id === 'build')?.bands.map(band => band.tone)).toContain('build')
+  expect(page.timeline.workers.find(row => row.id === 'quiet')?.bands.map(band => band.tone)).toEqual(['run'])
+  // A worker whose activity cannot be read is shown as not live rather than failing the page.
+  expect(page.working[2]!.activity).toEqual({ live: false, updatedAt: 0, tool: null, recent: [] })
+  expect(page.person.map(ticket => ticket.id)).toEqual(['asks'])
+  expect(page.verification.map(ticket => ticket.id)).toEqual(['check'])
+  expect(editorPage(host, { read: () => { throw new Error('gone') } }, null).editor).toBeNull()
+})
+
+it('shortens a lane name to its first clause and reads an MCP editor server as using the editor', () => {
+  expect(shortTitle('补 i18n 文案：设置页的保存按钮')).toBe('补 i18n 文案')
+  expect(shortTitle('梳理 dsh 与 dsh super agent 的提交并分类')).toBe('梳理 dsh 与 dsh…')
+  expect(shortTitle('')).toBe('')
+  const tool = (name: string, digest = '') => ({ live: true, updatedAt: 1, tool: { name, digest, elapsed: 1 }, recent: [] })
+  expect(editorUse(tool('Bash', 'E:/game/CompileSunGame.bat -target'))).toBe('uses')
+  expect(editorUse(tool('mcp__unreal__spawn_actor'))).toBe('uses')
+  expect(editorUse(tool('mcp__github__search_issues'))).toBe('unknown')
+  expect(editorUse(tool('Read', 'src/app/editor.ts'))).toBe('not')
+  expect(editorUse({ live: false, updatedAt: 0, tool: null, recent: [] })).toBe('unknown')
 })
 const problems = (host: ReturnType<typeof views>, health: Parameters<typeof overview>[1] = {}) =>
   overview(host, health, 'v1', load).problems

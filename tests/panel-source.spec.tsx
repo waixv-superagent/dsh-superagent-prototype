@@ -146,7 +146,9 @@ it('points a setup problem at the settings that fix it', async () => {
   expect(text()).toContain(zh.setupChecking)
   server.setup = { ...server.setup, problem: problemOf('gitTooOld') }
   await remount()
-  await click(zh['tab.overview'])
+  await click(tab(zh['tab.editor']))
+  await click(tab(zh.homeViewBoard))
+  expect(tab(zh.homeViewBoard).getAttribute('aria-selected')).toBe('true')
   await click(find(zh.problemSetup, 'button, a, [role="button"]'))
   expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(zh['settingsGroup.deployment'])
   expect(text()).toContain('部署检查未通过：git 没有读取 dsh-superagent 为 github.com 写的凭据配置')

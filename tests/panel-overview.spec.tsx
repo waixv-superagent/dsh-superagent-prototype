@@ -6,10 +6,18 @@ import { usePanel, mount, remount, all, find, field, settle, tab, click, text, t
 import { server, ticketSummary, threadSummary } from './fixtures/panel-server.ts'
 
 usePanel()
+/** The first tab is the editor view now; these cases exercise the board, so switch to it explicitly. */
+const openOverview = async (dictionary = zh) => {
+  const top = tab(dictionary['tab.editor'])
+  if (top.getAttribute('aria-selected') !== 'true') await click(top)
+  const item = tab(dictionary.homeViewBoard)
+  if (item.getAttribute('aria-selected') !== 'true') await click(item)
+}
 it('leads with a verdict and a five-lane board: decisions, verification, pipeline, running work and recently ended Tickets', async () => {
   await mount()
-  expect(tab(zh['tab.overview']).getAttribute('aria-selected')).toBe('true')
-  expect(all('[role="tab"]').map(tab => tab.textContent)).toEqual(['概览', '来源', '触发', '评估', '执行', '设置'])
+  await openOverview()
+  expect(tab(zh.homeViewBoard).getAttribute('aria-selected')).toBe('true')
+  expect(all('.dt-tabs [role="tab"]').map(tab => tab.textContent)).toEqual(['概览', '来源', '触发', '评估', '执行', '设置'])
   expect(document.querySelector('.dt-verdict-title')?.textContent).toBe('2件等你验证·2件等你决定')
   expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('2 件在跑')
   expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('最久的交付已经等了')
@@ -111,7 +119,7 @@ it('answers a question, retries a failure and stops a Ticket from its decision c
     'https://applink.feishu.cn/client/chat/open?openChatId=oc_1']])
   await click(zh.boardAnswer)
   expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('修复回归')
-  await click(tab(zh['tab.overview']))
+  await openOverview()
   await click(find(zh.retry, '.dt-deck-card-foot button'))
   await click(zh.confirm)
   expect(server.requests.some(request => request.path === 'tickets/t4/retry' && request.method === 'POST')).toBe(true)
@@ -125,7 +133,7 @@ it('opens a Ticket from its card title and from the running lane', async () => {
   await mount()
   await click('修复回归')
   expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('修复回归')
-  await click(tab(zh['tab.overview']))
+  await openOverview()
   await click('补 i18n 文案')
   expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('补 i18n 文案')
 })
@@ -160,7 +168,7 @@ it('links the verdict figures to the records behind them', async () => {
   expect(figures.map(button => button.textContent)).toEqual(['5', '1', '2 / 3'])
   await click(figures[0]!)
   expect(tab(zh['tab.eval']).getAttribute('aria-selected')).toBe('true')
-  await click(tab(zh['tab.overview']))
+  await openOverview()
   await click(all('.dt-figure button')[2]!)
   expect(tab(zh['tab.execution']).getAttribute('aria-selected')).toBe('true')
 })
@@ -207,7 +215,7 @@ it('says when no Source is on, an Eval is past its deadline or a message keeps f
   expect(text()).toContain('HTTP 502 from GitHub')
   await click(zh.actionOpenSources)
   expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(zh['settingsGroup.source'])
-  await click(tab(zh['tab.overview']))
+  await openOverview()
   await click('评估超时未决定：#9 迟迟未决')
   expect(server.requests.some(request => request.path.startsWith('threads/github:9'))).toBe(true)
 })

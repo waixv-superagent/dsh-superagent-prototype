@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { openKnownSession } from '../src/navigation.ts'
-import { initialLocation, parseRoute, remember, setupPage } from '../src/client/route.ts'
+import { initialLocation, parseRoute, remember, setupPage, type Route } from '../src/client/route.ts'
 const id = 'orchestrator-test' as SessionId
 function fixture(ready = false) {
   const pending = Promise.withResolvers<void>()
@@ -39,16 +39,17 @@ it('does not navigate after the panel unmounts or a newer request supersedes it'
   controller.abort(); state.phase = 'ready'; state.byId[id] = {}; pending.resolve()
   await expect(navigation).resolves.toBe(false); expect(open).not.toHaveBeenCalled()
 })
-it('reopens the page this tab showed last, and the overview for a route that no longer exists', () => {
-  remember({ route: { page: 'eval', query: { filter: 'stop' } }, stack: [{ page: 'overview' }] })
-  expect(initialLocation()).toEqual({ route: { page: 'eval', query: { filter: 'stop' } }, stack: [{ page: 'overview' }] })
-  // The Eval tab was previously named Policy; a route saved under the old name falls back to overview.
+it('reopens the page this tab showed last, and the editor overview for a route that no longer exists', () => {
+  remember({ route: { page: 'eval', query: { filter: 'stop' } }, stack: [{ page: 'overview' } as unknown as Route] })
+  expect(initialLocation()).toEqual({ route: { page: 'eval', query: { filter: 'stop' } },
+    stack: [{ page: 'editor', query: { view: 'board' } }] })
+  // The Eval tab was previously named Policy; a route saved under the old name falls back to the editor overview.
   sessionStorage.setItem('dsh-superagent/route', JSON.stringify({ route: { page: 'policy' }, stack: [] }))
-  expect(initialLocation()).toEqual({ route: { page: 'overview' }, stack: [] })
+  expect(initialLocation()).toEqual({ route: { page: 'editor' }, stack: [] })
   sessionStorage.setItem('dsh-superagent/route', JSON.stringify({ route: { page: 'trigger', id: 'github:1' }, stack: [{ page: 'policy' }, { page: 'trigger' }] }))
   expect(initialLocation().stack).toEqual([{ page: 'trigger' }])
   sessionStorage.setItem('dsh-superagent/route', '{')
-  expect(initialLocation().route).toEqual({ page: 'overview' })
+  expect(initialLocation().route).toEqual({ page: 'editor' })
 })
 it('reads each page a tab remembered with the parameters it takes, and leaves out what it does not know', () => {
   expect(parseRoute({ page: 'trigger', query: { filter: 'nope', trigger: 'e1' } })).toEqual({ page: 'trigger' })
@@ -58,7 +59,11 @@ it('reads each page a tab remembered with the parameters it takes, and leaves ou
   expect(parseRoute({ page: 'execution', id: 5, query: { filter: 'idle' } })).toEqual({ page: 'execution', query: { filter: 'idle' } })
   expect(parseRoute({ page: 'settings', query: { group: 'policy', source: 'feishu' } }))
     .toEqual({ page: 'settings', query: { group: 'source', source: 'feishu' } })
-  expect([parseRoute('overview'), parseRoute(null)]).toEqual([undefined, undefined])
+  // The removed Agent-status tab opens the board view of 概览; an unknown view keeps the editor view.
+  expect(parseRoute({ page: 'overview' })).toEqual({ page: 'editor', query: { view: 'board' } })
+  expect(parseRoute({ page: 'editor', query: { view: 'board' } })).toEqual({ page: 'editor', query: { view: 'board' } })
+  expect(parseRoute({ page: 'editor', query: { view: 'nope' } })).toEqual({ page: 'editor' })
+  expect([parseRoute('editor'), parseRoute(null)]).toEqual([undefined, undefined])
 })
 it('opens the settings that fix each setup problem: the Deployment group, or the card of the Source it names', () => {
   expect(setupPage('deployment')).toEqual({ page: 'settings', query: { group: 'deployment' } })

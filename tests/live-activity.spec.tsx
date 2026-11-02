@@ -2,7 +2,7 @@
 // The worker's current-tool buffer, and the Ticket page's compact "now" card. No reasoning, tokens or speed reaches the panel.
 import { expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import { Activity } from '../src/app/activity.ts'
+import { Activity, mcpToolName } from '../src/app/activity.ts'
 import { zh } from '../src/client/locales.ts'
 import { at, mount, text, usePanel } from './fixtures/panel.tsx'
 import { server } from './fixtures/panel-server.ts'
@@ -21,22 +21,47 @@ const worker = { agent: { id: 'worker-t1' } }
 const status = (emit: (event: string, ...args: unknown[]) => void, value: string) => emit('agent/status', { ...worker, status: value })
 const event = (emit: (event: string, ...args: unknown[]) => void, value: object, id = 'worker-t1') => emit('session/event', { id }, value)
 
-it('keeps only the running tool and its age, and clears it when the turn ends', () => {
+it('keeps the running tool and a bounded recent trail, and clears only the current tool when the turn ends', () => {
   const { ctx, emit } = fakeHost()
   const activity = new Activity(ctx)
   status(emit, 'running')
-  event(emit, { type: 'tool/call', seq: 1, time: Date.now(),
+  const at = Date.now()
+  event(emit, { type: 'tool/call', seq: 1, time: at,
     data: { turn: 1, step: 1, callId: 'c1', name: 'read_file', arguments: '{"path":"src/app/http.ts"}' } })
   const running = activity.read('t1')
-  expect(running).toMatchObject({ live: true, tool: { name: 'read_file', digest: 'src/app/http.ts' } })
+  expect(running).toMatchObject({ live: true, tool: { name: 'read_file', digest: 'src/app/http.ts' },
+    recent: [{ name: 'read_file', digest: 'src/app/http.ts', at, endedAt: null }] })
   expect(running.tool!.elapsed).toBeGreaterThanOrEqual(0)
-  event(emit, { type: 'tool/result', seq: 2, time: Date.now(), data: { turn: 1, step: 1, message: { toolCallId: 'c1', isError: false } } })
+  event(emit, { type: 'tool/result', seq: 2, time: at + 900, data: { turn: 1, step: 1, message: { toolCallId: 'c1', isError: false } } })
   expect(activity.read('t1').tool).toBeNull()
+  expect(activity.read('t1').recent[0]).toMatchObject({ name: 'read_file', endedAt: at + 900 })
   event(emit, { type: 'turn/end', seq: 3, time: Date.now(), data: { turn: 1 } })
   status(emit, 'idle')
   expect(activity.read('t1')).toMatchObject({ live: false, tool: null })
+  expect(activity.read('t1').recent).toHaveLength(1)
   activity.dispose()
-  expect(activity.read('t1')).toMatchObject({ live: false, tool: null })
+  expect(activity.read('t1')).toMatchObject({ live: false, tool: null, recent: [] })
+})
+
+it('keeps the newest calls first, bounds the trail, and reads an MCP tool name back to its server', () => {
+  const { ctx, emit } = fakeHost()
+  const activity = new Activity(ctx)
+  for (let index = 0; index < 8; index++) {
+    const at = Date.now() + index
+    event(emit, { type: 'tool/call', seq: index, time: at,
+      data: { turn: 1, step: index, callId: `c${index}`, name: index === 7 ? 'mcp__unreal__spawn_actor' : 'pwsh',
+        arguments: '{"command":"dir"}' } })
+    event(emit, { type: 'tool/result', seq: index + 100, time: at + 10, data: { turn: 1, step: index,
+      message: { toolCallId: `c${index}`, isError: false } } })
+  }
+  const trail = activity.read('t1').recent
+  expect(trail).toHaveLength(6)
+  expect(trail[0]!.name).toBe('mcp__unreal__spawn_actor')
+  expect(trail[0]!.endedAt).toBe(trail[0]!.at + 10)
+  expect(trail[5]!.name).toBe('pwsh')
+  expect(mcpToolName('mcp__unreal__spawn_actor')).toEqual({ server: 'unreal', tool: 'spawn_actor' })
+  expect(mcpToolName('pwsh')).toBeNull()
+  activity.dispose()
 })
 
 it('marks a generating turn live and ignores sessions that are not workers', () => {
@@ -52,7 +77,7 @@ it('marks a generating turn live and ignores sessions that are not workers', () 
 
 it('shows what the worker is doing, its latest progress and who acts next without a stream', async () => {
   server.activity = ticketId => ticketId !== 't1' ? undefined : { live: true, updatedAt: Date.now(),
-    tool: { name: 'read_file', digest: 'src/app/http.ts', elapsed: 3_200 } }
+    tool: { name: 'read_file', digest: 'src/app/http.ts', elapsed: 3_200 }, recent: [] }
   at({ page: 'execution', id: 't1' })
   await mount()
   expect(text()).toContain(zh.nowWorking)
@@ -70,7 +95,7 @@ it('shows what the worker is doing, its latest progress and who acts next withou
 })
 
 it('falls back to the assignment state when no tool is readable', async () => {
-  server.activity = () => ({ live: true, updatedAt: Date.now(), tool: null })
+  server.activity = () => ({ live: true, updatedAt: Date.now(), tool: null, recent: [] })
   at({ page: 'execution', id: 't1' })
   await mount()
   expect(text()).toContain(zh.nowPreparing)

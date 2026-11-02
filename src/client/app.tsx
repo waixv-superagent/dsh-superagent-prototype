@@ -1,16 +1,17 @@
 /** Root panel shell: header with global search and glossary, top-level navigation tabs, and active route view. */
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { SearchView } from './api.ts'
-import { Button, Dot, Icon, Input, Modal, SegmentedTabs } from './controls.tsx'
+import { Button, Dot, Icon, Input, Modal, SegmentedControl, SegmentedTabs } from './controls.tsx'
 import type { DeploymentForm } from './deployment.tsx'
+import { EditorPage } from './editor.tsx'
 import { EvalStatus } from './eval.tsx'
 import { ExecutionStatus } from './execution.tsx'
 import { ticketMark } from './marks.ts'
 import { GLOSSARY, GLOSSARY_VALUES, en, zh, type DshSuperagentKey } from './locales.ts'
 import { OverviewPage } from './overview.tsx'
 import { PanelProvider, usePanel, usePanelData } from './provider.tsx'
-import { HOME, TABS, initialLocation, lastSettingsGroup, remember, routeLabel, settingsRoute, type Location, type Route,
-  type Tab } from './route.ts'
+import { HOME, TABS, initialLocation, lastSettingsGroup, remember, routeLabel, settingsRoute, type HomeView, type Location,
+  type Route, type Tab } from './route.ts'
 import { SettingsPage } from './settings.tsx'
 import { SourceStatus } from './source.tsx'
 import { actorName, errorText, reasonLabel, valueLabel, type T, readableMarkers } from './text.ts'
@@ -26,7 +27,7 @@ export interface AppProps {
 
 function Glossary({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = usePanel()
-  const chinese = t('tab.overview') === zh['tab.overview']
+  const chinese = t('tab.editor') === zh['tab.editor']
   const [own, other] = chinese ? [zh, en] : [en, zh]
   const heading = (group: keyof typeof GLOSSARY) => t(group === 'roles' ? 'glossaryGroup.roles' : `tab.${group}`)
   return <Modal className="dt-glossary-modal" open={open} onClose={onClose} title={t('glossary')} closeLabel={t('close')}
@@ -138,6 +139,20 @@ function Header({ masterId }: { masterId: string | undefined }) {
   </header>
 }
 
+/** 概览 owns two views: the editor page and the duty-desk board, switched in place so the tab bar stays short. */
+function HomePage({ view }: { view?: HomeView }) {
+  const { t, navigate } = usePanel()
+  const board = view === 'board'
+  return <>
+    <div className="dt-home-switch">
+      <SegmentedControl options={[{ value: 'editor', label: t('homeViewEditor') },
+        { value: 'board', label: t('homeViewBoard') }]} value={board ? 'board' : 'editor'} label={t('homeViewLabel')}
+        onChange={next => navigate(next === 'board' ? { page: 'editor', query: { view: 'board' } } : { page: 'editor' })} />
+    </div>
+    {board ? <OverviewPage /> : <EditorPage />}
+  </>
+}
+
 function Pages({ route, openTab, deploymentForm }: { route: Route; openTab: (tab: Tab) => void; deploymentForm: DeploymentForm }) {
   const { t } = usePanel()
   const { state, error, reload } = usePanelData()
@@ -146,7 +161,7 @@ function Pages({ route, openTab, deploymentForm }: { route: Route; openTab: (tab
   const waiting = error ? <p className="dt-error" role="alert">{error.message}</p> : <p className="dt-hint">{t('loading')}</p>
   const page = (() => {
     switch (route.page) {
-      case 'overview': return <OverviewPage />
+      case 'editor': return <HomePage view={route.query?.view} />
       case 'source': return <SourceStatus />
       case 'trigger': return route.id !== undefined ? <ThreadPage key={route.id} id={route.id} target={route.query?.trigger} />
         : <TriggerStatus filter={route.query?.filter ?? 'subscribed'} />

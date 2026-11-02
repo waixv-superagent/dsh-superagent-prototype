@@ -13,6 +13,7 @@ import type { DroppedReply, HistoryView, Problem, PromptsView, SetupView, Source
   ActivityView,
   TicketRow, TicketStage,
   TriggerRow } from '../../src/client/api.ts'
+import { editorUse, shortTitle } from '../../src/app/views/editor.ts'
 import { SETUP_FIELDS } from '../../src/deployment.ts'
 import { EvalConfigSchema, ExecutorConfigSchema, PolicyConfigSchema, SettingsSchema } from '../../src/policy.ts'
 import { SetupError, type SetupCode } from '../../src/setup.ts'
@@ -93,8 +94,10 @@ export interface PanelServer {
   tickets: { open: TicketRow[]; ended: TicketRow[] }; ticketDetails: Record<string, TicketPageView>
   /** Live worker activity the Ticket page polls; tests replace it to simulate a running worker. */
   activity: (ticketId: string) => ActivityView | undefined
-  /** Editor occupancy the Overview reads; tests replace it to simulate a person, an agent or an unreadable probe. */
+  /** Editor occupancy the Overview reads; tests replace it to simulate a person, an agent, an unreadable probe or no probe yet. */
   editor: ApiResponse<'GET overview'>['editor']
+  /** Replaces the Editor page's answer; by default it is derived from the lanes, `editor` and `activity` above. */
+  editorPage?: () => ApiResponse<'GET editor'>
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; verification: TicketRow[]; working: TicketRow[]; idle: TicketRow[]; pipeline: TicketRow[]; ended: TicketRow[]
@@ -184,6 +187,35 @@ const settingsView = (): ApiResponse<'GET settings'> => ({
     { owner: 'github', enabled: false, variables: [{ key: 'DSH_SUPERAGENT_GITHUB_REPOSITORY', description: { zh: '仓库',
       en: 'Repository' } }] }] },
 })
+/** A last-hour timeline for the page: the fixture has no assignment history, so it draws the rows it can defend. */
+const editorTimeline = (): ApiResponse<'GET editor'>['timeline'] => {
+  const to = new Date()
+  const from = new Date(to.getTime() - 60 * 60_000)
+  const start = new Date(to.getTime() - 25 * 60_000).toISOString()
+  const workers = server.working.filter(ticket => ticket.stage === 'working' && ticket.action !== 'queued').slice(0, 2)
+    .map(ticket => ({ id: ticket.id, ticketId: ticket.id, label: ticket.title,
+      short: shortTitle(ticket.title) || `#${ticket.id.slice(0, 8)}`, tone: 'run' as const,
+      bands: [{ id: `${ticket.id}-run`, tone: 'run' as const, from: start, to: to.toISOString() }] }))
+  const editor = server.editor && server.editor.holder !== 'none' && server.editor.since
+    ? [{ id: 'editor', tone: server.editor.holder, from: from.toISOString(), to: to.toISOString() }] : []
+  return { from: from.toISOString(), to: to.toISOString(), editor, workers, hidden: 0 }
+}
+/** The Editor page as the host derives it: working Tickets with their live activity, live and running before queued. */
+const editorPageView = (): ApiResponse<'GET editor'> => {
+  if (server.editorPage) return server.editorPage()
+  const working = server.working.map(ticket => {
+    const activity = server.activity(ticket.id) ?? { live: false, updatedAt: 0, tool: null, recent: [] }
+    const use = editorUse(activity)
+    return { ticket, activity, queued: ticket.stage === 'working' && ticket.action === 'queued', usesEditor: use === 'uses', use }
+  }).sort((left, right) => Number(right.activity.live) - Number(left.activity.live) || Number(left.queued) - Number(right.queued))
+  const person = server.person.filter(ticket => !(ticket.stage === 'person' && ticket.action === 'verify'))
+  return { editor: server.editor, working, person, verification: server.verification,
+    executor: { running: working.filter(row => !row.queued).length, queued: working.filter(row => row.queued).length,
+      maxWorkers: server.settings.executor.maxWorkers },
+    timeline: editorTimeline(),
+    counts: { working: working.length, queued: working.filter(row => row.queued).length, person: person.length,
+      verification: server.verification.length } }
+}
 const overviewView = (): ApiResponse<'GET overview'> => {
   const { problem, feishuProblem } = server.setup
   const setup = problem ?? feishuProblem
@@ -204,12 +236,11 @@ const overviewView = (): ApiResponse<'GET overview'> => {
       ...Object.values(server.settings.policy.sources).some(part => part.allowed.length) ? [] : [{ kind: 'no-allowed' as const }],
       ...server.failing.map(outgoing => ({ kind: 'outgoing' as const, outgoing }))],
     person: server.person, verification: server.verification, working: server.working, idle: server.idle,
-    pipeline: server.pipeline, ended: server.ended,
+    pipeline: server.pipeline, ended: server.ended, editor: server.editor,
     endedStats: { completed: 1, verified: 0, pending: 1, agent: 1, none: 0, changelist: 1, archived: 0 },
     executor: { running: 2, queued: 0, maxWorkers: server.settings.executor.maxWorkers, idle: 1 },
     flow: { received: 12, filtered: 2, triggers: 10, judged: 5, accepted: 1, evaluating: 0,
       dropped: server.dropped.filter(item => item.dropped.at >= dayAgo()).length },
-    editor: server.editor,
     policyVersion: 'abcdef1234567890',
   }
 }
@@ -267,7 +298,6 @@ function initial(): PanelServer {
   const defaults = { revision: 0, previousRevision: null, savedAt: '', source: 'defaults' }
   return {
     health: {}, down: false, pending: 0, opened: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
-    editor: { holder: 'person', activity: 'editing', since: '2026-09-22T00:00:00Z', pid: 4242, at: '2026-09-22T00:00:00Z' },
     setup: { machine: MACHINE, problem: null, feishuProblem: null,
       accounts: { repository: 'acme/widgets', agent: 'agent-bot', feishu: { appId: 'cli_bot', brand: 'feishu', botId: 'ou_bot',
         name: 'Widgets Bot' } } },
@@ -278,6 +308,7 @@ function initial(): PanelServer {
       defaultChanged: [], revisions: [{ ...defaults, changed: [] }], sessions: [], notificationPending: false, next_offset: null },
     tickets: { open: [ticketSummary()], ended: [ended] }, ticketDetails: { t1: ticketDetail(), t5: { ...ticketDetail(), id: 't5', title: '补 i18n 文案' } },
     activity: () => undefined,
+    editor: { holder: 'person', activity: 'editing', since: '2026-09-22T08:00:00.000Z', pid: 1, at: '2026-09-22T08:10:00.000Z' },
     working: [ticketSummary({ id: 't5', title: '补 i18n 文案', summary: '第 12 步 · 修改 zh-CN.json' }),
       ticketSummary({ id: 't6', title: '升级依赖', summary: '后台 job · 60 秒无输出', updatedAt: '2026-09-22T23:30:00Z' })],
     idle: [], pipeline: [], ended: [ended],
@@ -324,6 +355,7 @@ const SourceSave = z.object({ enabled: z.boolean(), config: z.unknown() })
 const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET state': { answer: stateView },
   'GET overview': { answer: overviewView },
+  'GET editor': { answer: editorPageView },
   'GET tickets/search': { query: ['q', 'limit'], answer: ({ query }) => server.ticketSearch?.(String(query.q ?? '')) ?? { tickets: [], total: 0 } },
   'GET search': { query: ['q'], answer: async ({ query }) => {
     const q = query.q ?? ''
@@ -367,7 +399,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     : 'open']) },
   'GET tickets/:id': { answer: ({ params }) => server.ticketDetails[params.id] ?? refuse(404, 'Ticket not found') },
   'GET tickets/:id/activity': { answer: ({ params }) => server.activity(params.id) ?? {
-    live: false, updatedAt: 0, tool: null } },
+    live: false, updatedAt: 0, tool: null, recent: [] } },
   'POST tickets/:id/plan': { body: true, answer: ({ params }) => ticketOf(params.id) ? { decided: true } : refuse(404, 'Ticket not found') },
   'POST tickets/:id/retry': { answer: ({ params }) => {
     const ticket = ticketOf(params.id)

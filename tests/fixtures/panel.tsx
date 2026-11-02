@@ -35,12 +35,17 @@ export async function settle() {
   })
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 }
-export async function mount(dictionary: Record<string, string> = zh) {
+/** Most page tests start on the board (the 概览 tab's other view); only an explicit route or `mountHome` exercises the editor view. */
+export async function mount(dictionary: Record<string, string> = zh, route: object | null = { page: 'overview' }) {
+  const key = 'dsh-superagent/route'
+  if (route === null) sessionStorage.removeItem(key)
+  else if (!sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify({ route, stack: [] }))
   container = document.createElement('div'); document.body.append(container)
   root = createRoot(container)
   await act(async () => { root!.render(<Panel t={translator(dictionary)} />) })
   await settle()
 }
+export async function mountHome(dictionary: Record<string, string> = zh) { await mount(dictionary, null) }
 export async function remount(dictionary: Record<string, string> = zh) { unmount(); await mount(dictionary) }
 
 export const all = (selector: string) => [...document.querySelectorAll<HTMLElement>(selector)]
