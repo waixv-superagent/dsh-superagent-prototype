@@ -531,6 +531,18 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-verify-gate-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 12px; margin: 0; }
 .dt-verify-gate-facts dt { font-size: 10.5px; line-height: 15px; color: var(--dsw-alias-label-caption); }
 .dt-verify-gate-facts dd { margin: 2px 0 0; font-size: 12px; line-height: 17px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-verify-gate-brief { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--dsw-alias-label-primary) 3%, transparent); }
+.dt-verify-gate-brief > span { font-size: 10.5px; line-height: 15px; color: var(--dsw-alias-label-caption); }
+.dt-verify-gate-brief p { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
+.dt-verify-gate-scope { display: flex; flex-direction: column; gap: 4px; }
+.dt-verify-gate-scope h3 { margin: 0; font-size: 11px; line-height: 16px; font-weight: 600; color: var(--dsw-alias-label-secondary); }
+.dt-verify-file-list { display: flex; flex-wrap: wrap; gap: 3px 12px; margin: 0; padding: 0; list-style: none; }
+.dt-verify-file-list li { font-size: 11px; line-height: 17px; color: var(--dsw-alias-label-tertiary); overflow-wrap: anywhere; }
+.dt-verify-gate-warning { margin: 0; font-size: 11.5px; line-height: 17px; color: #b26b00; }
+.dt-verify-gate-tag { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10px; line-height: 15px; color: #d4a300; background: color-mix(in srgb, #d4a300 12%, transparent); }
+.dt-verify-gate-disclaimer { margin: 0; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); }
+.dt-verify-steps { display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 18px; }
+.dt-verify-steps li { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
 .dt-verify-gate-evidence { display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; border-radius: 8px; background: color-mix(in srgb, var(--dsw-alias-label-primary) 4%, transparent); }
 .dt-verify-gate-evidence-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .dt-verify-gate-evidence-head h3 { margin: 0; font-size: 11px; line-height: 16px; font-weight: 600; color: var(--dsw-alias-label-secondary); }

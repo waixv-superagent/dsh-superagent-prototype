@@ -1,4 +1,4 @@
-﻿// @vitest-environment jsdom
+// @vitest-environment jsdom
 // The Execution status, a Ticket, and the Execution settings.
 import { act } from 'react'
 import { expect, it } from 'vitest'
@@ -304,6 +304,42 @@ it('shows delivered work waiting for a person\'s local verification, with the wo
   await click(zh.verifyReturnSubmit)
   expect(server.requests.some(request => request.path === 'tickets/t8/rework' && request.method === 'POST'
     && JSON.stringify(request.body).includes('PIE 里 Q 技能仍然会卡住'))).toBe(true)
+})
+
+it('shows a historical delivery as a backfill with concrete checks, not a generic pass template', async () => {
+  const base = server.ticketDetails.t1!
+  server.ticketDetails.t9 = { ...base, id: 't9', title: '历史交付单', state: 'ended' as const, stage: 'ended' as const,
+    ended: { at: '2026-09-22T20:00:00Z', by: 'executor' as const, outcome: 'completed' as const },
+    actions: { retry: false, stop: false, confirm: false, verify: true, rework: false },
+    verification: undefined,
+    summary: '只改了 Source/Game/Player/Foo.cpp；流水线全绿，本地未编译。',
+    delivery: { lease: [], changelist: 123456, review: 'https://review.example.com/reviews/654321/',
+      verification: 'Pipeline 11/11 pass；未执行本地编译' } }
+  at({ page: 'execution', id: 't9' })
+  await mount()
+  expect(text()).toContain(zh.verifyBackfillTitle)
+  expect(text()).toContain(zh.verifyScopeUnknown)
+  expect(text()).toContain(zh.verifyNoFilesRecorded)
+  expect(text()).toContain(zh.verifyEvidenceNote)
+  expect(text()).toContain('Source/Game/Player/Foo.cpp')
+  expect(document.querySelector('.dt-verify-gate-facts a')?.getAttribute('href')).toBe('https://review.example.com/reviews/654321/')
+  await click(find(zh.verifyBackfillMark, '.dt-verify-gate-foot button'))
+  expect(text()).toContain('CL 123456')
+  expect(text()).toContain('review 654321')
+  await click(zh.confirm)
+  expect(server.requests.some(request => request.path === 'tickets/t9/verify' && request.method === 'POST')).toBe(true)
+})
+
+it('does not offer a backfill pass when a historical delivery has nothing concrete to check', async () => {
+  const base = server.ticketDetails.t1!
+  server.ticketDetails.t10 = { ...base, id: 't10', title: '没有依据的历史单', state: 'ended' as const, stage: 'ended' as const,
+    ended: { at: '2026-09-22T20:00:00Z', by: 'executor' as const, outcome: 'completed' as const },
+    actions: { retry: false, stop: false, confirm: false, verify: true, rework: false }, verification: undefined,
+    delivery: { lease: [] } }
+  at({ page: 'execution', id: 't10' })
+  await mount()
+  expect(text()).toContain(zh.verifyNoBasis)
+  expect(all('.dt-verify-gate-foot button').map(button => button.textContent)).not.toContain(zh.verifyBackfillMark)
 })
 
 it('sends one stop for a double click on Confirm', async () => {

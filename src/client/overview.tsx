@@ -192,10 +192,13 @@ function VerifyCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () =>
     </div>}
     {proof && <div className="dt-verify-proof"><VerificationChecks text={proof} /></div>}
     <footer className="dt-verify-foot">
-      <ConfirmButton variant="primary" icon="review" label={backlog ? t('verifyMark') : t('verifyPass')}
+      {(proof || delivery?.lease.length || delivery?.review) && <ConfirmButton variant="primary" icon="review"
+        label={backlog ? t('verifyBackfillMark') : t('verifyPass')}
         title={backlog ? t('verifyBackfillTitle') : t('verifyPassTitle')}
-        message={backlog ? t('verifyBackfillConfirm', { title: ticket.title }) : t('verifyPassConfirm', { title: ticket.title })}
-        onConfirm={async () => { await call('POST tickets/:id/verify', { id: ticket.id }); await onChanged() }} />
+        message={backlog ? t('verifyBackfillConfirm', { title: ticket.title, ref: [delivery?.changelist !== undefined ? `CL ${delivery.changelist}` : '', delivery?.review ?? ''].filter(Boolean).join(' · ') || t('verifyDeliveryRecord') })
+          : t('verifyPassConfirm', { title: ticket.title })}
+        onConfirm={async () => { await call('POST tickets/:id/verify', { id: ticket.id }); await onChanged() }} />}
+      {!(proof || delivery?.lease.length || delivery?.review) && <span className="dt-hint">{t('verifyNoBasis')}</span>}
       {!backlog && <Button variant="outline" size="sm" onClick={() => setReturning(value => !value)}>{t('verifyReturn')}</Button>}
       <Button variant="ghost" size="sm" onClick={open}>{t('verifyOpen')}</Button>
     </footer>

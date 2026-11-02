@@ -277,10 +277,24 @@ function waitedFor(t: T, at: string): string {
   return hours < 48 ? t('verifyWaitingHours', { hours }) : t('verifyWaitingDays', { days: Math.round(hours / 24) })
 }
 
+function reviewLabel(value: string): string {
+  try {
+    const url = new URL(value)
+    const id = url.pathname.split('/').filter(Boolean).at(-1)
+    return id ? `review ${id}` : value
+  } catch {
+    return value
+  }
+}
+function firstLine(text: string): string {
+  return text.split(/\r?\n/).map(line => line.trim()).find(Boolean)?.slice(0, 360) ?? ''
+}
+
 /**
  * The local verification gate: delivered work waits here until a person runs it on their machine. Passing records the
  * check and, while the Ticket is open, ends it as completed by a person; returning it sends the note back as a new Input.
- * The worker's own verification text stays visible as evidence, never as acceptance.
+ * The worker's own verification text stays visible as evidence, never as acceptance. A historical delivery is shown as a
+ * backfill: what was recorded, what is missing, and — when there is nothing concrete to check — no pass button at all.
  */
 function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onChanged: () => Promise<void> }) {
   const { t, call, notify } = usePanel()
@@ -292,6 +306,17 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
   const backlog = ticket.state === 'ended' && ticket.ended?.outcome === 'completed' && ticket.actions.verify
   if (!pending && !backlog) return null
   const delivery = ticket.delivery
+  const scope = delivery?.lease ?? []
+  const proof = delivery?.verification
+  const review = delivery?.review
+  const reviewHref = review && /^https?:\/\//i.test(review) ? review : undefined
+  const reviewText = review ? reviewLabel(review) : ''
+  const deliveredRef = [delivery?.changelist !== undefined ? `CL ${delivery.changelist}` : '', reviewText].filter(Boolean).join(' · ')
+  // A changelist number alone is not inspectable from this page: it gives no diff and no check. Only a file list, a
+  // review, or the worker's verification count as a basis for recording a pass. Historically ended Tickets often lost
+  // the lease; then the card must say so instead of pretending that a CL number is something to verify.
+  const hasBasis = scope.length > 0 || Boolean(review) || Boolean(proof)
+  const brief = firstLine(ticket.summary)
   const rework = async () => {
     setBusy(true); setError('')
     try {
@@ -310,31 +335,50 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
           {pending && <span className="dt-verify-gate-age">{t('verifyWaiting', { time: waitedFor(t, ticket.verification?.at ?? ticket.updatedAt) })}</span>}</h2>
         <p className="dt-verify-gate-sub">{pending ? t('verifyGateSub') : t('verifyBacklogHint')}</p>
       </div>
-      {pending && <span className="dt-verify-gate-state">{t('verifyWorkerBadge')}</span>}
+      <span className="dt-verify-gate-state">{backlog ? t('verifyHistorical') : t('verifyWorkerBadge')}</span>
     </header>
     <div className="dt-verify-gate-grid">
       <div className="dt-verify-gate-main">
         <dl className="dt-verify-gate-facts">
           <div><dt>CL</dt><dd className="dt-mono">{delivery?.changelist ?? '—'}</dd></div>
-          <div><dt>Swarm review</dt><dd className="dt-mono">{delivery?.review ?? '—'}</dd></div>
+          <div><dt>Swarm review</dt><dd>{review
+            ? reviewHref ? <ExternalLink href={reviewHref}>{reviewText}</ExternalLink> : <span className="dt-mono">{reviewText}</span>
+            : '—'}</dd></div>
           <div><dt>{t('verifyDeliveredLabel')}</dt><dd>{when(ticket.verification?.at ?? ticket.updatedAt, t('lang'))} · {t('verifyRound', {
             round: ticket.assignments.length })}</dd></div>
-          <div><dt>{t('verifyScope')}</dt><dd>{t('verifyFiles', { count: delivery?.lease.length ?? 0 })}</dd></div>
+          <div><dt>{t('verifyScope')}</dt><dd>{scope.length ? t('verifyFiles', { count: scope.length }) : t('verifyScopeUnknown')}</dd></div>
         </dl>
+        {brief && <div className="dt-verify-gate-brief">
+          <span>{t('verifyLastReport')}</span>
+          <p>{brief}</p>
+        </div>}
+        <div className="dt-verify-gate-scope">
+          <h3>{t('verifyFilesTitle')}</h3>
+          {scope.length ? <ul className="dt-verify-file-list">
+            {scope.slice(0, 6).map((path, index) => <li key={index} className="dt-mono">{path}</li>)}
+            {scope.length > 6 && <li className="dt-hint">+{scope.length - 6}</li>}
+          </ul> : <p className="dt-verify-gate-warning">{t('verifyNoFilesRecorded')}</p>}
+        </div>
         <div className="dt-verify-gate-evidence">
-          <div className="dt-verify-gate-evidence-head"><h3>{t('verifyEvidenceTitle')}</h3></div>
-          {delivery?.verification ? <>
-            <VerificationChecks text={delivery.verification} />
+          <div className="dt-verify-gate-evidence-head"><h3>{t('verifyEvidenceTitle')}</h3>
+            {proof && <span className="dt-verify-gate-tag">{t('verifyWorkerBadge')}</span>}</div>
+          {proof ? <>
+            <p className="dt-verify-gate-disclaimer">{t('verifyEvidenceNote')}</p>
+            <VerificationChecks text={proof} />
             <details className="dt-verify-original"><summary>{t('verifyOriginal')}</summary>
-              <p className="dt-mono">{delivery.verification}</p></details>
+              <p className="dt-mono">{proof}</p></details>
           </> : <Hint>{t('verifyNoEvidence')}</Hint>}
         </div>
       </div>
       <aside className="dt-verify-gate-side">
         <h3>{t('verifyWhatToDoTitle')}</h3>
-        <p>{t('verifyWhatToDo')}</p>
-        {!delivery?.lease.length && <Hint>{t('verifyNoSteps')}</Hint>}
-        {ticket.sessionId && <SessionButton variant="ghost" sessionId={ticket.sessionId} />}
+        <ol className="dt-verify-steps">
+          <li>{scope.length ? t('verifyStepDiff') : t('verifyStepNoScope')}</li>
+          <li>{proof ? t('verifyStepRerun') : t('verifyStepNoEvidence')}</li>
+          <li>{backlog ? t('verifyStepBackfill') : t('verifyStepRecord')}</li>
+        </ol>
+        {!hasBasis && <p className="dt-verify-gate-warning">{t('verifyNoBasis')}</p>}
+        {reviewHref && <ActionLink href={reviewHref} icon="review">{t('verifyOpenReview')}</ActionLink>}
         <p className="dt-verify-gate-note">{t('verifyGateAfter')}</p>
       </aside>
     </div>
@@ -349,9 +393,12 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
       </div>
     </div>}
     <footer className="dt-verify-gate-foot">
-      <ConfirmButton variant="primary" icon="review" label={t('verifyPass')} title={t('verifyPassTitle')}
-        message={t('verifyPassConfirm', { title: ticket.title })}
-        onConfirm={async () => { await call('POST tickets/:id/verify', { id: ticket.id }); notify(t('verifyPassed')); await onChanged() }} />
+      {hasBasis && <ConfirmButton variant="primary" icon="review" label={backlog ? t('verifyBackfillMark') : t('verifyPass')}
+        title={backlog ? t('verifyBackfillTitle') : t('verifyPassTitle')}
+        message={backlog ? t('verifyBackfillConfirm', { title: ticket.title, ref: deliveredRef || t('verifyDeliveryRecord') })
+          : t('verifyPassConfirm', { title: ticket.title })}
+        onConfirm={async () => { await call('POST tickets/:id/verify', { id: ticket.id }); notify(t('verifyPassed')); await onChanged() }} />}
+      {!hasBasis && <p className="dt-verify-gate-warning">{t('verifyNoBasis')}</p>}
       {pending && <Button variant="outline" size="sm" onClick={() => setReturning(value => !value)}>{t('verifyReturn')}</Button>}
       {ticket.sessionId && <SessionButton variant="ghost" sessionId={ticket.sessionId} />}
     </footer>
