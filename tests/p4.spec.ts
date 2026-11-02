@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { EXECUTOR_VARIABLES, environmentOf, p4Client, p4Prepare } from '../src/app/execution-environment.ts'
 import { ticketExecution } from '../src/executor/dsh.ts'
 import { ExecutorConfigSchema, SettingsSchema } from '../src/policy.ts'
@@ -18,6 +18,8 @@ describe('p4 delivery settings', () => {
     expect(executor.prepare).toBe('')
     expect(executor.p4.depot).toBe('')
     expect(executor.p4.stream).toBe('')
+    expect(executor.p4.jenkinsToken).toBe('')
+    expect(executor.p4.jenkinsUrl).toBe('')
   })
   it('accept the p4 backend with its depot, revision and review settings', () => {
     const executor = ExecutorConfigSchema.parse({ backend: 'p4', p4: { port: 'p4.example.com:1666', user: 'agent',

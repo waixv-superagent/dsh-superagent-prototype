@@ -289,8 +289,9 @@ export class Tickets extends EnginePart {
       shortId ? `本单 TAPD 短单号：${shortId}（P4_Check 首行用它）` : '来源里没有结构化的 TAPD 短单号；先按来源消息和 TAPD 页面核对，找不到就报 blocked。',
       skill ? `先读这个 skill：${skillFile}` : '按团队的 Swarm/Jenkins 流水线跟进 skill 执行。',
       '很多流水线发起时 CL 描述没有带 TAPD 短单号：先核对来源里的短编号；P4_Check 要求描述首行是「短单号 + 空格」（如 123456 xxx），只取纯数字短单号，不要用长 ID、URL 或前缀；缺就先补描述再 reshelve。',
-      '让 subagent 做这些：拉 testruns、读失败 Jenkins 的 consoleText、按 skill 修 ClangTidy/编译问题、p4 edit 后 p4 shelve -r；不要 p4 submit，入库由人执行。',
-      'subagent 结束后，用 orchestrator_pipeline 记录：已入库报 merged；需要人处理才报 blocked（写清原因，manual=true）；仍在跑报 running 和最后检查。不要报 ready。',
+      '先用 orchestrator_pipeline_check 读 testruns/AI 结论；失败项再把 Jenkins URL 传给同一工具读错误行，token 不写进命令或报告。',
+      '失败摘要交给 subagent：按 skill 修 ClangTidy/编译、补描述、p4 edit 后 p4 shelve -r；不要 p4 submit。',
+      'subagent 结束后再查一次，用 orchestrator_pipeline 记录结果；不要报 ready。',
     ].filter(Boolean).join('\n')
     const input: TicketInput = { id: key('input', ticket.id, 'pipeline', at), kind: 'text', text, at }
     ticket.inputs.push(input); ticket.undelivered.push(input.id)

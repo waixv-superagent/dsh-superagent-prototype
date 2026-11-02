@@ -1,10 +1,11 @@
-/** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, and reporting status. */
+/** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, checking a delivered change's pipeline, and reporting status. */
 import { z } from 'zod'
 import { liveTicket, ticketPhase, type EngineForExecutor, type Ticket } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
 import { claimPull, readPull } from '../../sources/github-pull.ts'
 import { workerSessionId } from '../../executor/dsh.ts'
 import type { SourceContext } from '../../sources/host.ts'
+import type { PipelineChecks } from '../pipeline.ts'
 import { readResource, type ResourceHost } from '../resources.ts'
 import type { Store } from '../store.ts'
 import { reportRelay, threadFollowedNotice } from '../notices.ts'
@@ -17,6 +18,8 @@ export interface ExecutorToolsHost {
   readonly store: Pick<Store, 'tickets' | 'replyStatus' | 'atomic'>
   readonly sessions: Pick<Sessions, 'relay' | 'notify' | 'prompt'>
   readonly resources: ResourceHost
+  /** Read-only Swarm and Jenkins checks; the Jenkins token stays in this host and never reaches the Session. */
+  readonly pipeline: Pick<PipelineChecks, 'status' | 'jenkins'>
   /** GitHub Source context whose pull-request rules govern claiming a reported PR. */
   readonly github: SourceContext
   /** Sends a submitted P1 plan to the person who decides it, and returns the card's message id when it went out. */
@@ -137,6 +140,18 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           `Waiting for a person: ${result.attention.question}\nThey can answer here in this Session or in the ticket's channel; either reaches this ticket.`,
           { inject: 'Waiting for a person' }).catch(() => undefined)
         return result
+      },
+    }),
+    tool({
+      name: 'orchestrator_pipeline_check',
+      description: 'Read a Swarm review\'s testruns/AI verdict, or a failed Jenkins build\'s errors. Read-only; the token stays on the host.',
+      schema: z.object({
+        target: z.string().trim().max(1000).optional().describe('Swarm review id/URL (defaults to this ticket\'s), or a failed Jenkins URL.'),
+      }).strict(),
+      execute: async args => {
+        const target = args.target?.trim() || ticket.execution?.review
+        if (!target) throw new Error('this ticket has no Swarm review yet; pass the review id or URL')
+        return /\/job\/|^https?:\/\/[^/]*jenkins/i.test(target) ? host.pipeline.jenkins(target) : host.pipeline.status(target)
       },
     }),
     tool({

@@ -1,4 +1,4 @@
-﻿# 009 — p4 and Swarm delivery
+# 009 — p4 and Swarm delivery
 
 This document covers the `p4` delivery backend: a Ticket's directory becomes a Perforce workspace of a depot, and delivering means shelving a changelist for a Swarm review instead of opening a GitHub pull request. The `git` backend stays the default and is unaffected.
 
@@ -16,6 +16,9 @@ This document covers the `p4` delivery backend: a Ticket's directory becomes a P
 | `p4.syncSpec` | Revision a new workspace syncs to, such as `@12345`; `@head` means head and is left off, because it is not a valid sync path spec |
 | `p4.swarmUrl` | Swarm base URL, used to open and follow reviews; empty disables review actions |
 | `p4.reviewApi` | Swarm API version prefix, such as `/api/v11` |
+| `p4.jenkinsUrl` | Jenkins base URL used to read a failed build's consoleText; empty uses the testrun URL's origin |
+| `p4.jenkinsUser` | Jenkins account for that read; empty uses `p4.user` or `P4USER` |
+| `p4.jenkinsToken` | Jenkins API token for that read. It is stored only in this installation's settings, used by the host-side check, redacted from its result, and never written to a prompt, a log or the repository |
 
 ## 2. Preparing a workspace
 
@@ -76,6 +79,7 @@ Rules for this flow:
 Reviews are followed the way pull requests are: a new comment, a status change, and a pipeline result each arrive as a Trigger for the Ticket's Thread, and a reply goes back to the review. This is not implemented yet; the table in section 6 says what exists.
 
 Until it is, a worker follows its own review in the Session that opened it, by polling Swarm, and reports the outcome in the Ticket. `scripts/swarm-followup.mjs <reviewId>` does the polling half already: it reads `P4USER` and `P4TICKET` from the environment, prints each failing check with its Jenkins URL, and exits with a code a worker can branch on. A p4 Ticket can point at a project-specific pipeline skill instead of the GitHub pull-request skill.
+The worker also has `orchestrator_pipeline_check`: given a review it returns the testruns and the AI verdict, and given a failed Jenkins URL it returns that build's error lines and tail. The check runs on the host, so the Jenkins token never enters the Session, a command line or a report; the tool redacts it from the log it returns.
 
 ### What implementing it needs
 
@@ -99,7 +103,7 @@ Two samples answer both: one review JSON, one comment JSON. With them the Source
 - `channel`: replies post a comment on the review;
 - `scope`/`policy`: reviews authored by the deployment's account are subscribed automatically, like pull requests.
 
-Credentials stay out of the configuration: the Swarm API is called with the p4 ticket taken from the environment, and the p4 account needs only read access plus changelist and shelve rights.
+Swarm credentials stay out of the configuration: the Swarm API is called with the p4 ticket taken from the environment, and the p4 account needs only read access plus changelist and shelve rights. The Jenkins API token is the one delivery credential that may be configured, because it is not derivable from the p4 session; it lives in `p4.jenkinsToken`, is used only by the host-side check, and is redacted from what that check returns.
 
 ## 6. What exists today
 
@@ -111,6 +115,7 @@ Credentials stay out of the configuration: the Swarm API is called with the p4 t
 | Tool-level refusal of `p4 submit` | Implemented as a worker `p4` wrapper that passes every other subcommand through; like the other wrappers it fails only when `p4` is invoked by name, so an absolute path still runs |
 | Swarm Source (review comments and pipeline results as Triggers) | Not implemented |
 | Pipeline follow-up as a command | Implemented as `scripts/swarm-followup.mjs`: polls a review's testruns with the credentials in `P4USER` and `P4TICKET`, prints the failing checks with their Jenkins URLs, and exits `0` pass, `1` fail, `2` still running, `3` configuration or network error. `--self-test` checks the parsing and the authentication header against a synthetic payload |
+| Pipeline check tool | Implemented as `orchestrator_pipeline_check`: testruns, AI verdict, and a failed Jenkins build's error lines and tail; the token stays in the host and is redacted from the result |
 | Operating account, depot, Swarm instance | Not verified in this installation; see 006 Deployment |
 
 ## 7. Acceptance

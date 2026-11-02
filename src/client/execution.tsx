@@ -142,6 +142,19 @@ export function ExecutionSettings() {
               <Input className="dt-mono" value={value.p4.swarmUrl} placeholder={t('swarmUrlEmpty')} spellCheck={false}
                 onChange={event => edit({ p4: { ...value.p4, swarmUrl: event.target.value } })} />
             </Field>
+            <Field label={t('jenkinsUrl')} hint={t('jenkinsUrlHint')}>
+              <Input className="dt-mono" value={value.p4.jenkinsUrl} placeholder={t('jenkinsUrlEmpty')} spellCheck={false}
+                onChange={event => edit({ p4: { ...value.p4, jenkinsUrl: event.target.value } })} />
+            </Field>
+            <Field label={t('jenkinsUser')} hint={t('jenkinsUserHint')}>
+              <Input className="dt-mono" value={value.p4.jenkinsUser} placeholder={t('jenkinsUserEmpty')} spellCheck={false}
+                onChange={event => edit({ p4: { ...value.p4, jenkinsUser: event.target.value } })} />
+            </Field>
+            <Field label={t('jenkinsToken')} hint={t('jenkinsTokenHint')}>
+              <Input className="dt-mono" type="password" autoComplete="off" value={value.p4.jenkinsToken}
+                placeholder={t('jenkinsTokenEmpty')} spellCheck={false}
+                onChange={event => edit({ p4: { ...value.p4, jenkinsToken: event.target.value } })} />
+            </Field>
           </>}
           <EnvironmentVariables groups={environment.variables} sources={sources} onPick={insert} />
           <Field label={t('blockedCommands')} hint={t('blockedCommandsHint')}>

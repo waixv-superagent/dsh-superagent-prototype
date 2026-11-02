@@ -44,6 +44,7 @@ import { feishuSettings } from '../sources/feishu.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
 import { Activity } from './activity.ts'
+import { PipelineChecks } from './pipeline.ts'
 import { Settings } from './settings.ts'
 import { sourceContextOf, sourceState, type SourceContextDeps } from './source-context.ts'
 import type { ResourceHost } from './resources.ts'
@@ -71,6 +72,7 @@ export class Runtime extends Service implements SourceHost {
   readonly executor: DshExecutor
   readonly activity: Activity
   readonly editor: Editor
+  readonly pipeline: PipelineChecks
   readonly assessor: MasterAssessor
   readonly outbox: Outbox
   readonly engine: Engine
@@ -135,6 +137,7 @@ export class Runtime extends Service implements SourceHost {
         repliedTo: trigger => repliedTo({ store, sources }, trigger) })
       this.activity = new Activity(ctx)
       this.editor = new Editor({ warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
+      this.pipeline = new PipelineChecks({ settings: () => store.settings() })
       this.assessor = new MasterAssessor({ get engine() { return runtime.engine }, commands, get deployment() { return setup.deployment }, effects,
         settings: () => store.settings(), paused: () => this.paused(), threadContext: trigger => sources.threadContext(trigger),
         deliver: (id, text) => sessions.prompt(masterId, id, text, 'steer'), candidateCard: candidate => candidateCard(links, candidate) })
@@ -173,6 +176,7 @@ export class Runtime extends Service implements SourceHost {
         get deployment() { return setup.deployment }, configured: () => setup.configured(),
         get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => passes.receive(trigger) }
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
+        pipeline: this.pipeline,
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
         notifyPlan: ticket => sendPlanCard({ store, sources, commands, warn: message => ctx.logger.warn('dsh-superagent: %s', message) }, ticket),

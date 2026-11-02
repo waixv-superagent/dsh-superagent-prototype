@@ -115,7 +115,9 @@ const CommandNameSchema = z.string().regex(/^[A-Za-z0-9._-]+$/).refine(name => n
   .refine(name => !WORKER_COMMANDS.includes(name), `${WORKER_COMMANDS.join(', ')} cannot be blocked`)
 /**
  * Perforce delivery settings, used only when `backend` is `p4`.
- * Credentials are never stored here: `P4TICKETS`, `P4PASSWD` and Swarm tokens come from the installation's environment.
+ * Swarm credentials are not stored here: they come from the installation's P4 ticket. The Jenkins API token is the one
+ * delivery credential these settings hold, because it cannot be derived from the P4 session; the host uses it only for
+ * the read-only pipeline check and redacts it from the result.
  */
 export const P4ConfigSchema = z.object({
   /** `P4PORT`, such as `p4.example.com:1666`; empty leaves the installation's own setting in place. */
@@ -134,6 +136,12 @@ export const P4ConfigSchema = z.object({
   swarmUrl: z.string().trim().max(300).default(''),
   /** Swarm API version prefix, such as `/api/v11`. */
   reviewApi: z.string().trim().max(40).default('/api/v11'),
+  /** Jenkins base URL used to read consoleText; empty uses the testrun URL's origin. */
+  jenkinsUrl: z.string().trim().max(300).default(''),
+  /** Jenkins account for reading consoleText; empty falls back to `user`. */
+  jenkinsUser: z.string().trim().max(100).default(''),
+  /** Jenkins API token for reading consoleText. Stored only in this installation's settings; never printed or committed. */
+  jenkinsToken: z.string().trim().max(500).default(''),
 }).strict()
 /** Executor settings: worker model, concurrency, ticket directory root (empty defaults to `<stateDir>/work`), `prepare` command, blocked commands, and the delivery backend. */
 export const ExecutorConfigSchema = z.object({
