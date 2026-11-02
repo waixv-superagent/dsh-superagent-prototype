@@ -254,6 +254,7 @@ const TEXT = {
   pipelineBlocked: ['流水线阻塞', 'Blocked'],
   pipelineWaiting: ['待你处理', 'Needs you'],
   pipelineRunning: ['跟进中', 'Following'],
+  pipelineBlockedNow: ['{count} 张被流水线卡住，需要你处理', '{count} blocked on the pipeline need you'],
   pipelineBlockedCount: ['{count} 张阻塞', '{count} blocked'],
   pipelineBlockedSub: ['agent 无法自行处理；先看原因，再决定重试还是介入。', 'The agent cannot clear these; read the reason, then retry or step in.'],
   pipelineOpen: ['打开跟进', 'Open follow-up'],
