@@ -13,6 +13,10 @@ export interface EngineOptions {
   executor: Executor
   outbox: Outbox
   prepareTicket?: (ticket: Ticket, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>) => Ticket
+  /** Local pipeline-follow-up skill the ticket's worker hands to its subagent; empty uses the built-in instructions. */
+  pipelineSkill?: string
+  /** The Swarm base URL, so a follow-up gets a review link from a bare review id. */
+  swarmUrl?: () => string
   now?: () => string
   emit?: (event: DomainEvent) => void
 }

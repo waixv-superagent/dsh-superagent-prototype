@@ -127,6 +127,12 @@ describe('TAPD triggers', () => {
   const bug = { id: '42', title: 'Strafe drift', status: 'new', priority: '高', severity: 'normal', owner: 'alice', reporter: 'bob',
     created: '2026-11-01 09:00:00', modified: '2026-11-01 09:30:00', url: 'https://www.tapd.cn/12345678/bugtrace/bugs/view/42', description: 'Repro steps' }
 
+  it('derives the short id from a long id, which is what a P4 description uses', () => {
+    const long = { ...bug, id: '1234567890000123456' }
+    expect(triggerOf(long, config()).meta).toMatchObject({ bugId: '1234567890000123456', shortId: '123456' })
+    // A row that already carries the short id keeps it unchanged.
+    expect(triggerOf(bug, config()).meta).toMatchObject({ shortId: '42' })
+  })
   it('carry the bug revision so an edited bug is a new trigger and an unchanged one a duplicate', () => {
     const first = triggerOf(bug, config())
     expect(first.id).toMatch(/^tapd:42:\d+$/)

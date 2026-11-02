@@ -1,4 +1,4 @@
-﻿/** What the Executor and its workers report about the Assignments that run tickets. */
+/** What the Executor and its workers report about the Assignments that run tickets. */
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, liveTicket, runningAssignment } from './model.ts'
@@ -157,11 +157,14 @@ export class Assignments extends EnginePart {
     // where the ticket waits for the person who can run the build or PIE check. Analysis tickets, with no such delivery, end
     // as before. This is the fact the board shows as "待你验证", and it is why the ticket is not silently closed.
     const deliveredWork = ticket.execution?.changelist !== undefined || !!ticket.execution?.review
-    if (outcome === 'completed' && deliveredWork) {
+    // A pipeline follow-up may report a result after the local gate already passed: a ready report must not reopen the
+    // verification gate, because there is nothing new for the person to check. The pipeline tool, not this report, ends it.
+    const followup = ticket.verification?.state === 'passed' && !!ticket.pipeline
+    if (outcome === 'completed' && deliveredWork && !followup) {
       ticket.verification = { at, state: 'pending' }
       ticket.updatedAt = at
       this.repo.tickets.save(ticket)
-    } else if (outcome) this.tickets.end(ticketId, 'executor', outcome, at)
+    } else if (outcome && !followup) this.tickets.end(ticketId, 'executor', outcome, at)
     return this.require(ticketId)
   }
   /** The ticket, while it is open and `assignmentId` runs it. */

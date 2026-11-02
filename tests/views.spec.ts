@@ -8,7 +8,7 @@ import { SourceRegistry } from '../src/sources/registry.ts'
 import { feishuKind } from '../src/sources/feishu.ts'
 import { githubKind } from '../src/sources/github.ts'
 import { snapshot, threadSummary, ticketSummary, triggerView } from '../src/app/views/records.ts'
-import { basisFacts, ticketDetail, ticketRow } from '../src/app/views/tickets.ts'
+import { basisFacts, ticketDetail, ticketRow, ticketSearch } from '../src/app/views/tickets.ts'
 import { threadDetail } from '../src/app/views/threads.ts'
 import { droppedReplies, sourcesStatus } from '../src/app/views/sources.ts'
 import { overview } from '../src/app/views/overview.ts'
@@ -169,6 +169,22 @@ it('does not show a follow-up that reached a ticket as waiting for an Eval, thou
   expect(threadSummary(snapshot(host), store.threads.get('feishu:oc_1:om_root')!)).toMatchObject({ stage: 'queued', pending: 1 })
 })
 
+it('archives completed Tickets from the board after seven days but keeps them in search', () => {
+  const host = views()
+  live('t1')
+  store.tickets.save({ ...store.tickets.get('t1')!, title: '旧交付', execution: { name: 'w', directory: '/w', assignment: '', changelist: 7001 },
+    verification: { at: '2026-10-01T00:00:00.000Z', state: 'passed', by: 'person' },
+    ended: { at: '2026-10-01T00:00:00.000Z', by: 'executor', outcome: 'completed' } })
+  live('t2')
+  store.tickets.save({ ...store.tickets.get('t2')!, title: '新交付', execution: { name: 'w', directory: '/w', assignment: '', changelist: 7002 },
+    verification: { at: new Date().toISOString(), state: 'passed', by: 'person' },
+    ended: { at: new Date().toISOString(), by: 'executor', outcome: 'completed' } })
+  const page = overview(host, {}, 'v1', load)
+  expect(page.ended.map(ticket => ticket.title)).toEqual(['新交付'])
+  expect(page.endedStats).toMatchObject({ completed: 1, archived: 1 })
+  expect(ticketSearch(host, '7001').tickets[0]).toMatchObject({ archived: true, ticket: { title: '旧交付' } })
+})
+
 const load = { running: 0, queued: 0 }
 const problems = (host: ReturnType<typeof views>, health: Parameters<typeof overview>[1] = {}) =>
   overview(host, health, 'v1', load).problems
@@ -302,6 +318,24 @@ it('names a bot\'s Mandate as a bot once the Policy no longer lists it', () => {
   expect(ticketDetail(host, 't1')!.mandate.actor).toEqual({ source: 'feishu', id: 'cli_removed', name: feishuKind.policy!.unnamed!.bot })
 })
 
+it('finds Tickets by id, CL, review, title or requester, and marks archived completed work', () => {
+  const host = views()
+  live('t1')
+  store.tickets.save({ ...store.tickets.get('t1')!, title: '修复移动普攻后接 Q 技能无法起飞', origin: { triggerId: 'e1', triggerIds: ['e1'] },
+    execution: { name: 'w', directory: '/w', assignment: '',
+    changelist: 123456, review: '654321' } })
+  store.triggers.save(message('e1', { source: 'feishu', id: 'ou_alice' }))
+  const byCl = ticketSearch(host, 'CL 123456')
+  expect(byCl.tickets[0]).toMatchObject({ ticket: { id: 't1' }, match: { field: 'changelist', text: 'CL 123456' } })
+  expect(ticketSearch(host, '654321').tickets[0]).toMatchObject({ match: { field: 'review', text: '654321' } })
+  expect(ticketSearch(host, 'Q 技能').tickets[0]).toMatchObject({ match: { field: 'title' } })
+  expect(ticketSearch(host, 'Alice').tickets[0]).toMatchObject({ match: { field: 'actor', text: 'Alice' } })
+  expect(ticketSearch(host, 'nothing-matches-this').tickets).toEqual([])
+  // A completed Ticket leaves the board after seven days but stays searchable, flagged so the panel can say it is archived.
+  store.tickets.save({ ...store.tickets.get('t1')!, ended: { at: '2026-10-01T00:00:00.000Z', by: 'executor', outcome: 'completed' },
+    updatedAt: '2026-10-01T00:00:00.000Z' })
+  expect(ticketSearch(host, '123456').tickets[0]).toMatchObject({ archived: true })
+})
 it('offers a person to send a follow-up to Eval while a ticket decides it, or once nothing did', () => {
   const host = views()
   live('t1')
@@ -351,3 +385,4 @@ it('reads each ticket a page\'s follow-ups reached once, and nothing for a messa
   expect(followupOwners(store.triggers.get('f3')!, records)).toEqual([])
   expect([records.tickets.get, records.threads.get].map(read => read.mock.calls.length)).toEqual([0, 0])
 })
+

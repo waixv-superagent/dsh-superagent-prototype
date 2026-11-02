@@ -132,6 +132,8 @@ export type DecisionRow = ApiResponse<'GET decisions'>['items'][number]
 export type Problem = ApiResponse<'GET overview'>['problems'][number]
 export type DroppedReply = SourceStatusRow['dropped'][number]
 export type SearchView = ApiResponse<'GET search'>
+export type TicketSearchView = ApiResponse<'GET tickets/search'>
+export type TicketSearchHit = TicketSearchView['tickets'][number]
 export type TicketSummary = SearchView['tickets'][number]
 export type { TicketStage }
 export type HistoryView = ApiResponse<'GET policy/history'>

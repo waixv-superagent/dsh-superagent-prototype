@@ -1,11 +1,11 @@
 /** Ticket list, ticket detail, mandate basis formatting, and executor load views. */
-import { liveTicket, pendingPlan, planLines, threadKey, ticketStage, type AcceptMode, type AdmissionCell, type MandateBasis, type Ticket,
-  type TicketStage } from '../../core/index.ts'
+import { completedArchived, latestReport, liveTicket, pendingPlan, planLines, threadKey, ticketStage, type AcceptMode, type AdmissionCell,
+  type MandateBasis, type Ticket, type TicketStage } from '../../core/index.ts'
 import { workerSessionId } from '../../executor/dsh.ts'
 import { KV } from '../../kv.ts'
 import type { Store } from '../store.ts'
-import { channelLink, decisionView, delivered, newestFirst, page, snapshot, threadSummary, ticketLine, type Snapshot,
-  type ViewHost } from './records.ts'
+import { channelLink, decisionView, delivered, newestFirst, page, snapshot, threadSummary, threadTitle, ticketLine, ticketSummary,
+  type Snapshot, type ViewHost } from './records.ts'
 import { markdown, preview } from './text.ts'
 
 export type BasisFact =
@@ -48,11 +48,74 @@ export function ticketList(host: ViewHost, stage: 'open' | TicketStage['stage'] 
     const own = ticketStage(ticket)
     return own.stage === stage
   }
-  const tickets = (stage === 'ended' || stage === 'unverified' || stage === 'verify' ? store.tickets.list() : store.tickets.open()).filter(shown).sort(newestFirst)
+  const tickets = (stage === 'ended' || stage === 'unverified' || stage === 'verify' ? store.tickets.list() : store.tickets.open())
+    .filter(ticket => !completedArchived(ticket)).filter(shown).sort(newestFirst)
   const result = page(tickets, offset, limit)
   return { ...result, items: result.items.map(ticket => ticketRow(view, ticket)) }
 }
 export type TicketListView = ReturnType<typeof ticketList>
+/** Why a search hit matched, in data the panel can label without guessing: the field and the concrete value it saw. */
+export type TicketMatch = { field: 'id' | 'changelist' | 'review' | 'title' | 'summary' | 'thread' | 'actor'; text: string }
+export type TicketSearchHit = { ticket: ReturnType<typeof ticketSummary>; match: TicketMatch; archived?: true }
+/**
+ * Finds Tickets by what a person remembers: an id, a changelist, a review, a title or summary phrase, a Thread, or the
+ * requester. Results rank identifiers above text and recently updated work above stale work; archived Tickets stay
+ * findable but carry `archived` so the panel can say why they are not on the board.
+ */
+export function ticketSearch(host: ViewHost, query: string, limit = 8) {
+  const value = query.trim()
+  if (!value) return { tickets: [] as TicketSearchHit[], total: 0 }
+  const view = snapshot(host)
+  const { store } = view
+  const lower = value.toLowerCase()
+  const bare = lower.replace(/^#/, '')
+  const terms = lower.split(/\s+/).filter(Boolean)
+  const cl = /^(?:cl\s*)?#?(\d{4,})$/i.exec(value)?.[1]
+  const reviewNumber = /(?:^|\/)(\d{3,})\/?$/.exec(value)?.[1]
+  const best = (ticket: Ticket): { score: number; match: TicketMatch } | undefined => {
+    let found: { score: number; match: TicketMatch } | undefined
+    const consider = (score: number, field: TicketMatch['field'], text: string) => {
+      if (!found || score > found.score) found = { score, match: { field, text } }
+    }
+    if (ticket.id.toLowerCase() === bare || bare.length >= 6 && ticket.id.toLowerCase().startsWith(bare)) {
+      consider(1000, 'id', `#${ticket.id.slice(0, 8)}`)
+    }
+    if (cl && ticket.execution?.changelist === Number(cl)) consider(900, 'changelist', `CL ${ticket.execution.changelist}`)
+    const review = ticket.execution?.review
+    if (review) {
+      const reviewLower = review.toLowerCase()
+      if (reviewLower === lower || reviewLower.includes(lower) || reviewNumber && reviewLower.includes(reviewNumber)) {
+        consider(800, 'review', review)
+      }
+    }
+    const title = ticket.title.toLowerCase()
+    if (terms.every(term => title.includes(term))) consider(500 + (title.includes(lower) ? 40 : 0), 'title', value)
+    const summary = latestReport(ticket)?.summary ?? ''
+    if (summary && terms.every(term => summary.toLowerCase().includes(term))) {
+      consider(300, 'summary', preview(summary, 80))
+    }
+    const threadKeys = [...(ticket.follows ?? []).map(follow => follow.thread), ...view.threadsOf(ticket.id).map(thread => thread.key)]
+    for (const key of threadKeys) {
+      const thread = store.threads.get(key)
+      const titleText = thread ? threadTitle(store, thread) : key
+      if (key.toLowerCase().includes(lower) || titleText.toLowerCase().includes(lower)) consider(700, 'thread', titleText)
+    }
+    const trigger = store.triggers.get(ticket.origin.triggerId)
+    const actor = trigger ? view.actor(trigger.actor, trigger.human) : undefined
+    if (actor) {
+      const name = typeof actor.name === 'string' ? actor.name : actor.name?.zh || actor.name?.en || ''
+      if (actor.id.toLowerCase().includes(lower) || name.toLowerCase().includes(lower)) consider(600, 'actor', name || actor.id)
+    }
+    return found
+  }
+  const hits = store.tickets.list().flatMap(ticket => {
+    const found = best(ticket)
+    return found ? [{ ticket, ...found }] : []
+  }).sort((left, right) => right.score - left.score || right.ticket.updatedAt.localeCompare(left.ticket.updatedAt))
+  return { total: hits.length, tickets: hits.slice(0, Math.max(1, Math.min(limit, 20))).map(({ ticket, match }) =>
+    ({ ticket: ticketSummary(ticket), match, ...completedArchived(ticket) ? { archived: true as const } : {} })) }
+}
+export type TicketSearchView = ReturnType<typeof ticketSearch>
 /** The message a plan card asked from: its own link, so the panel opens the question rather than the chat's latest message. */
 function questionUrl(view: Snapshot, ticket: Pick<Ticket, 'id'>): string | undefined {
   const cards = view.store.get(KV.feishu.cards) ?? {}

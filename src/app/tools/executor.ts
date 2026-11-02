@@ -1,4 +1,4 @@
-﻿/** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, and reporting status. */
+/** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, and reporting status. */
 import { z } from 'zod'
 import { liveTicket, ticketPhase, type EngineForExecutor, type Ticket } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
@@ -12,7 +12,8 @@ import type { Sessions } from '../sessions.ts'
 import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
 
 export interface ExecutorToolsHost {
-  readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'submitPlan' | 'advancePhase'>
+  readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'submitPlan' | 'advancePhase'
+    | 'recordPipeline'>
   readonly store: Pick<Store, 'tickets' | 'replyStatus' | 'atomic'>
   readonly sessions: Pick<Sessions, 'relay' | 'notify' | 'prompt'>
   readonly resources: ResourceHost
@@ -136,6 +137,22 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           `Waiting for a person: ${result.attention.question}\nThey can answer here in this Session or in the ticket's channel; either reaches this ticket.`,
           { inject: 'Waiting for a person' }).catch(() => undefined)
         return result
+      },
+    }),
+    tool({
+      name: 'orchestrator_pipeline',
+      description: 'Record where a delivered change stands after local verification: running, blocked with the reason a person must act on, '
+        + 'or merged. Merged completes the ticket; blocked keeps it open at the top of the pipeline lane.',
+      schema: z.object({
+        state: z.enum(['running', 'blocked', 'merged']).describe('merged once the change is in the mainline; blocked when the agent cannot clear it itself.'),
+        url: z.string().trim().max(500).optional().describe('The review or pipeline URL a person can open.'),
+        reason: z.string().trim().max(2000).optional().describe('Why it is blocked and what a person must do; required for blocked.'),
+        manual: z.boolean().optional().describe('True when a person has to intervene; false only when the agent will retry on its own.'),
+        check: z.string().trim().max(500).optional().describe('The last observed check, short enough for a board card.'),
+      }).strict(),
+      execute: async args => {
+        const updated = host.engine.recordPipeline(ticketId, args)
+        return { state: updated.pipeline?.state, completed: !!updated.ended }
       },
     }),
   ]

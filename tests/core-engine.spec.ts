@@ -1,4 +1,4 @@
-﻿import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Engine, MemoryRepositories, UserError, followupOwners, key, runningAssignment, ticketOutcome, ticketStage,
   waitsForPerson } from '../src/core/index.ts'
 import type { Assessor, Assignment, Candidate, EngineOptions, Executor, OutboundMessage, Outcome, Policy, Ticket, Trigger } from '../src/core/index.ts'
@@ -287,7 +287,7 @@ describe('subscription fan-out', () => {
     // Confirming records the person's decision only: the ticket's changelist is untouched, so submitting stays theirs.
     expect(h.repo.tickets.get(id)!.execution?.changelist).toBe(123456)
   })
-  it('opens local verification only for delivered work, and a person either passes it or sends it back with a note', () => {
+  it('opens local verification only for delivered work, then hands the verified change to the pipeline follow-up', () => {
     const analysis = harness()
     const answer = accepted(analysis)
     // Analysis work has nothing to run locally: a ready report still ends the ticket as before.
@@ -315,14 +315,21 @@ describe('subscription fan-out', () => {
     expect(returnNote?.kind === 'text' && returnNote.text).toContain('PIE 里 Q 技能仍然会卡住')
     expect(h.executor.start).toHaveBeenCalledTimes(2)
 
-    // The worker delivers again: the gate reopens, and passing it ends the ticket as completed by a person, never a submit.
+    // The worker delivers again: the gate reopens, and passing it hands the delivered change to the independent pipeline
+    // follow-up; only a merged observation completes the Ticket, and it is recorded as the pipeline's, not a person's check.
     h.engine.report(id, { state: 'ready', summary: 'fixed', delivery: { changelist: 123456 } })
     expect(h.repo.tickets.get(id)!.verification?.state).toBe('pending')
     const passed = h.engine.verifyTicket(id)
-    expect(passed.ended).toMatchObject({ by: 'human', outcome: 'completed' })
+    expect(passed.ended).toBeUndefined()
     expect(passed.verification).toMatchObject({ state: 'passed', by: 'person' })
-    expect(passed.execution?.changelist).toBe(123456)
-    expect(passed.confirmed).toBeUndefined()
+    expect(passed.pipeline).toMatchObject({ state: 'running' })
+    expect(passed.assignments.at(-1)).toMatchObject({ state: 'pending' })
+    expect(h.executor.start).toHaveBeenCalledTimes(3)
+    const merged = h.engine.recordPipeline(id, { state: 'merged', check: 'CL submitted; review merged' })
+    expect(merged.ended).toMatchObject({ by: 'executor', outcome: 'completed' })
+    expect(merged.verification).toMatchObject({ state: 'passed', by: 'person' })
+    expect(merged.execution?.changelist).toBe(123456)
+    expect(merged.confirmed).toBeUndefined()
     expect(() => h.engine.verifyTicket(id)).toThrow(/already recorded local verification/)
     expect(() => h.engine.reworkTicket(id, 'again')).toThrow(/Ticket has ended/)
   })

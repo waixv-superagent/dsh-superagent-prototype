@@ -9,9 +9,9 @@ import type { OverviewView } from './views/overview.ts'
 import type { SettingsView } from './views/settings.ts'
 import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
-import type { TicketListView } from './views/tickets.ts'
+import type { TicketListView, TicketSearchView } from './views/tickets.ts'
 
-export const TICKET_FILTERS = ['open', 'person', 'verify', 'unverified', 'working', 'idle', 'ended'] as const
+export const TICKET_FILTERS = ['open', 'person', 'verify', 'unverified', 'working', 'idle', 'pipeline', 'ended'] as const
 export const THREAD_FILTERS = ['subscribed', 'evaluating', 'recent', 'all'] as const
 export type TicketFilter = typeof TICKET_FILTERS[number]
 export type ThreadFilter = typeof THREAD_FILTERS[number]
@@ -37,6 +37,8 @@ export interface Api {
   /** Withdraws a waiting Channel message, so it is never sent. */
   'POST outbox/:id/withdraw': { response: { withdrawn: true } }
   'GET tickets': { query?: Paged & { state?: TicketFilter }; response: TicketListView }
+  /** Ticket-first search for the Overview box, ordered by match strength rather than recency alone. */
+  'GET tickets/search': { query: { q: string; limit?: number }; response: TicketSearchView }
   'GET tickets/:id': { response: TicketPageView }
   /** Live execution activity of the ticket's worker; the panel polls the summary collapsed and the reasoning text expanded. */
   'GET tickets/:id/activity': { query?: { after?: number; thinking?: '1' }; response: ActivityView }
@@ -48,6 +50,11 @@ export interface Api {
   'POST tickets/:id/confirm': { response: { confirmed: true } }
   /** A person's local check of delivered work passed; an open ticket ends as completed by a person. */
   'POST tickets/:id/verify': { response: { verified: true } }
+  /** A follow-up observation: `merged` completes the ticket, `blocked` puts it at the top of the pipeline lane for a person. */
+  'POST tickets/:id/pipeline': { body: { state: 'running' | 'blocked' | 'merged'; url?: string; reason?: string; manual?: boolean;
+    check?: string }; response: { updated: true; completed: boolean } }
+  /** A person clears a pipeline blocker and starts the follow-up again. */
+  'POST tickets/:id/pipeline/check': { response: { resumed: true } }
   /** A person's local check failed: the ticket returns to implement with their note as the next Input. */
   'POST tickets/:id/rework': { body: { note?: string }; response: { reworking: true } }
   'POST executor/pause': { body: { paused: boolean }; response: { paused: boolean } }

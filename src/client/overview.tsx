@@ -1,7 +1,7 @@
 /** Overview: the duty desk. One verdict, decision cards for Tickets waiting on a person, a running lane, and recently ended work. */
-import { useState, type ReactNode } from 'react'
-import { usePoll, type Problem, type TicketRow } from './api.ts'
-import { Button, Icon, Tag } from './controls.tsx'
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { usePoll, type Problem, type TicketRow, type TicketSearchView } from './api.ts'
+import { Button, Icon, Input, Tag } from './controls.tsx'
 import { ticketMark } from './marks.ts'
 import { useAction, usePanel, usePanelData } from './provider.tsx'
 import { ThreadChip } from './rows.tsx'
@@ -94,7 +94,7 @@ function DecisionCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
     <header className="dt-deck-card-head">
       <span className="dt-deck-card-kind"><Icon name={mark.icon} size={13} />{mark.label}</span>
       <span className="dt-deck-card-when"><When at={ticket.updatedAt} /></span>
-      <span className="dt-deck-card-id">#{ticket.id}</span>
+      <span className="dt-deck-card-id" title={ticket.id}>#{ticket.id.slice(0, 8)}</span>
     </header>
     <button type="button" className="dt-deck-card-title" onClick={open}>{ticket.title}</button>
     {body && <p className={ticket.note?.error ? 'dt-deck-card-body dt-deck-card-body-error' : 'dt-deck-card-body'}>{body}</p>}
@@ -215,12 +215,48 @@ function VerifyCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () =>
   </article>
 }
 
+/**
+ * A delivered ticket being followed through its review and pipeline. A blocked one that needs a person sits at the top of
+ * the lane; a running one is still moving, so the card leans on the last check and the review link instead of a verdict.
+ */
+function PipelineCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () => Promise<void> }) {
+  const { t, call, notify, navigate } = usePanel()
+  const blocked = ticket.stage === 'pipeline' && ticket.action === 'blocked'
+  const pipeline = ticket.pipeline
+  const delivery = ticket.delivery
+  const open = () => navigate(ticketRoute(ticket.id))
+  const resume = async () => {
+    await call('POST tickets/:id/pipeline/check', { id: ticket.id })
+    notify(t('pipelineResumedNotice'))
+    await onChanged()
+  }
+  return <article className="dt-pipeline-card" data-blocked={blocked || undefined}>
+    <header className="dt-pipeline-head">
+      <Tag tone={blocked ? 'danger' : 'info'}>{t(blocked ? 'pipelineBlocked' : 'pipelineRunning')}</Tag>
+      <span className="dt-pipeline-age"><When at={pipeline?.at ?? ticket.updatedAt} /></span>
+    </header>
+    <button type="button" className="dt-pipeline-title" onClick={open}>{ticket.title}</button>
+    {pipeline?.reason && <p className="dt-pipeline-reason">{pipeline.reason}</p>}
+    {!pipeline?.reason && pipeline?.check && <p className="dt-pipeline-check">{pipeline.check}</p>}
+    <div className="dt-pipeline-facts">
+      {delivery?.changelist !== undefined && <span className="dt-verify-cl">CL {delivery.changelist}</span>}
+      {pipeline?.url && <a className="dt-pipeline-link" href={pipeline.url} target="_blank" rel="noreferrer"
+        onClick={event => event.stopPropagation()}>{t('pipelineOpenReview')}</a>}
+      {delivery?.review && !pipeline?.url && <span className="dt-pipeline-review">{delivery.review}</span>}
+    </div>
+    <footer className="dt-pipeline-foot">
+      <Button variant={blocked ? 'primary' : 'outline'} size="sm" onClick={open}>{t(blocked ? 'pipelineHandle' : 'pipelineOpen')}</Button>
+      {blocked && <Button variant="ghost" size="sm" onClick={() => { void resume() }}>{t('pipelineResume')}</Button>}
+    </footer>
+  </article>
+}
+
 /** An ended Ticket with its acceptance source: a person, the worker's own check, an analysis close, or nothing recorded. */
 function EndedCard({ ticket }: { ticket: TicketRow }) {
   const { t, navigate } = usePanel()
   const provenance = ticket.provenance ?? (ticket.verification?.state === 'passed' ? 'person'
     : ticket.delivery?.verification ? 'agent' : 'none')
-  const tone = provenance === 'person' ? 'success' : provenance === 'agent' ? 'warning' : 'quiet'
+  const tone = provenance === 'person' || provenance === 'pipeline' ? 'success' : provenance === 'agent' ? 'warning' : 'quiet'
   return <li className="dt-ended2" data-outcome={ticket.ended?.outcome}>
     <button type="button" className="dt-ended2-title" onClick={() => navigate(ticketRoute(ticket.id))}>{ticket.title}</button>
     <div className="dt-ended2-meta">
@@ -235,7 +271,7 @@ function EndedCard({ ticket }: { ticket: TicketRow }) {
 
 /** One vertical lane of the board: a fixed header, a scrollable list, and an optional "see all" link. */
 function Lane({ tone, title, count, sub, action, empty, children }: {
-  tone: 'decision' | 'verify' | 'run' | 'ended'; title: string; count: number; sub: string; action?: ReactNode; empty: string
+  tone: 'decision' | 'verify' | 'run' | 'pipeline' | 'ended'; title: string; count: number; sub: string; action?: ReactNode; empty: string
   children?: ReactNode
 }) {
   return <section className="dt-board-col" data-tone={tone} aria-label={title}>
@@ -256,6 +292,81 @@ function Figure({ label, value, onClick }: { label: string; value: ReactNode; on
     : value}</dd></div>
 }
 
+/**
+ * The Overview's Ticket-first finder: people remember a title, an id, a CL, a review or the person who asked, not a menu.
+ * Results stay in the page flow above the board, so a search never covers the lanes and the board does not jump under it.
+ */
+function TicketFinder() {
+  const { t, call, navigate } = usePanel()
+  const [query, setQuery] = useState('')
+  const [result, setResult] = useState<TicketSearchView>()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [active, setActive] = useState(0)
+  const latest = useRef(0)
+  useEffect(() => {
+    const text = query.trim()
+    if (text.length < 2) { latest.current++; setResult(undefined); setLoading(false); setError(''); return }
+    const request = ++latest.current
+    const timer = window.setTimeout(() => {
+      setLoading(true)
+      call('GET tickets/search', { query: { q: text, limit: 8 } }).then(value => {
+        if (request !== latest.current) return
+        setResult(value); setActive(0); setError('')
+      }, reason => { if (request === latest.current) setError(reason instanceof Error ? reason.message : String(reason)) })
+        .finally(() => { if (request === latest.current) setLoading(false) })
+    }, /^\d+$/.test(text) ? 0 : 200)
+    return () => window.clearTimeout(timer)
+  }, [query, call])
+  const hits = result?.tickets ?? []
+  const choose = (id: string) => { setQuery(''); setResult(undefined); navigate({ page: 'execution', id }) }
+  const key = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape') { setQuery(''); setResult(undefined); return }
+    if (!hits.length) return
+    if (event.key === 'ArrowDown') { event.preventDefault(); setActive(index => (index + 1) % hits.length) }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); setActive(index => (index - 1 + hits.length) % hits.length) }
+    else if (event.key === 'Enter') { event.preventDefault(); choose(hits[active]!.ticket.id) }
+  }
+  const hint = query.trim().length < 2 ? t('ticketSearchHint') : loading ? t('ticketSearchLoading') : undefined
+  return <section className="dt-finder" aria-label={t('ticketSearchLabel')}>
+    <div className="dt-finder-box">
+      <Input type="search" icon={<Icon name="search" size={15} />} value={query} placeholder={t('ticketSearchPlaceholder')}
+        aria-label={t('ticketSearchLabel')} role="combobox" aria-expanded={hits.length > 0}
+        aria-controls="dt-finder-results" aria-autocomplete="list" aria-activedescendant={hits[active] ? `dt-finder-${hits[active]!.ticket.id}` : undefined}
+        onChange={event => setQuery(event.target.value)} onKeyDown={key} />
+      {hint && <p className="dt-finder-hint">{hint}</p>}
+      {error && <p className="dt-finder-error" role="alert">{error}</p>}
+    </div>
+    {query.trim().length >= 2 && result && <div className="dt-finder-results" id="dt-finder-results" role="listbox" aria-label={t('ticketSearchResults')}>
+      <div className="dt-finder-head">
+        <span>{t('ticketSearchFound', { count: result.total })}</span>
+        {result.total > hits.length && <span>{t('ticketSearchShowing', { shown: hits.length, total: result.total })}</span>}
+      </div>
+      {hits.length === 0 ? <p className="dt-finder-empty">{t('ticketSearchNone')}</p> : <ul className="dt-finder-list">
+        {hits.map((hit, index) => {
+          const mark = ticketMark(t, hit.ticket)
+          return <li key={hit.ticket.id} role="none">
+            <button type="button" id={`dt-finder-${hit.ticket.id}`} role="option" aria-selected={index === active}
+              className="dt-finder-row" data-active={index === active || undefined}
+              onMouseEnter={() => setActive(index)} onClick={() => choose(hit.ticket.id)}>
+              <span className="dt-finder-row-main">
+                <span className="dt-finder-title">{hit.ticket.title}</span>
+                <span className="dt-finder-meta">
+                  <span className="dt-finder-id">#{hit.ticket.id.slice(0, 8)}</span>
+                  <Tag tone={mark.tone}>{mark.label}</Tag>
+                  {hit.archived && <Tag tone="quiet">{t('ticketSearchArchived')}</Tag>}
+                  <span className="dt-finder-match">{t(`ticketSearchField.${hit.match.field}`)} · {hit.match.text}</span>
+                </span>
+              </span>
+              <When at={hit.ticket.ended?.at ?? hit.ticket.updatedAt} />
+            </button>
+          </li>
+        })}
+      </ul>}
+    </div>}
+  </section>
+}
+
 export function OverviewPage() {
   const { t, call, navigate } = usePanel()
   const { setup } = usePanelData()
@@ -263,6 +374,8 @@ export function OverviewPage() {
   if (!data) return <LoadState error={error} loading />
   const person = data.person
   const verification = data.verification ?? []
+  const pipeline = data.pipeline ?? []
+  const blockedPipeline = pipeline.filter(ticket => ticket.stage === 'pipeline' && ticket.action === 'blocked').length
   const working = data.working ?? []
   const idle = data.idle ?? []
   const ended = data.ended ?? []
@@ -307,6 +420,8 @@ export function OverviewPage() {
       {setup?.problem && <p className="dt-verdict-note">{t('executorWaitingSetup')}</p>}
     </section>
 
+    <TicketFinder />
+
     {data.problems.length > 0 && <details className="dt-problems">
       <summary className="dt-problems-head"><span className="dt-problems-title">{t('problems')}</span>
         <span className="dt-problems-count">{data.problems.length}</span>
@@ -340,6 +455,17 @@ export function OverviewPage() {
             none: endedStats.none, cl: endedStats.changelist })}</p>}
         </div>}
         <div className="dt-board-stack">{verification.map(ticket => <VerifyCard key={ticket.id} ticket={ticket} onChanged={reload} />)}</div>
+      </Lane>
+
+      <Lane tone="pipeline" title={t('boardPipelineTitle')} count={pipeline.length} sub={t('boardPipelineSub')}
+        empty={t('boardPipelineEmpty')}
+        action={pipeline.length ? <button type="button" className="dt-board-more" onClick={() => navigate({ page: 'execution', query: { filter: 'pipeline' } })}>
+          {t('boardAllNeeds', { count: pipeline.length })} →</button> : undefined}>
+        {blockedPipeline > 0 && <div className="dt-pipeline-alert">
+          <p>{t('pipelineBlockedNow', { count: blockedPipeline })}</p>
+          <p className="dt-pipeline-alert-sub">{t('pipelineBlockedSub')}</p>
+        </div>}
+        <div className="dt-board-stack">{pipeline.map(ticket => <PipelineCard key={ticket.id} ticket={ticket} onChanged={reload} />)}</div>
       </Lane>
 
       <Lane tone="ended" title={t('boardEnded')} count={ended.length} sub={t('boardEndedSub')} empty={t('boardEndedEmpty')}

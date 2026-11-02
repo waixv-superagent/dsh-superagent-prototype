@@ -28,7 +28,7 @@ import { overview } from './views/overview.ts'
 import { settingsView } from './views/settings.ts'
 import { sourcesStatus, type SetupState } from './views/sources.ts'
 import { decisionList, search, threadDetail, threadList } from './views/threads.ts'
-import { executorLoad, ticketDetail, ticketList } from './views/tickets.ts'
+import { executorLoad, ticketDetail, ticketList, ticketSearch } from './views/tickets.ts'
 
 export interface HttpHost {
   readonly store: Store
@@ -143,6 +143,7 @@ type Routes = { [K in keyof Api]: (input: Input<K>) => ApiResponse<K> | Promise<
 const offset = z.coerce.number().int().nonnegative().catch(0)
 const limit = (fallback: number, max: number) => z.coerce.number().int().positive().catch(fallback).transform(value => Math.min(max, value))
 const TicketsQuery = z.object({ state: z.enum(TICKET_FILTERS).catch('open'), offset, limit: limit(20, 1000) })
+const TicketSearchQuery = z.object({ q: z.string().trim().max(200).default(''), limit: z.coerce.number().int().min(1).max(20).default(8) })
 const ThreadsQuery = z.object({ filter: z.enum(THREAD_FILTERS).catch('subscribed'), offset, limit: limit(20, 1000) })
 const ThreadQuery = z.object({ limit: limit(50, 100), before: z.string().optional(), around: z.string().optional() })
 const DecisionsQuery = z.object({ kind: z.string().default(''), window: z.literal('24h').optional().catch(undefined), offset,
@@ -155,6 +156,10 @@ const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().no
 const PlanRequest = z.object({ decision: z.enum(['approve', 'revise', 'stop']), note: z.string().trim().max(2000).optional() })
 const ActivityQuery = z.object({ after: count.default(0), thinking: z.literal('1').optional() })
 const VerificationRequest = z.object({ note: z.string().trim().max(2000).optional() })
+/** A follow-up observation: `merged` completes, `blocked` needs a person, `running` records a check still in flight. */
+const PipelineRequest = z.object({ state: z.enum(['running', 'blocked', 'merged']),
+  url: z.string().trim().max(500).optional(), reason: z.string().trim().max(2000).optional(),
+  manual: z.boolean().optional(), check: z.string().trim().max(500).optional() }).strict()
 
 function routes(runtime: HttpHost): Routes {
   const { store } = runtime
@@ -206,6 +211,11 @@ function routes(runtime: HttpHost): Routes {
       const { state, offset, limit } = TicketsQuery.parse(query)
       return ticketList(views(runtime), state, offset, limit)
     },
+    // Dedicated Ticket-first search: the Overview box and the header search must not each invent their own ranking.
+    'GET tickets/search': ({ query }) => {
+      const { q, limit } = TicketSearchQuery.parse(query)
+      return ticketSearch(views(runtime), q, limit)
+    },
     'GET tickets/:id': ({ params }) => ticketPage(runtime, params.id),
     'GET tickets/:id/activity': ({ params, query }) => {
       const { after, thinking } = ActivityQuery.parse(query)
@@ -223,6 +233,15 @@ function routes(runtime: HttpHost): Routes {
     'POST tickets/:id/confirm': ({ params }) => { const id = ticket(params.id); runtime.engine.confirmTicket(id); return { confirmed: true } },
     // A person's local check passed: the ticket records it and, while open, ends as completed by a person.
     'POST tickets/:id/verify': ({ params }) => { const id = ticket(params.id); runtime.engine.verifyTicket(id); return { verified: true } },
+    // A follow-up worker or a person records the pipeline state: a merged change completes, a blocked one stays for a person.
+    'POST tickets/:id/pipeline': async ({ params, body }) => {
+      const id = ticket(params.id)
+      const request = PipelineRequest.parse(await body(8_192))
+      const updated = runtime.engine.recordPipeline(id, request)
+      return { updated: true as const, completed: !!updated.ended }
+    },
+    // A person clears the blocker and asks the independent follow-up to run again.
+    'POST tickets/:id/pipeline/check': ({ params }) => { runtime.engine.resumePipeline(ticket(params.id)); return { resumed: true as const } },
     // A person's local check failed: the ticket goes back to implement with their note as the worker's next Input.
     'POST tickets/:id/rework': async ({ params, body }) => {
       const id = ticket(params.id)

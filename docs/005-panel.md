@@ -16,11 +16,11 @@ The tabs follow the workflow: **Overview**, **Source**, **Trigger**, **Eval**, *
 
 | Tab | Shows |
 | --- | --- |
-| Overview | The duty desk as a four-lane board: **Needs your decision · To verify · Running · Recently ended**. The header sums what waits on a person, each lane links to its filtered list, and ended cards name who verified the work (you, the worker, or nobody). Compact system problems and the day's counts sit above the board |
+| Overview | The duty desk as a five-lane board: **Needs your decision · To verify · 流水线 · Running · Recently ended**. The pipeline lane shows blocked follow-ups first, then the oldest running check. The header sums what waits on a person, each lane links to its filtered list, and ended cards name who verified the work (you, the pipeline, or nobody). Compact system problems and the day's counts sit above the board |
 | Source | Source state, setup problems and non-zero counts. Filtered Triggers and dropped messages cover the same 24-hour window as Overview |
 | Trigger | Threads filtered by Subscribed, Evaluating, New Triggers in 24 h, or All Threads. Each Thread shows its Triggers newest first, Decisions and Subscriptions |
 | Eval | Decisions with their reason and matched rules, filtered by 接单与续做 / 闲聊 / 停止 / 忽略 / 未完成 / 全部. 一条带 escalation 的闲聊决策额外显示「升级为工单」和它的类别（缺陷 / 需求），并链到它建的工单 |
-| Execution | Executor state, Pause processing, and Tickets filtered by Open, Pending, To verify, Unverified, Working, Waiting for a Trigger or Ended. Ticket details show a local-verification gate for delivered work, plus actions, authorization, waiting Inputs, Subscriptions and Assignments |
+| Execution | Executor state, Pause processing, and Tickets filtered by Open, Pending, To verify, Unverified, Working, Waiting for a Trigger or Ended. Ticket details show a local-verification gate for delivered work and a pipeline gate once the follow-up starts, plus actions, authorization, waiting Inputs, Subscriptions and Assignments |
 | Settings | Sources, Eval, Execution, Prompts and Deployment. Each group includes its save history |
 
 ### Reading individual records
@@ -44,6 +44,8 @@ Ticket details show the execution history built from its Assignments, Inputs and
 ## Search
 
 The header search finds Triggers by text, id, Feishu message id or a stored link, such as a GitHub comment URL. A Feishu link missing from the original message becomes searchable only after the host reads it during the current process lifetime.
+
+The ticket finder on Overview searches titles, ticket ids, changelists, reviews, Thread ids, actors and summaries. It waits for two characters, queries numbers (ticket ids and CLs) immediately, and shows why each hit matched. Archived Tickets stay searchable and are marked **Archived**; the card shows the first eight characters of a ticket id.
 
 Search also finds Threads by references such as `#12` or a GitHub URL, and Tickets by title or a matching Thread.
 

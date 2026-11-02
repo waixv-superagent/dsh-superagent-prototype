@@ -52,3 +52,5 @@ Call orchestrator_report with progress, ready, blocked, failed or dropped; inclu
 Omit pr_number or use null if no PR exists; never fill it with a placeholder such as 1.
 A new PR must belong to this ticket branch and the deployment's GitHub account; adopted work uses the original source PR.
 ready means reviewed implementation with relevant checks passed.
+Pipeline follow-up is a separate Assignment after local verification: give its subagent the skill path and delivery facts, and record its result with orchestrator_pipeline — merged, blocked with what a person must do, or running with the last check.
+It repairs a missing TAPD short id (plain digits, not the long id or URL) before reshelving and never runs p4 submit; a ready report does not return the gate to waiting.

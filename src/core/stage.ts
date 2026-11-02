@@ -1,8 +1,9 @@
 /** Ticket stage classification and retry eligibility (docs/003). */
 import { awaitsVerification, latestAssignment, waitsForPerson, type Ticket } from './model.ts'
 
-/** High-level execution stage of a ticket: waiting on a person, actively working or queued, idle between turns, or ended. */
+/** High-level execution stage of a ticket: waiting on a person, in pipeline follow-up, actively working or queued, idle between turns, or ended. */
 export type TicketStage = { stage: 'person'; action: 'delivery' | 'answer' | 'review' | 'verify' | 'blocked' | 'failed' }
+  | { stage: 'pipeline'; action: 'running' | 'blocked' }
   | { stage: 'working'; action?: 'queued' } | { stage: 'idle' } | { stage: 'ended' }
 
 /** Classifies a ticket's stage; the rules follow the table in docs/003 in order, where the first matching row wins. */
@@ -11,6 +12,7 @@ export function ticketStage(ticket: Ticket): TicketStage {
   if (ticket.delivery) return { stage: 'person', action: 'delivery' }
   if (awaitsVerification(ticket)) return { stage: 'person', action: 'verify' }
   if (ticket.attention) return { stage: 'person', action: 'answer' }
+  if (ticket.pipeline) return { stage: 'pipeline', action: ticket.pipeline.state === 'blocked' ? 'blocked' : 'running' }
   const assignment = latestAssignment(ticket)
   const report = assignment?.report?.state
   if (report === 'ready') return { stage: 'person', action: 'review' }

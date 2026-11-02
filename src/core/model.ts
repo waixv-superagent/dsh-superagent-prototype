@@ -327,6 +327,11 @@ export interface Ticket {
    * completed ticket, so the board can say who checked it. Absent on analysis tickets and on work delivered before this gate.
    */
   verification?: TicketVerification
+  /**
+   * The follow-up after a person's local check: a delivered change is tracked through its review, pipeline and submit
+   * until it is merged. A blocked pipeline that needs a person stays here instead of silently ending the ticket.
+   */
+  pipeline?: TicketPipeline
   /** The P1 gate: the worker's plan and the person's decision on it (see `core/plan.ts`). */
   plan?: Plan
   /** The phase the ticket is in, `plan` from its creation until a person approves its plan; absent on tickets stored before the gate. */
@@ -353,10 +358,36 @@ export interface TicketVerification {
   at: string
   state: 'pending' | 'passed' | 'failed'
   /** Who answered the pending state; a `pending` one has none. */
-  by?: 'person'
+  by?: 'person' | 'pipeline'
   /** The person's words when they returned the work or accepted it with a caveat. */
   note?: string
 }
+/** What the follow-up stage observed about a delivered change. */
+export type PipelineState = 'running' | 'blocked' | 'merged'
+/**
+ * A delivered change's follow-up: the review and pipeline checks after delivery, and the submit that ends it. `blocked`
+ * with `manual: true` is the case the agent must not paper over: a person has to act before it can proceed. `merged`
+ * means the change is already in the mainline, so the ticket completes without waiting for another check.
+ */
+export interface TicketPipeline {
+  state: PipelineState
+  /** When this state was recorded. */
+  at: string
+  /** Where a person follows it, such as the review or CI URL. */
+  url?: string
+  /** Why it is blocked, in words a person can act on. */
+  reason?: string
+  /** False when the agent may retry on its own; a blocked pipeline that needs a person sets this true. */
+  manual?: boolean
+  /** The last observed check, short enough for a board card. */
+  check?: string
+}
+/** How many days a completed ticket stays on the board before it is archived. */
+export const COMPLETED_RETENTION_DAYS = 7
+/** Whether a completed ticket is past its board retention and should be treated as archived. */
+export const completedArchived = (ticket: Pick<Ticket, 'ended'>, now = new Date().toISOString()): boolean =>
+  ticket.ended?.outcome === 'completed'
+  && Date.parse(ticket.ended.at) + COMPLETED_RETENTION_DAYS * 24 * 60 * 60 * 1000 <= Date.parse(now)
 /** Whether a ticket is open: it has not ended. */
 export const liveTicket = (ticket: Pick<Ticket, 'ended'>): boolean => !ticket.ended
 /** Whether a delivered ticket waits for a person's local verification. */

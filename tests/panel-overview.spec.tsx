@@ -1,12 +1,12 @@
-﻿// @vitest-environment jsdom
+// @vitest-environment jsdom
 // The overview: the duty desk.
 import { expect, it } from 'vitest'
 import { en, zh } from '../src/client/locales.ts'
-import { usePanel, mount, remount, all, find, tab, click, text, type } from './fixtures/panel.tsx'
+import { usePanel, mount, remount, all, find, field, settle, tab, click, text, type } from './fixtures/panel.tsx'
 import { server, ticketSummary, threadSummary } from './fixtures/panel-server.ts'
 
 usePanel()
-it('leads with a verdict and a four-lane board: decisions, verification, running work and recently ended Tickets', async () => {
+it('leads with a verdict and a five-lane board: decisions, verification, pipeline, running work and recently ended Tickets', async () => {
   await mount()
   expect(tab(zh['tab.overview']).getAttribute('aria-selected')).toBe('true')
   expect(all('[role="tab"]').map(tab => tab.textContent)).toEqual(['概览', '来源', '触发', '评估', '执行', '设置'])
@@ -14,8 +14,8 @@ it('leads with a verdict and a four-lane board: decisions, verification, running
   expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('2 件在跑')
   expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('最久的交付已经等了')
   expect(all('.dt-figure').map(figure => figure.textContent)).toEqual(['今日到达12', '已评估5', '接单1', '执行中2 / 3'])
-  expect(all('.dt-board-col-title').map(title => title.textContent)).toEqual(['待你决定', '正在跑', '待你验证', '最近结束'])
-  expect(all('.dt-board-col-count').map(count => count.textContent)).toEqual(['2', '2', '2', '1'])
+  expect(all('.dt-board-col-title').map(title => title.textContent)).toEqual(['待你决定', '正在跑', '待你验证', '流水线', '最近结束'])
+  expect(all('.dt-board-col-count').map(count => count.textContent)).toEqual(['2', '2', '2', '0', '1'])
   expect(all('.dt-deck-card-title').map(title => title.textContent)).toEqual(['修复回归', '截图工具'])
   expect(all('.dt-deck-card-kind').map(kind => kind.textContent)).toEqual(['待回答', '待处理失败'])
   expect(all('.dt-deck-card-body').map(body => body.textContent)).toEqual(['需要确认按钮颜色',
@@ -29,6 +29,35 @@ it('leads with a verdict and a four-lane board: decisions, verification, running
   expect(all('.dt-ended2-meta .dt-tag')).toEqual([])
   // The historical delivery keeps only the pass action; there is no worker turn left to send it back to.
   expect(all('.dt-verify-card')[1]!.querySelectorAll('.dt-verify-foot button').length).toBe(2)
+})
+
+it('pins a blocked pipeline at the top of its lane and offers the review and a new follow-up', async () => {
+  server.pipeline = [
+    ticketSummary({ id: 'p1', title: '流水线阻塞', pipeline: { state: 'blocked', at: '2026-09-23T00:00:00Z', reason: 'P4_Check 缺少 TAPD 单号',
+      url: 'https://swarm.example/reviews/9', manual: true }, delivery: { lease: [], changelist: 9001 } }, { stage: 'pipeline', action: 'blocked' }),
+    ticketSummary({ id: 'p2', title: '流水线在跑', pipeline: { state: 'running', at: '2026-09-23T00:00:00Z', check: 'ClangTidy 已过' },
+      delivery: { lease: [], changelist: 9002 } }, { stage: 'pipeline', action: 'running' }),
+  ]
+  await mount()
+  expect(all('.dt-board-col-count')[3]?.textContent).toBe('2')
+  const cards = all('.dt-pipeline-card')
+  expect(cards.map(card => card.querySelector('.dt-pipeline-title')?.textContent)).toEqual(['流水线阻塞', '流水线在跑'])
+  expect(cards[0]!.hasAttribute('data-blocked')).toBe(true)
+  expect(cards[0]!.textContent).toContain('P4_Check 缺少 TAPD 单号')
+  expect(cards[0]!.querySelector<HTMLAnchorElement>('.dt-pipeline-link')?.href).toBe('https://swarm.example/reviews/9')
+  await click(find(zh.pipelineResume, '.dt-pipeline-card button'))
+  expect(server.requests.some(request => request.path === 'tickets/p1/pipeline/check' && request.method === 'POST')).toBe(true)
+})
+
+it('finds a Ticket from the Overview and opens it, with the field that matched', async () => {
+  server.ticketSearch = () => ({ total: 1, tickets: [{ ticket: ticketSummary(), match: { field: 'changelist', text: 'CL 123456' } }] })
+  await mount()
+  await type(field<HTMLInputElement>(zh.ticketSearchLabel), '123456')
+  await settle()
+  expect(all('.dt-finder-row')).toHaveLength(1)
+  expect(document.querySelector('.dt-finder-match')?.textContent).toBe('CL · CL 123456')
+  await click(all('.dt-finder-row')[0]!)
+  expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('修复回归')
 })
 
 it('passes delivered work from its verification card, or sends it back with a note', async () => {
@@ -94,6 +123,7 @@ it('goes quiet when nothing needs a person and nothing is running', async () => 
   expect(document.querySelector('.dt-verdict-title')?.textContent).toBe('现在没有需要你的事')
   expect(text()).toContain(zh.boardDecisionEmpty)
   expect(text()).toContain(zh.boardVerifyEmpty)
+  expect(text()).toContain(zh.boardPipelineEmpty)
   expect(text()).toContain(zh.boardRunningEmpty)
   expect(text()).toContain(zh.boardEndedEmpty)
 })
@@ -133,7 +163,7 @@ it('shows the duty desk in English', async () => {
   await mount(en)
   expect(document.querySelector('.dt-verdict-title')?.textContent).toBe('2 to verify·2 waiting on you')
   expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('2 running')
-  expect(all('.dt-board-col-title').map(title => title.textContent)).toEqual(['Needs your decision', 'Running', 'To verify', 'Recently ended'])
+  expect(all('.dt-board-col-title').map(title => title.textContent)).toEqual(['Needs your decision', 'Running', 'To verify', 'Pipeline', 'Recently ended'])
   expect(all('.dt-deck-card-kind').map(kind => kind.textContent)).toEqual([en['stage.answer'], en['stage.failed']])
   expect(all('.dt-deck-card-foot button').map(button => button.textContent)).toContain(en.retry)
   expect(all('.dt-verify-badge').map(badge => badge.textContent)).toEqual([en.verifyWorkerBadge, en.verifyWorkerBadge])
@@ -194,4 +224,5 @@ it('shows paused processing as a system problem with its resume action', async (
   await click(zh.confirm)
   expect(server.requests.find(request => request.path === 'executor/pause')).toMatchObject({ method: 'POST', body: { paused: false } })
 })
+
 

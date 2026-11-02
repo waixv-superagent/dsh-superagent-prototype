@@ -1,4 +1,4 @@
-﻿/** TAPD source kind: reads the bugs of one person, read-only, and turns every relevant change into a Trigger on a per-bug Thread. */
+/** TAPD source kind: reads the bugs of one person, read-only, and turns every relevant change into a Trigger on a per-bug Thread. */
 import type { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
 import type { Trigger } from '../core/index.ts'
@@ -43,9 +43,14 @@ const TapdConfigSchema = z.object({
 }).strict()
 export type TapdConfig = z.infer<typeof TapdConfigSchema>
 
+/** TAPD's long id is the workspace shard followed by the zero-padded short id: 1234567890000123456 -> 123456. */
+export const shortIdOf = (id: string): string => id.length > 10 ? id.slice(10).replace(/^0+/, '') : id
+
 /** One TAPD bug as the Source needs it; a missing field stays empty instead of being guessed. */
 export interface TapdBug {
   id: string
+  /** The short id TAPD shows in its UI: a long id's last shard segment without leading zeros (see the shard_id mapping). */
+  shortId?: string
   title: string
   status: string
   priority: string
@@ -127,8 +132,10 @@ export function plainText(html: string): string {
 export function normalizeBug(row: { Bug?: Record<string, unknown> }, config: Pick<TapdConfig, 'workspaceId'>): TapdBug {
   const bug = row?.Bug ?? {}
   const id = String(bug.id ?? '')
+  const shortId = shortIdOf(id)
   return {
     id,
+    shortId,
     title: String(bug.title ?? '').trim(),
     status: String(bug.status ?? ''),
     priority: String(bug.priority_label ?? bug.priority ?? ''),
@@ -215,7 +222,7 @@ export function triggerOf(bug: TapdBug, config: Pick<TapdConfig, 'workspaceId' |
     at,
     text: bug.description ? `${bug.title}\n\n${bug.description}` : bug.title,
     url: bug.url,
-    meta: { bugId: bug.id, workspaceId: config.workspaceId, kind: 'bug', status: bug.status, priority: bug.priority,
+    meta: { bugId: bug.id, shortId: bug.shortId ?? shortIdOf(bug.id), workspaceId: config.workspaceId, kind: 'bug', status: bug.status, priority: bug.priority,
       severity: bug.severity, owner: bug.owner || config.owner, people: owners, reporter: bug.reporter, created: bug.created,
       modified: bug.modified },
   }
@@ -303,11 +310,13 @@ export const tapdKind: SourceKind<TapdConfig> = {
   environment: {
     variables: [
       { key: 'DSH_SUPERAGENT_TAPD_BUG_ID', description: { zh: '接下工单的 TAPD 缺陷 ID；工单不是从 TAPD 来的时为空', en: 'ID of the TAPD bug that started the ticket; empty when the ticket did not start on TAPD' } },
+      { key: 'DSH_SUPERAGENT_TAPD_SHORT_ID', description: { zh: '这条缺陷的 TAPD 短单号（P4 描述首行用）', en: 'TAPD short id of that bug, for the first line of a P4 description' } },
       { key: 'DSH_SUPERAGENT_TAPD_BUG_URL', description: { zh: '这条缺陷在 TAPD 里的链接', en: 'Link to that bug in TAPD' } },
       { key: 'DSH_SUPERAGENT_TAPD_WORKSPACE', description: { zh: '缺陷所在的 TAPD 项目 ID', en: 'TAPD workspace the bug lives in' } },
     ],
     values: ({ trigger }) => ({
       DSH_SUPERAGENT_TAPD_BUG_ID: trigger?.threads[0]?.source === SOURCE ? String(trigger.meta.bugId ?? '') : '',
+      DSH_SUPERAGENT_TAPD_SHORT_ID: trigger?.threads[0]?.source === SOURCE ? String(trigger.meta.shortId ?? '') : '',
       DSH_SUPERAGENT_TAPD_BUG_URL: trigger?.threads[0]?.source === SOURCE ? String(trigger.url ?? '') : '',
       DSH_SUPERAGENT_TAPD_WORKSPACE: trigger?.threads[0]?.source === SOURCE ? String(trigger.meta.workspaceId ?? '') : '',
     }),

@@ -306,6 +306,24 @@ it('shows delivered work waiting for a person\'s local verification, with the wo
     && JSON.stringify(request.body).includes('PIE 里 Q 技能仍然会卡住'))).toBe(true)
 })
 
+it('shows the pipeline gate with the last check and clears a blocker on the ticket page', async () => {
+  const base = server.ticketDetails.t1!
+  server.ticketDetails.t11 = { ...base, id: 't11', title: '流水线阻塞单', stage: 'pipeline' as const, action: 'blocked' as const,
+    actions: { retry: false, stop: false, confirm: false, verify: false, rework: false },
+    verification: { at: '2026-09-23T00:00:00Z', state: 'passed' as const, by: 'person' as const },
+    pipeline: { state: 'blocked' as const, at: '2026-09-23T00:00:00Z', reason: 'P4_Check 缺少 TAPD 单号',
+      url: 'https://swarm.example/reviews/9', check: 'Entry 失败: no TAPD id' },
+    delivery: { lease: [], changelist: 9001, review: '9' } }
+  at({ page: 'execution', id: 't11' })
+  await mount()
+  expect(text()).toContain(zh.pipelineGateBlockedTitle)
+  expect(document.querySelector('.dt-pipeline-gate-reason')?.textContent).toBe('P4_Check 缺少 TAPD 单号')
+  expect(text()).toContain('Entry 失败: no TAPD id')
+  expect(document.querySelector('.dt-pipeline-gate-facts a')?.getAttribute('href')).toBe('https://swarm.example/reviews/9')
+  await click(find(zh.pipelineResume, '.dt-pipeline-gate-foot button'))
+  expect(server.requests.some(request => request.path === 'tickets/t11/pipeline/check' && request.method === 'POST')).toBe(true)
+})
+
 it('shows a historical delivery as a backfill with concrete checks, not a generic pass template', async () => {
   const base = server.ticketDetails.t1!
   server.ticketDetails.t9 = { ...base, id: 't9', title: '历史交付单', state: 'ended' as const, stage: 'ended' as const,

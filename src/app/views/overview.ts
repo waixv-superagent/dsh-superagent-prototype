@@ -1,5 +1,5 @@
 /** Overview view: active system problems, tickets awaiting human action, executor load, and 24-hour trigger flow. */
-import { reasonText, ticketStage, type Decision, type Thread } from '../../core/index.ts'
+import { completedArchived, reasonText, ticketStage, type Decision, type Thread } from '../../core/index.ts'
 import type { Health } from '../../sources/host.ts'
 import type { SetupProblem } from '../../setup.ts'
 import { anyoneAllowed } from '../../policy.ts'
@@ -67,7 +67,9 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
   ]
   const open = store.tickets.open().sort(newestFirst)
   const all = store.tickets.list()
-  const completed = all.filter(ticket => ticket.ended?.outcome === 'completed')
+  const completedAll = all.filter(ticket => ticket.ended?.outcome === 'completed')
+  // A completed ticket leaves the board after its retention window; it stays queryable by id and search.
+  const completed = completedAll.filter(ticket => !completedArchived(ticket, now))
   // Delivered work a person has not passed is verification work, even when the Ticket ended before the gate existed. It
   // leaves Recently ended for the verification lane, so "completed" never hides work still owed to a person.
   const awaiting = completed.filter(ticket => ticket.verification?.state !== 'passed' && delivered(ticket))
@@ -78,12 +80,17 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
     return stage.stage === 'person' && stage.action === 'verify'
   }), ...awaiting]
   const working = open.filter(ticket => ticketStage(ticket).stage === 'working')
-  const ended = all.filter(ticket => ticket.ended && !awaitingIds.has(ticket.id)).sort(newestFirst).slice(0, 6)
+  // Pipeline work is after delivery: blocked tickets first, then the ones still being followed.
+  const pipeline = open.filter(ticket => ticketStage(ticket).stage === 'pipeline')
+    .sort((left, right) => Number(right.pipeline?.state === 'blocked') - Number(left.pipeline?.state === 'blocked')
+      || (left.pipeline?.at ?? '').localeCompare(right.pipeline?.at ?? ''))
+  const ended = all.filter(ticket => ticket.ended && !awaitingIds.has(ticket.id) && !completedArchived(ticket, now)).sort(newestFirst).slice(0, 6)
   const endedStats = { completed: completed.length, verified: completed.filter(ticket => ticket.verification?.state === 'passed').length,
     pending: awaiting.length,
     agent: completed.filter(ticket => ticket.execution?.verification).length,
     none: completed.filter(ticket => !ticket.execution?.verification).length,
-    changelist: completed.filter(ticket => ticket.execution?.changelist !== undefined).length }
+    changelist: completed.filter(ticket => ticket.execution?.changelist !== undefined).length,
+    archived: completedAll.length - completed.length }
   const stats = Object.values(store.read.triggerStats(since))
   const received = stats.reduce((sum, item) => sum + item.received, 0), filtered = stats.reduce((sum, item) => sum + item.filtered, 0)
   const judgement = store.read.flow(since)
@@ -94,6 +101,7 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
       return stage.stage === 'person' && stage.action !== 'verify'
     }).map(ticket => ticketRow(view, ticket)),
     verification: verification.map(ticket => ticketRow(view, ticket)),
+    pipeline: pipeline.map(ticket => ticketRow(view, ticket)),
     working: working.map(ticket => ticketRow(view, ticket)),
     idle: open.filter(ticket => ticketStage(ticket).stage === 'idle').map(ticket => ticketRow(view, ticket)),
     ended: ended.map(ticket => ticketRow(view, ticket)),

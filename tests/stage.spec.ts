@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canRetry, ticketStage, type Assignment, type ReportState, type Ticket } from '../src/core/index.ts'
+import { canRetry, completedArchived, ticketStage, type Assignment, type ReportState, type Ticket } from '../src/core/index.ts'
 
 const assignment = (overrides: Partial<Assignment> = {}): Assignment => ({ id: 'a', state: 'running', createdAt: '', ...overrides })
 const reported = (state: ReportState, overrides: Partial<Assignment> = {}) => assignment({ report: { state, summary: '', at: '' }, ...overrides })
@@ -23,6 +23,13 @@ describe('ticketStage', () => {
     ['a ready Report of an ended Assignment', ticket({ assignments: [reported('ready', { state: 'ended' })] }), { stage: 'person', action: 'review' }],
     ['a blocked Report', ticket({ assignments: [reported('blocked')] }), { stage: 'person', action: 'blocked' }],
     ['a failed Report', ticket({ assignments: [reported('failed')] }), { stage: 'person', action: 'failed' }],
+    ['a running pipeline after verification', ticket({ pipeline: { state: 'running', at: '' },
+      assignments: [assignment({ state: 'ended' })] }), { stage: 'pipeline', action: 'running' }],
+    ['a blocked pipeline before an answer', ticket({ pipeline: { state: 'blocked', at: '', manual: true }, attention, assignments: [reported('ready')] }),
+      { stage: 'person', action: 'answer' }],
+    ['a blocked pipeline', ticket({ pipeline: { state: 'blocked', at: '', manual: true }, assignments: [assignment({ state: 'ended' })] }),
+      { stage: 'pipeline', action: 'blocked' }],
+    ['an ended pipeline', ticket({ pipeline: { state: 'merged', at: '' }, ended }), { stage: 'ended' }],
     ['a blocked Report a person answered since', ticket({ ...answered, assignments: [reportedAt('blocked')] }), { stage: 'working' }],
     ['no Assignment', ticket({ assignments: [] }), { stage: 'working', action: 'queued' }],
     ['a pending Assignment', ticket({ assignments: [reported('failed', { state: 'ended' }), assignment({ state: 'pending' })] }), { stage: 'working', action: 'queued' }],
@@ -32,6 +39,20 @@ describe('ticketStage', () => {
     ['a progress Report', ticket({ assignments: [reported('progress')] }), { stage: 'working' }],
     ['an ended Ticket', ticket({ ended, attention, assignments: [reported('failed')] }), { stage: 'ended' }],
   ])('%s', (_name, value, stage) => { expect(ticketStage(value)).toEqual(stage) })
+})
+
+describe('completedArchived', () => {
+  const completedAt = '2026-10-01T00:00:00.000Z'
+  const done = ticket({ ended: { at: completedAt, by: 'executor', outcome: 'completed' } })
+  it('keeps a completed Ticket for seven days, then archives it without touching the record', () => {
+    expect(completedArchived(done, '2026-10-07T23:59:59.999Z')).toBe(false)
+    expect(completedArchived(done, '2026-10-08T00:00:00.000Z')).toBe(true)
+    expect(done.ended?.outcome).toBe('completed')
+  })
+  it('does not archive any other outcome', () => {
+    expect(completedArchived(ticket({ ended: { at: completedAt, by: 'human', outcome: 'stopped' } }), '2027-01-01T00:00:00.000Z')).toBe(false)
+    expect(completedArchived(ticket(), '2027-01-01T00:00:00.000Z')).toBe(false)
+  })
 })
 
 describe('canRetry', () => {

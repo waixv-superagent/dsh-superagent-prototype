@@ -9,7 +9,9 @@ Each open Ticket has one stage, determined by what it is waiting for. Read the t
 | Stage | Condition | Panel label |
 | --- | --- | --- |
 | person / delivery | Delivering an Input to the Executor Session failed; it is retried after 2 seconds, then after a delay that doubles up to a minute, and a success, a new Assignment or the Ticket's end clears it | Input undelivered |
+| person / verify | Delivered work, a changelist or a review, waits for the person's local check | Awaiting local verification |
 | person / answer | It has an Attention | Awaiting answer |
+| pipeline / running, blocked | Locally verified delivered work is followed through its review and pipeline; blocked is pinned above running work | Pipeline · Blocked |
 | person / review | The latest Report is `ready` | Awaiting review |
 | person / blocked, failed | The latest Report is `blocked` or `failed`, and no person's message reached the Ticket since | Blocked · Failed |
 | working / queued | No Assignment, or a pending one | Queued |
@@ -92,7 +94,7 @@ Reviews without a body, such as approvals, also arrive as Triggers and can wake 
 ## How a Ticket ends
 
 - **Ready without delivered work:** a `ready` Report with no changelist and no review ends the Ticket as completed. Analysis answers and other work with nothing to run locally end here.
-- **Ready with delivered work:** a `ready` Report that shelves a changelist or names a review does not end the Ticket. It records `verification: pending` and waits for a person's local check (the P4.5 gate, defined in the gates document); passing that check ends it as completed by a person, and returning it starts a new Assignment with the person's note as its first Input.
+- **Ready with delivered work:** a `ready` Report that shelves a changelist or names a review does not end the Ticket. It records `verification: pending` and waits for a person's local check (the P4.5 gate, defined in the gates document); passing that check starts the pipeline follow-up in a fresh Assignment, and returning it starts a new Assignment with the person's note as its first Input. The follow-up repairs a CL description that lacks the TAPD short id before reshelving, using plain digits rather than the long bug id or URL. A merged observation completes the Ticket with `verification.by: pipeline`; a blocked observation keeps it open until a person clears the reason. A completed Ticket leaves the board after seven days and stays findable by id and search.
 - **Nothing to do:** an Executor that finds no work for a person to act on, such as a request that does not reproduce or is superseded, reports `dropped`. The Ticket ends without a message, unless a matched rule asks for one, and a person's later message on its Threads resumes it.
 ### Pull requests
 

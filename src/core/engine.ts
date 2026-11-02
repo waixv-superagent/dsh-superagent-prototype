@@ -1,7 +1,7 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
 import { isoTime, liveTicket } from './model.ts'
-import type { ChannelRef, Decision, PolicyEffect, ThreadRef, Ticket, Trigger } from './model.ts'
+import type { ChannelRef, Decision, PolicyEffect, ThreadRef, Ticket, TicketPipeline, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
 import type { PlanDecision, PlanVia } from './plan.ts'
@@ -184,6 +184,20 @@ export class Engine {
    */
   verifyTicket(ticketId: string): Ticket { return this.repo.atomic(() => this.tickets.verify(ticketId)) }
   /**
+   * Records a follow-up observation about a delivered ticket's pipeline. A `merged` observation completes the ticket,
+   * because the change is already in the mainline; a `blocked` one keeps it open for a person at the top of the pipeline lane.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  recordPipeline(ticketId: string, update: Omit<TicketPipeline, 'at'>): Ticket {
+    return this.repo.atomic(() => this.tickets.recordPipeline(ticketId, update))
+  }
+  /**
+   * A person asks a blocked pipeline follow-up to run again after clearing the blocker; the same independent subagent job
+   * starts in a new Assignment.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  resumePipeline(ticketId: string): Ticket { return this.repo.atomic(() => this.tickets.resumePipeline(ticketId)) }
+  /**
    * A person's local check found a problem: records it and returns the ticket to implement with their words as the next
    * Assignment's first Input, so the worker fixes the delivered work.
    * @throws UserError when the ticket is not open and waiting for local verification.
@@ -315,9 +329,11 @@ export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThre
 /** What the main Session asks of the Engine. */
 export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'>
 /** What people ask of the Engine, through the panel or the main Session. */
-export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'confirmTicket' | 'verifyTicket' | 'reworkTicket' | 'decidePlan' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
+export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'confirmTicket' | 'verifyTicket' | 'recordPipeline' | 'resumePipeline'
+  | 'reworkTicket' | 'decidePlan' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
 /** What Settings tells the Engine. */
 export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
-  | 'assignmentInterrupted' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply' | 'submitPlan' | 'advancePhase'>
+  | 'assignmentInterrupted' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply' | 'submitPlan' | 'advancePhase'
+  | 'recordPipeline'>

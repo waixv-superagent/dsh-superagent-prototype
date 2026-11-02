@@ -138,7 +138,7 @@ async function cardWatch(ctx: SourceContext, signal: AbortSignal): Promise<void>
 async function consumeCards(ctx: SourceContext, signal: AbortSignal): Promise<void> {
   const [file, argv] = commandLine(bot(ctx).cli, ['event', 'consume', 'card.action.trigger', '--as', 'bot'])
   const child = spawn(file, argv,
-    { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1',
+    { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1',
       LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' } })
   const stdout = createInterface({ input: child.stdout }); const stderr = createInterface({ input: child.stderr })
   let chain = Promise.resolve(); let diagnostic = ''; let ready = false
@@ -175,7 +175,7 @@ async function consume(ctx: SourceContext, signal: AbortSignal): Promise<void> {
   // Windows 上 bot 的 lark-cli 是 `.cmd` 包装脚本，直接 spawn 会 EINVAL；commandLine 负责按需经 cmd.exe 转一层。
   const [file, argv] = commandLine(bot(ctx).cli, ['event', 'consume', 'im.message.receive_v1', '--as', 'bot'])
   const child = spawn(file, argv,
-    { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1',
+    { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1',
       LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' } })
   const stdout = createInterface({ input: child.stdout }); const stderr = createInterface({ input: child.stderr })
   let chain = Promise.resolve(); let diagnostic = ''; let ready = false

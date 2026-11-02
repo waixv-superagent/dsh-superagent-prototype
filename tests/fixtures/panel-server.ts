@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Typed fake management API server for panel tests. Implements every route in `src/app/api.ts` and records any
  * undeclared query parameter or body mismatch in `server.misuse`, which `usePanelServer` asserts is empty after each test.
  */
@@ -95,7 +95,9 @@ export interface PanelServer {
   activity: (ticketId: string, query: { after?: string; thinking?: string }) => ActivityView | undefined
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
-  person: TicketRow[]; verification: TicketRow[]; working: TicketRow[]; idle: TicketRow[]; ended: TicketRow[]
+  person: TicketRow[]; verification: TicketRow[]; working: TicketRow[]; idle: TicketRow[]; pipeline: TicketRow[]; ended: TicketRow[]
+  /** Answers `GET tickets/search`; the Overview finder lets a test provide ranked hits. */
+  ticketSearch?: (query: string) => ApiResponse<'GET tickets/search'>
   search: Pick<ApiResponse<'GET search'>, 'items' | 'threads'>; history: HistoryView
   requests: { path: string; method: string; body?: unknown }[]
   /** Requests with undeclared query params or invalid body presence; asserted empty after each test. */
@@ -199,8 +201,9 @@ const overviewView = (): ApiResponse<'GET overview'> => {
         .map(([name, item]) => ({ kind: 'runtime-error' as const, name, detail: item.detail })),
       ...Object.values(server.settings.policy.sources).some(part => part.allowed.length) ? [] : [{ kind: 'no-allowed' as const }],
       ...server.failing.map(outgoing => ({ kind: 'outgoing' as const, outgoing }))],
-    person: server.person, verification: server.verification, working: server.working, idle: server.idle, ended: server.ended,
-    endedStats: { completed: 1, verified: 0, pending: 1, agent: 1, none: 0, changelist: 1 },
+    person: server.person, verification: server.verification, working: server.working, idle: server.idle,
+    pipeline: server.pipeline, ended: server.ended,
+    endedStats: { completed: 1, verified: 0, pending: 1, agent: 1, none: 0, changelist: 1, archived: 0 },
     executor: { running: 2, queued: 0, maxWorkers: server.settings.executor.maxWorkers, idle: 1 },
     flow: { received: 12, filtered: 2, triggers: 10, judged: 5, accepted: 1, evaluating: 0,
       dropped: server.dropped.filter(item => item.dropped.at >= dayAgo()).length },
@@ -273,7 +276,7 @@ function initial(): PanelServer {
     activity: () => undefined,
     working: [ticketSummary({ id: 't5', title: '补 i18n 文案', summary: '第 12 步 · 修改 zh-CN.json' }),
       ticketSummary({ id: 't6', title: '升级依赖', summary: '后台 job · 60 秒无输出', updatedAt: '2026-09-22T23:30:00Z' })],
-    idle: [], ended: [ended],
+    idle: [], pipeline: [], ended: [ended],
     threads: [threadSummary()], threadPages: threadPage,
     person: [ticketSummary({ attention: { id: 'q1', question: '需要确认按钮颜色' }, note: { text: '需要确认按钮颜色', error: false }, reply },
       { stage: 'person', action: 'answer' }),
@@ -317,6 +320,7 @@ const SourceSave = z.object({ enabled: z.boolean(), config: z.unknown() })
 const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET state': { answer: stateView },
   'GET overview': { answer: overviewView },
+  'GET tickets/search': { query: ['q', 'limit'], answer: ({ query }) => server.ticketSearch?.(String(query.q ?? '')) ?? { tickets: [], total: 0 } },
   'GET search': { query: ['q'], answer: async ({ query }) => {
     const q = query.q ?? ''
     await server.searching?.(q)
@@ -384,6 +388,11 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     return ticket.actions.verify ? { verified: true }
       : refuse(400, 'This ticket has no delivered work waiting for local verification', { code: 'nothingToVerify', values: {} })
   } },
+  'POST tickets/:id/pipeline': { body: true, answer: ({ params }) => {
+    if (!ticketOf(params.id)) return refuse(404, 'Ticket not found')
+    return { updated: true, completed: false }
+  } },
+  'POST tickets/:id/pipeline/check': { answer: () => ({ resumed: true }) },
   'POST tickets/:id/rework': { body: true, answer: ({ params }) => {
     const ticket = ticketOf(params.id)
     if (!ticket) return refuse(404, 'Ticket not found')

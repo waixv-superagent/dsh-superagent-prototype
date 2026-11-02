@@ -1,4 +1,4 @@
-﻿# 010 — The TAPD Source
+# 010 — The TAPD Source
 
 This document covers the `tapd` Source kind: a read-only intake that polls the bugs assigned to one person in a TAPD workspace and turns each open bug into a Trigger, so a bug can become a Ticket without anyone restating it. `tapd` never writes to TAPD — no status change, no comment, no field edit — and needs nothing but an API credential in the environment.
 
@@ -51,7 +51,8 @@ A Ticket that came from TAPD gives its Executor:
 
 | Variable | Value |
 | --- | --- |
-| `DSH_SUPERAGENT_TAPD_BUG_ID` | The bug's ID |
+| `DSH_SUPERAGENT_TAPD_BUG_ID` | The bug's long ID |
+| `DSH_SUPERAGENT_TAPD_SHORT_ID` | The bug's short ID, the number a P4 description starts with |
 | `DSH_SUPERAGENT_TAPD_BUG_URL` | The bug's page |
 | `DSH_SUPERAGENT_TAPD_WORKSPACE` | The workspace the bug lives in |
 

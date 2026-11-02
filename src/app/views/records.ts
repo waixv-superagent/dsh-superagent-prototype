@@ -108,6 +108,8 @@ export function triggerView(view: Snapshot, trigger: Trigger, threadDecisions?: 
 export type TriggerView = ReturnType<typeof triggerView>
 /** Single-line summary of why a ticket in the `person` stage is waiting on human action (omitted once answered and back with the Executor). */
 function ticketNote(ticket: Ticket, stage: TicketStage): { text: string; error: boolean } | undefined {
+  if (stage.stage === 'pipeline') return ticket.pipeline?.reason
+    ? { text: preview(ticket.pipeline.reason), error: stage.action === 'blocked' } : undefined
   if (stage.stage !== 'person') return undefined
   if (stage.action === 'answer' && ticket.attention) return { text: preview(ticket.attention.question), error: false }
   if (stage.action === 'delivery' && ticket.delivery) return { text: preview(ticket.delivery.error), error: true }
@@ -122,11 +124,13 @@ export function ticketSummary(ticket: Ticket) {
   // Where an ended completed ticket's verification came from: the person, the worker's own checks, nothing recorded, or
   // an analysis ticket with nothing to run locally. This is what stops "completed" from reading as "verified".
   const provenance = ticket.ended?.outcome === 'completed'
-    ? ticket.verification?.state === 'passed' ? 'person' as const
+    ? ticket.verification?.state === 'passed'
+      ? ticket.verification.by === 'pipeline' ? 'pipeline' as const : 'person' as const
       : delivered(ticket) ? ticket.execution?.verification ? 'agent' as const : 'none' as const
         : 'auto' as const
     : undefined
   return { id: ticket.id, title: ticket.title, state, ...stage, ...note ? { note } : {},
+    ...ticket.pipeline ? { pipeline: ticket.pipeline } : {},
     actions: { retry: canRetry(ticket), stop: liveTicket(ticket), confirm: canConfirm(ticket), verify: canVerify(ticket),
       rework: canRework(ticket) }, strength: ticket.mandate.strength, ended: ticket.ended,
     ...ticket.verification ? { verification: ticket.verification } : {}, ...provenance ? { provenance } : {},

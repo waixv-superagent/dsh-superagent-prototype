@@ -404,6 +404,49 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
     </footer>
   </section>
 }
+/**
+ * The follow-up after local verification: a delivered change is tracked through its review and pipeline until it is in the
+ * mainline. A blocked pipeline says what a person must do; an already merged one completes the Ticket instead of asking
+ * for another check.
+ */
+function PipelineGate({ ticket, onChanged }: { ticket: TicketPageView; onChanged: () => Promise<void> }) {
+  const { t, call, notify } = usePanel()
+  const pipeline = ticket.pipeline
+  if (!pipeline || ticket.state === 'ended') return null
+  const blocked = pipeline.state === 'blocked'
+  const review = pipeline.url ?? ticket.delivery?.review
+  const reviewHref = review && /^https?:\/\//i.test(review) ? review : undefined
+  return <section className="dt-pipeline-gate" data-blocked={blocked || undefined} aria-labelledby="dt-pipeline-gate-title">
+    <header className="dt-pipeline-gate-head">
+      <span className="dt-pipeline-gate-icon" aria-hidden="true"><Icon name="review" size={15} /></span>
+      <div className="dt-pipeline-gate-titles">
+        <h2 id="dt-pipeline-gate-title" className="dt-pipeline-gate-title">{t(blocked ? 'pipelineGateBlockedTitle' : 'pipelineGateTitle')}</h2>
+        <p className="dt-pipeline-gate-sub">{t(blocked ? 'pipelineGateBlockedSub' : 'pipelineGateSub')}</p>
+      </div>
+      <Tag tone={blocked ? 'danger' : 'info'}>{t(blocked ? 'pipelineBlocked' : 'pipelineRunning')}</Tag>
+    </header>
+    <dl className="dt-pipeline-gate-facts">
+      <div><dt>{t('pipelineState')}</dt><dd>{valueLabel(t, 'pipelineState', pipeline.state)}</dd></div>
+      <div><dt>{t('pipelineLastCheck')}</dt><dd>{pipeline.check || t('pipelineNoCheck')}</dd></div>
+      <div><dt>CL</dt><dd>{ticket.delivery?.changelist !== undefined ? ticket.delivery.changelist : t('empty')}</dd></div>
+      <div><dt>review</dt><dd>{reviewHref ? <a href={reviewHref} target="_blank" rel="noreferrer">{reviewLabel(review!)}</a>
+        : review || t('empty')}</dd></div>
+    </dl>
+    {pipeline.reason && <p className="dt-pipeline-gate-reason">{pipeline.reason}</p>}
+    <footer className="dt-pipeline-gate-foot">
+      <ConfirmButton variant="primary" label={t('pipelineMarkMerged')} title={t('pipelineMarkMergedTitle')}
+        message={t('pipelineMarkMergedConfirm', { title: ticket.title })}
+        onConfirm={async () => { await call('POST tickets/:id/pipeline', { id: ticket.id, body: { state: 'merged',
+          ...(review ? { url: review } : {}) } }); notify(t('pipelineMergedNotice')); await onChanged() }} />
+      {blocked && <Button variant="outline" size="sm" onClick={async () => {
+        await call('POST tickets/:id/pipeline/check', { id: ticket.id })
+        notify(t('pipelineResumedNotice')); await onChanged()
+      }}>{t('pipelineResume')}</Button>}
+      {reviewHref && <ActionLink href={reviewHref}>{t('pipelineOpenReview')}</ActionLink>}
+    </footer>
+  </section>
+}
+
 export function TicketPage({ id }: { id: string }) {
   const { t, call, notify } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET tickets/:id', { id }), [id])
@@ -451,10 +494,13 @@ export function TicketPage({ id }: { id: string }) {
     }} />}
     {/* The P2 gate: delivered work is not done until a person has run it locally. It outranks the submit banner below. */}
     <VerificationGate ticket={data} onChanged={reload} />
+    <PipelineGate ticket={data} onChanged={reload} />
     {data.verification?.state === 'passed' && data.state === 'ended' && <div className="dt-verified-strip">
       <Icon name="check" size={14} />
-      <span>{t('verifyVerifiedAt', { time: when(data.verification.at, t('lang')) })}</span>
-      <span className="dt-verified-note">{t('verifyVerifiedNote')}</span>
+      <span>{data.verification.by === 'pipeline'
+        ? t('pipelineMergedAt', { time: when(data.verification.at, t('lang')) })
+        : t('verifyVerifiedAt', { time: when(data.verification.at, t('lang')) })}</span>
+      <span className="dt-verified-note">{data.verification.by === 'pipeline' ? t('pipelineMergedNote') : t('verifyVerifiedNote')}</span>
     </div>}
     {/* Legacy delivery banner for Tickets without a verification gate: what the worker shelved, and the submit a person runs themselves. */}
     {data.delivery?.changelist !== undefined && !data.verification && <div className="dt-banner">

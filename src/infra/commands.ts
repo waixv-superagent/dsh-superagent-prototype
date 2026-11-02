@@ -77,7 +77,10 @@ export class Commands {
   async run(program: string, args: string[], cwd?: string): Promise<string> {
     try {
       const [file, argv] = commandLine(program, args)
+      // `windowsHide` keeps the `cmd.exe` that wraps a `.cmd` CLI from allocating a console: without it every poll
+      // flashes a terminal window, and Feishu backfill issues dozens of calls per round.
       const { stdout } = await exec(file, argv, { cwd, signal: this.signal, timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024,
+        windowsHide: true,
         env: { ...process.env, ...this.environment, GH_PROMPT_DISABLED: '1', LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' } })
       return stdout
     } catch (error) { throw commandError(error, program) }
