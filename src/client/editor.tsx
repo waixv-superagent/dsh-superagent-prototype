@@ -8,7 +8,7 @@ import { usePoll, type EditorPageView, type EditorRow, type EditorTicketRow, typ
 import { Button, Tag } from './controls.tsx'
 import { ticketMark } from './marks.ts'
 import { usePanel } from './provider.tsx'
-import type { Route } from './route.ts'
+import type { BoardFocus, Route } from './route.ts'
 import type { T } from './text.ts'
 import { LoadState, When } from './widgets.tsx'
 
@@ -46,6 +46,16 @@ function holderPhrase(t: T, editor: EditorRow | null): string {
   }
 }
 
+/** One hero count: a door to the board lane behind it, or plain text when that lane has nothing to show. */
+function CountItem({ count, focus, tone, label }: { count: number; focus: BoardFocus
+  tone?: 'live' | 'verify' | 'decide'; label: string }) {
+  const { t, navigate } = usePanel()
+  return count > 0
+    ? <button type="button" className="dt-editor-count" data-count={focus} data-tone={tone} title={t('editorCountJump')}
+      onClick={() => navigate({ page: 'editor', query: { view: 'board', focus } })}>{label}</button>
+    : <span data-count={focus} data-tone={tone}>{label}</span>
+}
+
 function Hero({ data }: { data: EditorPageView }) {
   const { t } = usePanel()
   const { editor, counts, executor } = data
@@ -67,12 +77,14 @@ function Hero({ data }: { data: EditorPageView }) {
       </h2>
       {facts.length > 0 && <p className="dt-editor-facts">{facts.join(' · ')}</p>}
       <p className="dt-editor-counts">
-        <span data-count="working" data-tone={running > 0 ? 'live' : undefined}>{t('editorWorkingCount', { count: running })}</span>
-        {counts.queued > 0 && <span data-count="queued">{t('editorQueuedCount', { count: counts.queued })}</span>}
-        <span data-count="verification" data-tone={counts.verification > 0 ? 'verify' : undefined}>
-          {t('editorVerifyCount', { count: counts.verification })}</span>
-        <span data-count="person" data-tone={counts.person > 0 ? 'decide' : undefined}>
-          {t('editorDecideCount', { count: counts.person })}</span>
+        <CountItem count={running} focus="working" tone={running > 0 ? 'live' : undefined}
+          label={t('editorWorkingCount', { count: running })} />
+        {counts.queued > 0 && <CountItem count={counts.queued} focus="queued"
+          label={t('editorQueuedCount', { count: counts.queued })} />}
+        <CountItem count={counts.verification} focus="verification" tone={counts.verification > 0 ? 'verify' : undefined}
+          label={t('editorVerifyCount', { count: counts.verification })} />
+        <CountItem count={counts.person} focus="person" tone={counts.person > 0 ? 'decide' : undefined}
+          label={t('editorDecideCount', { count: counts.person })} />
       </p>
       <p className="dt-editor-sub">{t('editorPageSub')}</p>
     </div>

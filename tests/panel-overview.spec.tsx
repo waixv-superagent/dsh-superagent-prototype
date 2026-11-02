@@ -2,7 +2,7 @@
 // The overview: the duty desk.
 import { expect, it } from 'vitest'
 import { en, zh } from '../src/client/locales.ts'
-import { usePanel, mount, remount, all, find, field, settle, tab, click, text, type } from './fixtures/panel.tsx'
+import { usePanel, mount, remount, all, at, find, field, settle, tab, click, text, type } from './fixtures/panel.tsx'
 import { server, ticketSummary, threadSummary } from './fixtures/panel-server.ts'
 
 usePanel()
@@ -40,6 +40,15 @@ it('leads with a verdict and a five-lane board: decisions, verification, pipelin
   expect(all('.dt-ended2-meta .dt-tag')).toEqual([])
   // The historical delivery keeps only the pass action; there is no worker turn left to send it back to.
   expect(all('.dt-verify-card')[1]!.querySelectorAll('.dt-verify-foot button').length).toBe(2)
+})
+
+it('rings the lane a stored count focus names when the board is opened cold', async () => {
+  at({ page: 'editor', query: { view: 'board', focus: 'verification' } })
+  await mount()
+  expect(tab(zh.homeViewBoard).getAttribute('aria-selected')).toBe('true')
+  expect(document.querySelector('.dt-verdict')).not.toBeNull()
+  expect(all('.dt-verify-card[data-board-focus]')).toHaveLength(2)
+  expect(all('[data-board-focus]')).toHaveLength(2)
 })
 
 it('shows the editor row in each state, keeping an unreadable probe on the safe side', async () => {

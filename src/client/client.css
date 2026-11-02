@@ -459,6 +459,12 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-run-time { margin-left: auto; flex: none; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); white-space: nowrap; }
 .dt-run-time-stuck { color: var(--dsw-alias-state-warn-primary); }
 .dt-run-alert { margin: 3px 0 0; font-size: 11px; line-height: 16px; color: var(--dsw-alias-state-warn-primary); }
+/* The arrival ring behind an editor hero count: one outer pulse, then the board reads as plain again. */
+@keyframes dt-board-focus { 0% { box-shadow: 0 0 0 2px transparent; } 15% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-brand-primary) 55%, transparent); } 70% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-brand-primary) 55%, transparent); } 100% { box-shadow: 0 0 0 6px transparent; } }
+.dt-board [data-board-focus] { animation: dt-board-focus 2.4s ease-out; scroll-margin: 12px; }
+@media (prefers-reduced-motion: reduce) {
+  .dt-board [data-board-focus] { animation: none; box-shadow: 0 0 0 2px var(--dsw-alias-brand-primary); }
+}
 
 /* The Overview Ticket finder: a query, then a compact list in the page flow; never an overlay that hides the lanes. */
 .dt-finder { display: flex; flex-direction: column; gap: 6px; max-width: 760px; margin: 14px 0 2px; }
@@ -672,6 +678,9 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-editor-hero[data-holder='none'] .dt-editor-holder { color: var(--dsw-alias-state-success-primary); }
 .dt-editor-facts { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-caption); font-variant-numeric: tabular-nums; }
 .dt-editor-counts { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 6px 0 0; font-size: 14px; line-height: 20px; font-weight: 500; color: var(--dsw-alias-label-primary); font-variant-numeric: tabular-nums; }
+.dt-editor-counts .dt-editor-count { padding: 0; border: 0; border-radius: 4px; background: none; font: inherit; font-variant-numeric: inherit; color: inherit; cursor: pointer; }
+.dt-editor-counts .dt-editor-count:hover { color: var(--dsw-alias-brand-primary); text-decoration: underline; text-underline-offset: 2px; }
+.dt-editor-counts .dt-editor-count:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
 .dt-editor-counts [data-count='queued'] { color: var(--dsw-alias-label-caption); }
 .dt-editor-counts [data-tone='live'] { color: var(--dsw-alias-state-success-primary); }
 .dt-editor-counts [data-tone='verify'] { color: var(--dsw-alias-state-warn-primary); }

@@ -63,6 +63,10 @@ it('reads each page a tab remembered with the parameters it takes, and leaves ou
   expect(parseRoute({ page: 'overview' })).toEqual({ page: 'editor', query: { view: 'board' } })
   expect(parseRoute({ page: 'editor', query: { view: 'board' } })).toEqual({ page: 'editor', query: { view: 'board' } })
   expect(parseRoute({ page: 'editor', query: { view: 'nope' } })).toEqual({ page: 'editor' })
+  // A count's arrival cue rides in the route, so a reload lands on the same board; an unknown value is dropped.
+  expect(parseRoute({ page: 'editor', query: { view: 'board', focus: 'verification' } }))
+    .toEqual({ page: 'editor', query: { view: 'board', focus: 'verification' } })
+  expect(parseRoute({ page: 'editor', query: { view: 'board', focus: 'lane' } })).toEqual({ page: 'editor', query: { view: 'board' } })
   expect([parseRoute('editor'), parseRoute(null)]).toEqual([undefined, undefined])
 })
 it('opens the settings that fix each setup problem: the Deployment group, or the card of the Source it names', () => {

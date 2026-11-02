@@ -393,12 +393,12 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/app.tsx` | The panel: header, search, glossary, tabs, the 概览 switch between the editor page and the board, and the page of the current route |
 | `src/client/provider.tsx` | What every page reads from its host: copy, calls, navigation, notices, the state poll, and `restart`, which reads the state quickly while dsh-superagent restarts |
 | `src/client/api.ts` | Calls and polls of the management API, typed by `src/app/api.ts`, and the Decision filters of the Eval status |
-| `src/client/route.ts` | The tabs, the two views of 概览, the settings groups, the typed routes that `parseRoute` reads (including the removed Agent-status tab, which opens the board), and the route memory with the settings group opened last |
-| `src/client/overview.tsx` | The board view of 概览: the duty desk |
+| `src/client/route.ts` | The tabs, the two views of 概览, the board focus a hero count carries, the settings groups, the typed routes that `parseRoute` reads (including the removed Agent-status tab, which opens the board), and the route memory with the settings group opened last |
+| `src/client/overview.tsx` | The board view of 概览: the duty desk, and the one-shot ring that marks the cards a hero count opened |
 | `src/client/source.tsx`, `trigger.tsx`, `eval.tsx`, `execution.tsx` | One file per stage: its status, and its settings where it has some |
 | `src/client/thread.tsx`, `ticket.tsx` | The record pages: a Thread with its timeline, and a Ticket with its authorization, Inputs and Assignments |
 | `src/client/activity.tsx` | The compact "now" block of a running Ticket: the current tool, its latest progress and who acts next, with no reasoning stream or token speed |
-| `src/client/editor.tsx` | The 概览 editor view: the holder, the last-hour timeline with short lane names, the working list split by editor use with each worker's tool and an expandable tool/MCP trail, and the short rail of what waits on a person; it starts and stops nothing |
+| `src/client/editor.tsx` | The 概览 editor view: the holder, the last-hour timeline with short lane names, the working list split by editor use with each worker's tool and an expandable tool/MCP trail, and the short rail of what waits on a person; its four hero counts are doors to the board; it starts and stops nothing |
 | `src/client/settings.tsx` | The Settings tab: the group navigation and the group on screen |
 | `src/client/settings-kit.tsx` | The building blocks of settings blocks: the settings the stage groups share, `useBlockDraft`, the fields, among them a Source kind's, and the history of saves |
 | `src/client/prompts.tsx` | The Prompts settings: the page owns the view it read and its editor the draft, and the Edit, Full prompt and History tabs render from them; a built-in part's editor shows a changed default and keeps or drops the override |

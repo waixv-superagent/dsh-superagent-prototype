@@ -10,8 +10,8 @@ import { ticketMark } from './marks.ts'
 import { GLOSSARY, GLOSSARY_VALUES, en, zh, type DshSuperagentKey } from './locales.ts'
 import { OverviewPage } from './overview.tsx'
 import { PanelProvider, usePanel, usePanelData } from './provider.tsx'
-import { HOME, TABS, initialLocation, lastSettingsGroup, remember, routeLabel, settingsRoute, type HomeView, type Location,
-  type Route, type Tab } from './route.ts'
+import { HOME, TABS, initialLocation, lastSettingsGroup, remember, routeLabel, settingsRoute, type BoardFocus, type HomeView,
+  type Location, type Route, type Tab } from './route.ts'
 import { SettingsPage } from './settings.tsx'
 import { SourceStatus } from './source.tsx'
 import { actorName, errorText, reasonLabel, valueLabel, type T, readableMarkers } from './text.ts'
@@ -140,7 +140,7 @@ function Header({ masterId }: { masterId: string | undefined }) {
 }
 
 /** 概览 owns two views: the editor page and the duty-desk board, switched in place so the tab bar stays short. */
-function HomePage({ view }: { view?: HomeView }) {
+function HomePage({ view, focus }: { view?: HomeView; focus?: BoardFocus }) {
   const { t, navigate } = usePanel()
   const board = view === 'board'
   return <>
@@ -149,7 +149,7 @@ function HomePage({ view }: { view?: HomeView }) {
         { value: 'board', label: t('homeViewBoard') }]} value={board ? 'board' : 'editor'} label={t('homeViewLabel')}
         onChange={next => navigate(next === 'board' ? { page: 'editor', query: { view: 'board' } } : { page: 'editor' })} />
     </div>
-    {board ? <OverviewPage /> : <EditorPage />}
+    {board ? <OverviewPage focus={focus} /> : <EditorPage />}
   </>
 }
 
@@ -161,7 +161,7 @@ function Pages({ route, openTab, deploymentForm }: { route: Route; openTab: (tab
   const waiting = error ? <p className="dt-error" role="alert">{error.message}</p> : <p className="dt-hint">{t('loading')}</p>
   const page = (() => {
     switch (route.page) {
-      case 'editor': return <HomePage view={route.query?.view} />
+      case 'editor': return <HomePage view={route.query?.view} focus={route.query?.focus} />
       case 'source': return <SourceStatus />
       case 'trigger': return route.id !== undefined ? <ThreadPage key={route.id} id={route.id} target={route.query?.trigger} />
         : <TriggerStatus filter={route.query?.filter ?? 'subscribed'} />
