@@ -9,7 +9,7 @@
 | 阶段 | 谁做 | 人工介入 | 状态 |
 | --- | --- | --- | --- |
 | P0 接单 | 主会话评估 + 接单规则 | 可选：批量预审 | 已有 allowlist / 评估，无预审 |
-| **P1 定位 + 方案** | worker（只读：代码、资产、配置） | **必过门**：交方案，人回一句 | 未实现 |
+| **P1 定位 + 方案** | worker（只读：代码、资产、配置） | **必过门**：交方案，人点选项（默认三项，worker 可改） | 已有（方案卡 + 动态选项） |
 | P2 实现 | worker | 不打扰，受预算约束 | 已有 |
 | P3 验证 | worker | 机器关卡；失败自动修，超预算才叫人 | 已有（编译 + 自动化测试） |
 | **P4 交付确认** | worker | **必过门**：CL + shelve + review + 对比结果 | 已有（`human_action` / attention） |
@@ -106,14 +106,30 @@ P1 卡片正面的信息量压到一眼能答：
 5. **影响面 · 预算**：一行 `notation` 字号的事实，不展开成长段。
 6. **证据折叠**：`collapsible_panel`（默认收起）里放代码线 / 资产线 / 配置线 / 验证方案四条完整依据；正面不重复。
 7. **通过后**一行：`通过后` 开始实现、按验证方案验证、再交给人确认交付、不直接 submit；像正常对话里问问题时把下一步说清。
-8. **三个按钮**：`通过`（primary）/ `改一下`（default）/ `停`（danger，带二次确认），三等分一行。
+8. **选项按钮**：worker 给的 2–4 个（默认 `通过` primary / `改一下` default / `停` danger 带二次确认），一行排开；`改一下` 带 `note` 时直接记这个方向，没有 `note` 才换成表单。
 9. **底部灰字**：`<截止时间> 前不答就自动停`，说明超时默认停，不默认继续。
 
 按钮是**真回调**：`behaviors: [{ type: 'callback', value: { v: 1, decision } }]`，点击产生 `card.action.trigger`，
 不依赖人在聊天里打字。`改一下` 先把卡片替换成一个带输入框的表单（`form` + `note`），提交时带上那句新方向。
+表单不把上下文丢掉：顶部保留原问题，下面是可展开的「原方案」全文；卡片表单不能上传图片，所以提示「要贴图/写长文直接回复这张卡」，
+并留一个 `返回方案` 按钮（回调只带 `back`，不改方案），可以退回方案卡再看再点。输入框用单行（`input_type: text`），
+手机上保持卡片内联，不跳成占满屏的多行文字编辑器；长文和贴图走「直接回复这张卡」。
 
 卡片的文本兜底也保持决策简报（现象、修复锚点、影响面、预算，加一句「证据与完整方案在工单面板」）和
 `回 1 通过 ｜ 回 2 换方向 ｜ 回 3 停`：客户端拒绝卡片时，问题仍然到得了人，但不再退化成八行模板的倾倒。
+
+### 6.1.1 动态选项（worker 提问）
+
+`orchestrator_plan` 可以带 `question`（一句话问题）和 `options`（2–4 个 `{ label, decision, note? }`）：`decision`
+只能是 `approve` / `revise` / `stop`，选项只改变人看到的说法，不改变闸口的三种结果；带 `note` 的 `revise` 选项直接记录
+这个方向，不带 `note` 的才展开表单。问题和选项随方案存档（`ticket.plan.question` / `ticket.plan.options`），被点的标签
+记进 `plan.approved.option` 或 `plan.feedback[].option`，面板和归档能看到人选了什么。不传时仍是原来的三个按钮，旧卡片和
+文本兜底不受影响；在聊天里直接回选项名与回 `1/2/3` 等效（intake 按标签精确匹配）。
+
+同一张卡也能按语境换内容：`orchestrator_plan` 可带 `sections`（1–6 个 `{ label, text, fold? }`），按 worker 给的标题和正文排版，
+`fold: true` 的块收进「补充」折叠；不传时仍是上面的八行标准布局。标准布局是**样式参考**：bug 修复、需求推进的方案卡按它来，
+其他语境（评审、取舍、多方案对比等）用 `sections` 写当下真正要人看的几块，而不是硬套八行。方案正文（`plan.text`）仍按固定模板存，
+`missingPlanLabels` 校验不变；`sections` 只决定卡片正面与折叠里显示什么，文本兜底同步用同样的分块。
 
 ### 6.2 三个入口，一个决策态
 
@@ -121,7 +137,7 @@ P1 卡片正面的信息量压到一眼能答：
 | --- | --- | --- |
 | 飞书卡片 | 点 `通过` / `改一下` + 一句 / `停` | `card.action.trigger` → `engine.decidePlan(..., 'feishu')`，卡片原地替换成结果 |
 | 面板工单页 | 同一个决策块，证据在面板里就地展开 | `POST tickets/:id/plan` → `engine.decidePlan(..., 'panel')` |
-| 聊天里直接回 | 回 `1` / `2 换方向` / `3` | 当前唯一在等的方案 → `engine.decidePlan(..., 'session')` |
+| 聊天里直接回 | 回 `1` / `2 换方向` / `3`，或直接回卡片上的选项名 | 当前唯一在等的方案 → `engine.decidePlan(..., 'session')` |
 
 三个入口都**不产生 Trigger、Decision 或 Eval**，也不绕 worker 一轮；worker 只收到一条输入：
 「人（飞书/面板/会话）通过了 P1 方案」或「换了方向：…」或「停了」。飞书私聊每条消息是独立话题，
@@ -137,8 +153,10 @@ P1 时工单的工作区还没检出（`ticket.execution.directory` 为空或未
 
 ### 6.3 发送位置与卡片映射
 
-卡片默认发到 Source 配置里的「介入卡片私聊」，留空则发到工单来源的私聊；发送用
-`im +messages-send --msg-type interactive --content <json>`，带幂等键。发送成功后把
+方案卡发到**工单来源的那条飞书话题**：用工单 `channels` 里来源 feishu channel 的 `messageId` 发送
+`im +messages-reply --message-id <来源消息> --reply-in-thread --msg-type interactive --content <json>`，带幂等键，
+这样在话题里工作的人看得到、点得到；没有来源话题（例如非飞书来源的单）才退到 Source 配置里的「介入卡片私聊」，留空则发到工单来源的私聊，
+用 `im +messages-send --msg-type interactive --content <json>`。发送成功后把
 `message_id → { ticketId, planAt, url }` 记进 `KV.feishu.cards`（48 小时后清理）；回调没有工单号时靠它反查。
 `url` 来自紧接着的 `im +messages-mget` 的 `message_app_link`（形如
 `https://applink.feishu.cn/client/chat/open?openChatId=…&position=…`，`position` 让它直接定位到这张卡），
@@ -153,6 +171,21 @@ P1 时工单的工作区还没检出（`ticket.execution.directory` 为空或未
   没开回调时消费者能起来但收不到事件，不报错。
 - 只有需要自动读取 `card_content` 时才要 `im:message:readonly`；本实现用 `message_id` 重建卡片，不需要该权限。
 - 回调 token 30 分钟内、同一张卡片最多 2 次有效；过期就只记决策、不换卡片，不影响工单状态。
+
+### 6.5 提问卡：worker 的 human_action 也带选项
+
+worker 用 `orchestrator_report` 的 `human_action` + `options`（2–4 个短标签）提问时，主会话的 attention 回复不再只发
+文本，而是发一张卡片：问题正文 + 每个选项一个回调按钮（`{ v: 1, attention: <attention id>, choice: <选项下标> }`），底下
+写明「也可以直接在对话里回复」。卡片回复的 `message_id → { ticketId, attentionId, at }` 记进
+`KV.feishu.attentionCards`（48 小时清理）；点击走 `engine.answerAttention`，把「人对「问题」选了：选项」作为这个人的
+一条 Input 交给 worker（不是 bot note，不会被自动输入压住），并清掉 attention。问题已被回答、替换或卡片过期时，回调只
+把卡片换成「已处理」，不改工单；仍然只有工单 actor 能点。飞书拒绝卡片时退回原来的纯文本回复。
+
+提问卡同样接受 worker 的 `sections`（1–6 个 `{ label, text, fold? }`）：问题下面先排不分块，`fold: true` 的收进「补充」折叠，
+仍然是问题 + 选项按钮 + 「也可以直接回复」。不传时保持原来的单行问题卡片；文本兜底把分块逐条写出。
+
+提问卡只在真的需要点一下的关键节点上用，例如方案契合度确认、动手前的一次决定：`orchestrator_report` 只传 `human_action`
+时仍走普通对话回复，只有同时传 `options`（2–4 个）才发卡片。日常提问用纯文本更快更轻，不要为了发卡而发卡。
 
 ## 7. 实现顺序
 

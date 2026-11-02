@@ -3,7 +3,7 @@ import { key } from './ids.ts'
 import { isoTime, liveTicket, threadKey } from './model.ts'
 import type { Ticket, Trigger } from './model.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
-import { pendingPlan, planDecision } from './plan.ts'
+import { pendingPlan, planChoice, planDecision } from './plan.ts'
 import type { Tickets } from './tickets.ts'
 
 export type ReceiveResult = 'stored' | 'duplicate' | 'filtered'
@@ -51,29 +51,43 @@ export class Intake extends EnginePart {
     const disposition = { fanout, ...context.length ? { context } : {}, at }
     this.repo.triggers.saveDisposition(trigger.id, disposition)
     // A person's one-word answer decides a waiting P1 plan instead of reaching its worker as ordinary work: `1` approves,
-    // `2` asks for another direction, `3` stops. The ticket records the decision, so the message needs no Eval either.
+    // `2` asks for another direction, `3` stops. Several reached tickets waiting for a plan keep the message ambiguous, so
+    // it reaches no worker and the Router asks which ticket; only exactly one waiting plan may consume it.
+    const waiting = trigger.human
+      ? [...reached].flatMap(([ticketId, { ticket }]) => {
+        const plan = pendingPlan(ticket)
+        const choice = plan ? planChoice(trigger.text, plan) : undefined
+        const decision = plan ? planDecision(trigger.text) ?? choice : undefined
+        return decision ? [{ ticketId, decision, option: choice?.option ?? '' }] : []
+      })
+      : []
     const decided = new Set<string>()
-    for (const [ticketId, { ticket, context: followed }] of reached) {
-      const decision = trigger.human ? planDecision(trigger.text) : undefined
-      if (decision && pendingPlan(ticket)) { this.tickets.decidePlan(ticketId, decision.decision, decision.note); decided.add(ticketId); continue }
-      this.tickets.addInput(ticket, { id: key('input', ticketId, 'trigger', trigger.id), kind: 'trigger', triggerId: trigger.id, at,
-        ...trigger.human ? { human: true } : {}, ...followed ? { context: true } : {} })
+    // Several reached tickets waiting for a plan keep the message ambiguous: it reaches no worker, and the Router asks
+    // which ticket the person meant instead of guessing.
+    const ambiguous = waiting.length > 1
+    if (!ambiguous) {
+      for (const [ticketId, { ticket, context: followed }] of reached) {
+        const answer = waiting.length === 1 && waiting[0]!.ticketId === ticketId ? waiting[0]! : undefined
+        if (answer) { this.tickets.decidePlan(ticketId, answer.decision.decision, answer.decision.note, 'feishu', answer.option); decided.add(ticketId) }
+        else if (!waiting.length) this.tickets.addInput(ticket, { id: key('input', ticketId, 'trigger', trigger.id), kind: 'trigger', triggerId: trigger.id, at,
+          ...trigger.human ? { human: true } : {}, ...followed ? { context: true } : {} })
+      }
     }
     // A person may answer in a fresh thread, such as a Feishu direct chat where every message is its own thread: a bare
     // 1/2/3 that reached no ticket decides the one plan that person has waiting. Several waiting plans make it ambiguous.
     if (!decided.size && !fanout.length && trigger.human && trigger.meta.direct === true) {
       const decision = planDecision(trigger.text)
-      const waiting = decision ? this.repo.tickets.open().filter(ticket => pendingPlan(ticket)
+      const plans = decision ? this.repo.tickets.open().filter(ticket => pendingPlan(ticket)
         && ticket.mandate.actor.source === trigger.actor.source && ticket.mandate.actor.id === trigger.actor.id) : []
-      if (waiting.length === 1) {
-        this.tickets.decidePlan(waiting[0]!.id, decision!.decision, decision!.note, 'feishu')
-        decided.add(waiting[0]!.id)
+      if (plans.length === 1) {
+        this.tickets.decidePlan(plans[0]!.id, decision!.decision, decision!.note, 'feishu')
+        decided.add(plans[0]!.id)
       }
     }
     if (decided.size) this.repo.triggers.saveDisposition(trigger.id, { ...disposition, acked: [...decided] })
-    // A person's message that no ticket decides, such as one that reached only tickets a person stopped or that follow the
-    // Thread for context, and every bot's, goes to Eval.
-    if (!decided.size && !this.owners(trigger).length) this.queueForEval(trigger)
+    // A person's message that no ticket decides, such as one that reached only tickets a person stopped, that follow the
+    // Thread for context, or that several waiting plans made ambiguous, and every bot's, goes to Eval.
+    if (!decided.size && (ambiguous || !this.owners(trigger).length)) this.queueForEval(trigger)
     for (const ticketId of fanout) this.tickets.wake(ticketId)
     this.emit('trigger.received', { triggerId: trigger.id, threads: trigger.threads.map(threadKey) })
     return 'stored'

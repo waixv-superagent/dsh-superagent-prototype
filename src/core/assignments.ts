@@ -2,9 +2,9 @@
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, liveTicket, runningAssignment } from './model.ts'
-import type { ReportState, Ticket } from './model.ts'
+import type { Assignment, QuestionSection, ReportState, Ticket } from './model.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
-import { ticketPhase } from './plan.ts'
+import { pendingPlan, validCardOptions, validQuestionSections, ticketPhase } from './plan.ts'
 import type { Replies } from './replies.ts'
 import { automatic, type Tickets } from './tickets.ts'
 
@@ -26,6 +26,10 @@ export interface WorkerReport {
   summary: string
   /** Open question for a person: a string asks it, `null` clears an open one, and `undefined` keeps the current one. */
   question?: string | null
+  /** The choices a question card offers, in the order the worker wants them; 2–4 unique labels. */
+  options?: string[]
+  /** The context the question card adds, in the worker's own order; 1–6 sections. */
+  sections?: QuestionSection[]
   /** The person's message whose request raised the question; routes the question to the channel where it was written. */
   askedBy?: string
   /** The person's question this report answers, which the worker thereby takes up; authorizes the main Session to send an answer reply. */
@@ -33,7 +37,19 @@ export interface WorkerReport {
   /** What it delivered, which the ticket keeps on its execution so the board and a person's confirmation see it. */
   delivery?: DeliveryFacts
 }
-const RECOVERY_NOTE = 'The host restarted during this ticket. Inspect the current worktree, git history and GitHub state before continuing. Do not repeat an already completed external operation. Finish the original assignment and report its status.'
+const RECOVERY_NOTE = 'The host restarted during this ticket. Inspect the current worktree, its delivery state and the ticket\'s records before continuing. Do not repeat an already completed external operation. Finish the original assignment and report its status.'
+/**
+ * The note a restarted Assignment starts from: the recovery instruction plus what its ticket already reported, so the resumed
+ * worker neither redoes settled work nor submits again a plan a person may already have answered.
+ */
+function recoveryNote(ticket: Ticket, running: Assignment): string {
+  const report = running.report
+  if (!report) return RECOVERY_NOTE
+  const summary = report.summary.replace(/\s+/g, ' ').trim()
+  const last = `Its last report was "${report.state}": ${summary.length > 240 ? `${summary.slice(0, 240)}…` : summary}`
+  const plan = pendingPlan(ticket) ? 'A P1 plan was waiting for a person when the host stopped: check whether it was answered before submitting it again.' : ''
+  return plan ? `${RECOVERY_NOTE} ${last} ${plan}` : `${RECOVERY_NOTE} ${last}`
+}
 
 /**
  * Assignments records what the Executor and its workers report about the Assignments that run tickets: one started, Inputs
@@ -102,7 +118,7 @@ export class Assignments extends EnginePart {
     const report = running.report
     const busy = !!running.deliveredAt && !!report && running.deliveredAt >= report.at
     const settled = !!report && ['waiting', 'ready', 'blocked', 'failed'].includes(report.state) && !busy
-    if (!settled) this.tickets.restart(ticket, running, 'hostRestarted', RECOVERY_NOTE)
+    if (!settled) this.tickets.restart(ticket, running, 'hostRestarted', recoveryNote(ticket, running))
     else if (ticket.undelivered.length) this.options.executor.deliver(ticket, running)
   }
   /**
@@ -123,6 +139,9 @@ export class Assignments extends EnginePart {
     if ((delivered || report.state === 'ready') && (phase === 'plan' || gated && phase !== 'deliver')) throw new UserError('notDeliverable')
     if (report.question && (report.state === 'ready' || report.answers)) throw new UserError('questionWithResult')
     if (report.askedBy && !report.question) throw new UserError('askerWithoutQuestion')
+    const options = report.options?.map(label => label.trim())
+    if (options && (!report.question || !validCardOptions(options))) throw new UserError(report.question ? 'attentionOptions' : 'optionsWithoutQuestion')
+    if (report.sections && (!report.question || !validQuestionSections(report.sections))) throw new UserError('attentionSections')
     const person = (id: string, channel: boolean) => {
       const trigger = this.repo.triggers.get(id)
       return !!trigger?.human && (!channel || !!trigger.channel) && this.reaches(ticket, trigger, false)
@@ -134,8 +153,11 @@ export class Assignments extends EnginePart {
     if (assignment.state === 'ended') throw new UserError('assignmentEnded')
     const at = this.now()
     const previous = ticket.attention
-    const ask = (question: string) => ({ id: key('attention', ticketId, question, at), question, ...(report.askedBy ? { triggerId: report.askedBy } : {}) })
-    const asked = report.question && report.question !== previous?.question ? ask(report.question) : previous
+    const ask = (question: string) => ({ id: key('attention', ticketId, question, at), question,
+      ...(options?.length ? { options } : {}), ...(report.sections?.length ? { sections: report.sections } : {}),
+      ...(report.askedBy ? { triggerId: report.askedBy } : {}) })
+    const same = report.question === previous?.question && JSON.stringify(options ?? []) === JSON.stringify(previous?.options ?? [])
+    const asked = report.question && !same ? ask(report.question) : previous
     const attention = report.question === null || report.state === 'ready' ? undefined : asked
     if (attention) ticket.attention = attention
     else delete ticket.attention

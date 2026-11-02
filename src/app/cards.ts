@@ -26,11 +26,13 @@ function cardState(ticket: Ticket): TicketCardState {
 export function ticketCard(ticket: Ticket) {
   const ended = ticket.ended && { at: ticket.ended.at, by: ticket.ended.by, reason: ticket.ended.reason ?? ticket.ended.outcome }
   const { attention } = ticket
-  const gate = ticket.plan?.waiting && !ticket.plan.approved ? { at: ticket.plan.at, preview: preview(ticket.plan.text), ...ticket.plan.deadline ? { deadline: ticket.plan.deadline } : {} } : undefined
+  const gate = ticket.plan?.waiting && !ticket.plan.approved ? { at: ticket.plan.at, preview: preview(ticket.plan.text), ...ticket.plan.deadline ? { deadline: ticket.plan.deadline } : {},
+    ...ticket.plan.question ? { question: ticket.plan.question } : {}, ...ticket.plan.options?.length ? { options: ticket.plan.options } : {} } : undefined
   return { ticket_id: ticket.id, title: ticket.title, state: cardState(ticket), phase: ticketPhase(ticket), strength: ticket.mandate.strength,
     ...(ticket.category ? { category: ticket.category } : {}),
     ...(pullOf(ticket) ? { pr_number: pullOf(ticket) } : {}), ...(ended ? { ended } : {}), ...(gate ? { plan: gate } : {}),
-    ...(attention ? { attention: { question: attention.question, ...attention.triggerId ? { trigger_id: attention.triggerId } : {} } } : {}),
+    ...(attention ? { attention: { question: attention.question, ...attention.options?.length ? { options: attention.options } : {},
+      ...attention.triggerId ? { trigger_id: attention.triggerId } : {} } } : {}),
     preview: preview(latestReport(ticket)?.summary ?? ''), read: `ticket/${ticket.id}` }
 }
 /** Strips `policyVersion`, an internal hash that callers never query by. */

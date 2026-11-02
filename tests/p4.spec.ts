@@ -105,6 +105,8 @@ describe('p4 delivery instructions', () => {
     // After a person submits, the follow-up syncs the files and continues in a new changelist.
     expect(assignment).toContain('start a new changelist')
     expect(assignment).toContain('Never reuse the submitted changelist')
+    // A ticket whose target is another repository must fail fast at P1 instead of implementing in the p4 workspace.
+    expect(assignment).toContain('report blocked at P1')
   })
   it('leave the git assignment without the p4 flow', () => {
     const assignment = ticketExecution(ticket, accept, settingsWith({}), '/state').assignment

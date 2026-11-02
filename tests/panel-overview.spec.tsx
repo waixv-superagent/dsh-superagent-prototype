@@ -114,6 +114,7 @@ it('passes delivered work from its verification card, or sends it back with a no
 
 it('answers a question, retries a failure and stops a Ticket from its decision card', async () => {
   await mount()
+  await openOverview()
   // The answer card keeps the Channel link and its primary action opens the Ticket.
   expect(all('.dt-deck-card-foot a').map(link => [link.textContent, link.getAttribute('href')])).toEqual([['去飞书回答',
     'https://applink.feishu.cn/client/chat/open?openChatId=oc_1']])
@@ -131,6 +132,7 @@ it('answers a question, retries a failure and stops a Ticket from its decision c
 
 it('opens a Ticket from its card title and from the running lane', async () => {
   await mount()
+  await openOverview()
   await click('修复回归')
   expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('修复回归')
   await openOverview()
@@ -142,6 +144,7 @@ it('marks a running Ticket that has not reported for ten minutes, and says which
     updatedAt: new Date(Date.now() - 31 * 60_000).toISOString() })]
   server.idle = [ticketSummary({ id: 't8', title: '等新消息', summary: '' }, { stage: 'idle' })]
   await mount()
+  await openOverview()
   expect(text()).toContain('31 分钟没有更新，可能卡住')
   expect(all('.dt-run').map(row => row.dataset.state)).toEqual(['working', 'idle'])
   expect(all('.dt-run-title').map(title => title.textContent)).toEqual(['补 i18n 文案', '等新消息'])
@@ -154,6 +157,7 @@ it('goes quiet when nothing needs a person and nothing is running', async () => 
   server.idle = []
   server.ended = []
   await mount()
+  await openOverview()
   expect(document.querySelector('.dt-verdict-title')?.textContent).toBe('现在没有需要你的事')
   expect(text()).toContain(zh.boardDecisionEmpty)
   expect(text()).toContain(zh.boardVerifyEmpty)
@@ -164,6 +168,7 @@ it('goes quiet when nothing needs a person and nothing is running', async () => 
 
 it('links the verdict figures to the records behind them', async () => {
   await mount()
+  await openOverview()
   const figures = all('.dt-figure button')
   expect(figures.map(button => button.textContent)).toEqual(['5', '1', '2 / 3'])
   await click(figures[0]!)
@@ -175,6 +180,7 @@ it('links the verdict figures to the records behind them', async () => {
 
 it('lists the problems that need a person and lets them requeue or dismiss an unjudged Eval', async () => {
   await mount()
+  await openOverview()
   expect(all('.dt-problem-title').map(item => item.textContent)).toEqual(['飞书 来源异常', '评估未完成：这个文案好奇怪'])
   await click(zh.requeue)
   expect(server.requests.some(request => request.path === 'triggers/e3/requeue' && request.method === 'POST')).toBe(true)
@@ -187,6 +193,7 @@ it('offers the step that fixes a settings problem, and says the Executor waits f
   server.settings = { ...server.settings, policy: { ...server.settings.policy, sources: {
     feishu: { allowed: [], admission: {} }, github: { allowed: [], admission: {} } } } }
   await mount()
+  await openOverview()
   expect(text()).toContain(zh.problemNoAllowed)
   await click(zh.actionAddAllowed)
   expect(tab(zh['tab.settings']).getAttribute('aria-selected')).toBe('true')
@@ -210,6 +217,7 @@ it('says when no Source is on, an Eval is past its deadline or a message keeps f
   server.failing = [{ id: 'm1', channel: { source: 'github', thread: 'github:42', address: { number: '42' } },
     text: '已修复', attempts: 4, error: 'HTTP 502 from GitHub', refused: false }]
   await mount()
+  await openOverview()
   const titles = () => all('.dt-problem-title').map(item => item.textContent)
   expect(titles()).toEqual([zh.problemNoSource, '评估超时未决定：#9 迟迟未决', '评估未完成：这个文案好奇怪', 'GitHub 回复发送失败（已重试 4 次）'])
   expect(text()).toContain('HTTP 502 from GitHub')
@@ -238,12 +246,14 @@ it('offers retrying or withdrawing a refused reply, which it confirms first, ins
 it('names a failing part of dsh-superagent itself by its label', async () => {
   server.health = { launch: { state: 'error', detail: 'spawn failed' }, relay: { state: 'ready', detail: 'Nothing waiting' } }
   await mount()
+  await openOverview()
   expect(all('.dt-problem-title').map(item => item.textContent)).toContain(zh.problemRuntime.replace('{name}', zh['health.launch']))
   expect(text()).toContain('spawn failed')
 })
 
 it('words a refused retry in the interface language by its code', async () => {
   await mount()
+  await openOverview()
   server.person = server.person.map(ticket => ticket.id === 't4' ? { ...ticket, actions: { ...ticket.actions, retry: false } } : ticket)
   await click(find(zh.retry, '.dt-deck-card-foot button'))
   await click(zh.confirm)
@@ -253,6 +263,7 @@ it('words a refused retry in the interface language by its code', async () => {
 it('shows paused processing as a system problem with its resume action', async () => {
   server.settings = { ...server.settings, paused: true }
   await mount()
+  await openOverview()
   expect(text()).toContain(zh.problemPaused)
   await click(find(zh.resumeProcessing, '.dt-problem-actions button'))
   await click(zh.confirm)

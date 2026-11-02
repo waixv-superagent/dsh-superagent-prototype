@@ -1,10 +1,10 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
 import { isoTime, liveTicket } from './model.ts'
-import type { ChannelRef, Decision, PolicyEffect, ThreadRef, Ticket, TicketPipeline, Trigger } from './model.ts'
+import type { ChannelRef, Decision, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketPipeline, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
-import type { PlanDecision, PlanVia } from './plan.ts'
+import type { PlanDecision, PlanOption, PlanVia } from './plan.ts'
 import { Assignments, type WorkerReport } from './assignments.ts'
 import { Evals, type Outcome } from './evals.ts'
 import { Intake, type ReceiveResult } from './intake.ts'
@@ -216,14 +216,23 @@ export class Engine {
    * submission is refused. The ticket stays in its plan phase until the answer.
    * @throws UserError when the ticket is unknown or ended, its plan was approved already, or a template line is missing.
    */
-  submitPlan(ticketId: string, text: string): Ticket { return this.repo.atomic(() => this.tickets.submitPlan(ticketId, text)) }
+  submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[]): Ticket {
+    return this.repo.atomic(() => this.tickets.submitPlan(ticketId, text, question, options, sections))
+  }
   /**
    * A person's decision on a ticket's waiting plan: `1` approves it and moves the ticket to implement, `2` asks for another
-   * direction, `3` stops the ticket.
+   * direction, `3` stops the ticket. `option` is the card choice's label, recorded with the decision.
    * @throws UserError when the ticket is unknown or no plan of it waits for a decision.
    */
-  decidePlan(ticketId: string, decision: PlanDecision, note?: string, via?: PlanVia): Ticket {
-    return this.repo.atomic(() => this.tickets.decidePlan(ticketId, decision, note, via))
+  decidePlan(ticketId: string, decision: PlanDecision, note?: string, via?: PlanVia, option?: string): Ticket {
+    return this.repo.atomic(() => this.tickets.decidePlan(ticketId, decision, note, via, option))
+  }
+  /**
+   * A person's click on a question card: the answer becomes a message to the worker and clears the question.
+   * @throws UserError when the ticket is unknown or ended, the question is gone, or the option is not offered.
+   */
+  answerAttention(ticketId: string, attentionId: string, option: string): Ticket {
+    return this.repo.atomic(() => this.tickets.answerAttention(ticketId, attentionId, option))
   }
   /**
    * A worker moves its ticket one phase forward: `verify` once implementation is done, `deliver` once verification passed.
@@ -333,7 +342,7 @@ export class Engine {
 }
 
 /** What Sources ask and tell the Engine. */
-export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThread' | 'retarget' | 'threadClosed' | 'decidePlan'>
+export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThread' | 'retarget' | 'threadClosed' | 'decidePlan' | 'answerAttention'>
 /** What the main Session asks of the Engine. */
 export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'>
 /** What people ask of the Engine, through the panel or the main Session. */

@@ -1,11 +1,11 @@
 /** Context-aware shared UI widgets: page/section headers, timestamps, Markdown rendering, and confirmation actions. */
 import { Fragment, useState, type ReactNode } from 'react'
 import type { SetupProblem } from '../setup.ts'
-import { Button, Icon, InfoTip, Modal, StateDot, type DotState, type IconName } from './controls.tsx'
+import { Button, Icon, InfoTip, Modal, StateDot, Tag, type DotState, type IconName, type TagTone } from './controls.tsx'
 import { inlines, linkify, markdownBlocks, type Inline } from './markdown.ts'
 import { useAction, usePanel, usePanelData } from './provider.tsx'
 import { settingsRoute, type SettingsGroup } from './route.ts'
-import { errorText, fullTime, readableMarkers, setupText, when, checkLines } from './text.ts'
+import { errorText, fullTime, readableMarkers, setupText, when, checkLines, type CheckLine } from './text.ts'
 
 const external = { target: '_blank', rel: 'noopener noreferrer' } as const
 
@@ -105,21 +105,36 @@ export function StageMark({ state, icon, label }: { state: DotState; icon: IconN
   return <span className="dt-stage" data-state={state}>{state === 'ongoing' ? <StateDot state="ongoing" /> : <Icon name={icon}
     size={14} />}{label}</span>
 }
+const CHECK_PILLS: Record<CheckLine['state'], { tone: TagTone; icon: IconName; label: 'verifyCheckPass' | 'verifyCheckFail'
+  | 'verifyCheckSkip' | 'verifyCheckNote' }> = {
+  pass: { tone: 'success', icon: 'check', label: 'verifyCheckPass' },
+  fail: { tone: 'danger', icon: 'close', label: 'verifyCheckFail' },
+  skip: { tone: 'neutral', icon: 'minus', label: 'verifyCheckSkip' },
+  note: { tone: 'info', icon: 'decision', label: 'verifyCheckNote' },
+}
 /**
- * A worker's verification prose as scannable rows, one per check it mentions, with the counts above them. It is still the
- * worker's own claim, not a person's acceptance; callers style it as evidence and never as a passed gate.
+ * A worker's verification prose as scannable rows, one per check it mentions, with a fixed status pill on each row and
+ * the counts above them. It is still the worker's own claim, not a person's acceptance; callers style it as evidence and
+ * never as a passed gate. `collapsible` keeps the card's evidence to its first three rows and lets a person expand it.
  */
-export function VerificationChecks({ text }: { text: string }) {
+export function VerificationChecks({ text, collapsible = false }: { text: string; collapsible?: boolean }) {
   const { t } = usePanel()
+  const [expanded, setExpanded] = useState(false)
   const lines = checkLines(text)
-  const count = (state: 'pass' | 'fail' | 'skip') => lines.filter(line => line.state === state).length
+  const count = (state: CheckLine['state']) => lines.filter(line => line.state === state).length
   const issues = count('fail') + count('skip')
+  const limit = collapsible && !expanded ? 3 : lines.length
   return <div className="dt-checks-wrap">
-    {issues > 0 && <p className="dt-checks-summary">{t('verifyChecks', { pass: count('pass'), fail: count('fail'), skip: count('skip') })}</p>}
-    <ul className="dt-checks">{lines.map((line, index) => <li key={index} data-state={line.state}>
-      <Icon name={line.state === 'pass' ? 'check' : line.state === 'fail' ? 'close' : 'minus'} size={13} />
-      <span>{line.text}</span>
+    {issues > 0 && <p className="dt-checks-summary">{t(count('note') > 0 ? 'verifyChecksNote' : 'verifyChecks', { pass: count('pass'),
+      fail: count('fail'), skip: count('skip'), note: count('note') })}</p>}
+    <ul className="dt-checks">{lines.slice(0, limit).map((line, index) => <li key={index} data-state={line.state}>
+      <Tag tone={CHECK_PILLS[line.state].tone}><Icon name={CHECK_PILLS[line.state].icon} size={12} />{t(CHECK_PILLS[line.state].label)}</Tag>
+      <span className="dt-check-text">{line.text}</span>
     </li>)}</ul>
+    {collapsible && lines.length > 3 && <button type="button" className="dt-checks-more" onClick={() => setExpanded(value => !value)}>
+      <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={12} />
+      {t(expanded ? 'verifyLess' : 'verifyMore', { count: lines.length })}
+    </button>}
   </div>
 }
 export function LoadState({ error, loading }: { error?: Error | undefined; loading: boolean }) {

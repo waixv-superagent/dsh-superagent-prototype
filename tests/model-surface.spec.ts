@@ -38,9 +38,9 @@ interface Skill { name: string; description: string; content: string }
  * 闲聊作为一等结果、并可在同一轮里升级建单，给主 Session 加了约 3.4k 字符（dispatch、admission、
  * orchestrator_route 与 orchestrator_eval_decide 的字段说明），因此主 Session 的上限从 59_000 上调到 65_000；
  * 对应的可观测性说明见 docs/007-architecture.md 的 Decision 一节。缩减文本时应同步下调。
- * The pipeline follow-up adds the read-only pipeline check tool, measured at 45.2k; the cap keeps its headroom.
+ * The plan card's choices and the read-only pipeline check add worker-tool schema, measured at 46.2k; the cap keeps headroom.
  */
-const BUDGET: Record<Role, number> = { orchestrator: 65_000, worker: 45_500 }
+const BUDGET: Record<Role, number> = { orchestrator: 65_000, worker: 47_000 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'
@@ -351,8 +351,8 @@ function failures(): Map<string, string> {
 }
 
 it('collects both roles\' tools, prompts, skills and inputs', () => {
-  expect([...toolsOf('worker').keys()].sort()).toEqual(['orchestrator_ack', 'orchestrator_phase', 'orchestrator_pipeline',
-    'orchestrator_pipeline_check', 'orchestrator_plan',
+  expect([...toolsOf('worker').keys()].sort()).toEqual(['orchestrator_ack', 'orchestrator_phase',
+    'orchestrator_pipeline', 'orchestrator_pipeline_check', 'orchestrator_plan',
     'orchestrator_read', 'orchestrator_report', 'orchestrator_thread_follow',
     'orchestrator_thread_unrelated', 'orchestrator_trigger_handback'])
   expect([...toolsOf('orchestrator').keys()]).toEqual(expect.arrayContaining(['orchestrator_route', 'orchestrator_eval_decide', 'orchestrator_reply']))

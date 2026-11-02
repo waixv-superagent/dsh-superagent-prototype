@@ -79,7 +79,7 @@ Rules for this flow:
 Reviews are followed the way pull requests are: a new comment, a status change, and a pipeline result each arrive as a Trigger for the Ticket's Thread, and a reply goes back to the review. This is not implemented yet; the table in section 6 says what exists.
 
 Until it is, a worker follows its own review in the Session that opened it, by polling Swarm, and reports the outcome in the Ticket. `scripts/swarm-followup.mjs <reviewId>` does the polling half already: it reads `P4USER` and `P4TICKET` from the environment, prints each failing check with its Jenkins URL, and exits with a code a worker can branch on. A p4 Ticket can point at a project-specific pipeline skill instead of the GitHub pull-request skill.
-The worker also has `orchestrator_pipeline_check`: given a review it returns the testruns and the AI verdict, and given a failed Jenkins URL it returns that build's error lines and tail. The check runs on the host, so the Jenkins token never enters the Session, a command line or a report; the tool redacts it from the log it returns. Only a Ticket whose executor backend is p4 enters this follow-up: a git backend has no Swarm review or Jenkins build, so its Ticket completes at the person's local check.
+The worker also has `orchestrator_pipeline_check`: given a review it returns the testruns and the AI verdict, and given a failed Jenkins URL it returns that build's error lines and tail. The check runs on the host, so the Jenkins token never enters the Session, a command line or a report; the tool redacts it from the log it returns.
 
 ### What implementing it needs
 

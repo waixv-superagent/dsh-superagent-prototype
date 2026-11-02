@@ -335,21 +335,6 @@ describe('subscription fan-out', () => {
     expect(() => h.engine.verifyTicket(id)).toThrow(/already recorded local verification/)
     expect(() => h.engine.reworkTicket(id, 'again')).toThrow(/Ticket has ended/)
   })
-  it('completes a git-backed delivery at the local check instead of following a pipeline', () => {
-    const h = harness({}, { pipelineFollowup: () => false })
-    const id = accepted(h).ticketId!
-    h.repo.tickets.save({ ...h.repo.tickets.get(id)!, execution: { name: 'w', directory: '/w', assignment: '' } })
-    h.engine.report(id, { state: 'ready', summary: 'committed and pushed',
-      delivery: { review: 'https://github.com/owner/repo/pull/7', verification: 'pnpm test: 42 passed' } })
-    const waiting = h.repo.tickets.get(id)!
-    expect(waiting.verification).toEqual({ at: expect.any(String), state: 'pending' })
-    const verified = h.engine.verifyTicket(id)
-    // The git backend has no Swarm/Jenkins pipeline: the person's local check is the last gate, so no follow-up starts.
-    expect(verified.pipeline).toBeUndefined()
-    expect(verified.ended).toMatchObject({ by: 'human', outcome: 'completed' })
-    expect(verified.verification).toMatchObject({ at: expect.any(String), state: 'passed', by: 'person' })
-    expect(h.executor.start).toHaveBeenCalledTimes(1)
-  })
   it('records a person\'s local verification on a completed ticket that ended before the gate existed', () => {
     const h = harness()
     const id = accepted(h).ticketId!
@@ -905,6 +890,17 @@ describe('interrupted assignments', () => {
     expect(h.repo.tickets.get(waiting)!.assignments).toHaveLength(1)
     expect(h.executor.deliver).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: waiting }), expect.objectContaining({ state: 'running' }))
   })
+  it('reminds a restarted worker what its ticket already reported', () => {
+    const h = harness()
+    const id = accepted(h).ticketId!
+    h.engine.report(id, { state: 'progress', summary: 'the first half is in place' })
+    const running = runningAssignment(h.repo.tickets.get(id)!)!
+    h.engine.assignmentInterrupted(id, running.id)
+    const note = h.repo.tickets.get(id)!.inputs.at(-1)!
+    if (note.kind !== 'text') throw new Error('expected a text recovery note')
+    expect(note.text).toContain('The host restarted')
+    expect(note.text).toContain('Its last report was "progress": the first half is in place')
+  })
   it('starts again a worker that reported but then got a person\'s message, which it was working on', () => {
     const h = harness()
     const other = accepted(h, '2', 't2').ticketId!
@@ -976,6 +972,43 @@ describe('worker reports', () => {
     const cleared = h.engine.report(ticketId, { state: 'progress', summary: 'answered', question: null })
     expect(cleared).not.toHaveProperty('attention')
     expect(h.withdrawn).toEqual([key('attention-reply', asked.attention!.id), key('attention-reply', replaced.attention!.id)])
+  })
+  it('offers the worker\'s choices on the question and turns a click into the person\'s answer', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    const asked = h.engine.report(ticketId, { state: 'progress', summary: 'need a call', question: '先上 A 还是先上 B？',
+      options: ['先上 A', '先上 B'], askedBy: '1' })
+    expect(asked.attention).toMatchObject({ question: '先上 A 还是先上 B？', options: ['先上 A', '先上 B'] })
+    // The main Session raises the question with its own attention reply; the ticket's choices travel with it to the channel.
+    expect(h.engine.reply({ purpose: 'attention', ticketId, question: '先上 A 还是先上 B？', text: '先上 A 还是先上 B？' }).status).toBe('pending')
+    expect(h.outbox.at(-1)).toMatchObject({ kind: 'reply', ticketId,
+      attention: { ticketId, attentionId: asked.attention!.id, options: ['先上 A', '先上 B'] } })
+    expect(() => h.engine.answerAttention(ticketId, asked.attention!.id, '先上 C'))
+      .toThrowError(expect.objectContaining({ code: 'notAttentionOption' }))
+    const answered = h.engine.answerAttention(ticketId, asked.attention!.id, '先上 A')
+    expect(answered.attention).toBeUndefined()
+    expect(answered.inputs.at(-1)).toMatchObject({ kind: 'text', text: '人对「先上 A 还是先上 B？」选了：先上 A' })
+    expect(answered.undelivered).toContain(answered.inputs.at(-1)!.id)
+    expect(() => h.engine.answerAttention(ticketId, asked.attention!.id, '先上 A'))
+      .toThrowError(expect.objectContaining({ code: 'notAttention' }))
+    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', options: ['先上 A', '先上 B'] }))
+      .toThrowError(expect.objectContaining({ code: 'optionsWithoutQuestion' }))
+    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', question: 'Q?', options: ['one'] }))
+      .toThrowError(expect.objectContaining({ code: 'attentionOptions' }))
+    // The answer is a person's message, so it is delivered rather than held as an automated note.
+    h.settle()
+    expect(h.delivered.map(([, id]) => id)).toContain(answered.inputs.at(-1)!.id)
+  })
+  it('puts the worker\'s context sections on the question card and refuses them without a question', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', question: '这个取舍能不能定？',
+      sections: [{ label: '', text: 'x' }] })).toThrowError(expect.objectContaining({ code: 'attentionSections' }))
+    const asked = h.engine.report(ticketId, { state: 'progress', summary: 'need a call', question: '这个取舍能不能定？',
+      options: ['能定', '再改改'], sections: [{ label: '现状', text: '两个方案都能过测试' }] })
+    expect(asked.attention).toMatchObject({ question: '这个取舍能不能定？', sections: [{ label: '现状', text: '两个方案都能过测试' }] })
+    h.engine.reply({ purpose: 'attention', ticketId, question: '这个取舍能不能定？', text: '这个取舍能不能定？' })
+    expect(h.outbox.at(-1)).toMatchObject({ attention: { sections: [{ label: '现状', text: '两个方案都能过测试' }] } })
   })
   it('ends the ticket on a final report: dropped drops it, ready completes it unless it follows a Source\'s Thread that is open', () => {
     const outcome = (state: 'ready' | 'dropped' | 'failed', follows: boolean, closed = false) => {
@@ -1827,6 +1860,43 @@ describe('P1 plan gate', () => {
     expect(ticket.plan!.approved).toBeUndefined()
     expect(ticket.attention?.question).toContain('方案待确认')
   })
+  it('cards the worker\'s question and choices, refuses a choice set that is not a card\'s, and records the clicked label', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.tick(1)
+    expect(() => h.engine.submitPlan(ticketId, PLAN, '先上 A 还是先上 B？', [{ label: '先上 A', decision: 'approve' }]))
+      .toThrowError(expect.objectContaining({ code: 'planOptions' }))
+    expect(() => h.engine.submitPlan(ticketId, PLAN, '   '))
+      .toThrowError(expect.objectContaining({ code: 'planQuestion' }))
+    const ticket = h.engine.submitPlan(ticketId, PLAN, '先上 A 还是先上 B？', [
+      { label: '先上 A', decision: 'approve', note: '先上 A，再补 B' },
+      { label: '先上 B', decision: 'revise', note: '走 B，先上工具链' },
+      { label: '先不动', decision: 'stop' },
+    ])
+    expect(ticket.plan).toMatchObject({ question: '先上 A 还是先上 B？', options: [
+      { label: '先上 A', decision: 'approve', note: '先上 A，再补 B' },
+      { label: '先上 B', decision: 'revise', note: '走 B，先上工具链' },
+      { label: '先不动', decision: 'stop' },
+    ] })
+    h.tick(1)
+    const decided = h.engine.decidePlan(ticketId, 'approve', '', 'feishu', '先上 A')
+    expect(decided.plan).toMatchObject({ approved: { option: '先上 A', via: 'feishu' } })
+  })
+  it('cards the worker\'s own context sections, and refuses sections that are not a card\'s', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.tick(1)
+    expect(() => h.engine.submitPlan(ticketId, PLAN, '这个取舍能不能定？',
+      [{ label: '能定', decision: 'approve' }, { label: '再改改', decision: 'revise' }],
+      [{ label: '', text: 'x' }])).toThrowError(expect.objectContaining({ code: 'planSections' }))
+    const ticket = h.engine.submitPlan(ticketId, PLAN, '这个取舍能不能定？',
+      [{ label: '能定', decision: 'approve' }, { label: '再改改', decision: 'revise' }],
+      [{ label: '现状', text: '两个方案都能过测试' }, { label: '代价', text: '复用控件少一个缓存层', fold: true }])
+    expect(ticket.plan).toMatchObject({ sections: [
+      { label: '现状', text: '两个方案都能过测试' },
+      { label: '代价', text: '复用控件少一个缓存层', fold: true },
+    ] })
+  })
   it('approves a plan on a person\'s 1 without handing the digit to the worker, and moves the ticket to implement', () => {
     const h = harness()
     const ticketId = accepted(h).ticketId!
@@ -1842,6 +1912,30 @@ describe('P1 plan gate', () => {
     expect(h.repo.threads.get('chat:t1')?.pending).not.toContain('2')
     expect(ticket.inputs.at(-1)).toMatchObject({ kind: 'text', text: expect.stringContaining('通过 P1 方案') })
   })
+  it('does not read prose that begins with a digit as approving or stopping a plan', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.tick(1); h.engine.submitPlan(ticketId, PLAN)
+    h.tick(1); h.engine.receive(trigger('2', { text: '3 个地方要改' }))
+    const ticket = h.repo.tickets.get(ticketId)!
+    expect(ticket.phase).toBe('plan')
+    expect(ticket.plan).toMatchObject({ waiting: true })
+    // It reaches the worker as ordinary work instead of ending the ticket and swallowing the review comment.
+    expect(ticket.inputs.at(-1)).toMatchObject({ kind: 'trigger', triggerId: '2' })
+  })
+  it('keeps a bare 1 ambiguous when two reached tickets both wait for a plan, and sends it to Eval to ask which', () => {
+    const h = harness()
+    const first = accepted(h, '1', 't1').ticketId!
+    const second = accepted(h, '2', 't2').ticketId!
+    h.tick(1); h.engine.submitPlan(first, PLAN); h.engine.submitPlan(second, PLAN)
+    h.tick(1); h.engine.receive(trigger('3', { text: '1', threads: [{ source: 'chat', id: 't1' }, { source: 'chat', id: 't2' }] }))
+    for (const id of [first, second]) {
+      const ticket = h.repo.tickets.get(id)!
+      expect(ticket.phase).toBe('plan')
+      expect(ticket.plan).toMatchObject({ waiting: true })
+      expect(ticket.inputs.some(input => input.kind === 'trigger' && input.triggerId === '3')).toBe(false)
+    }
+  })
   it('takes a bare 1 in a fresh direct thread as the answer to the one plan that person has waiting', () => {
     const h = harness()
     const ticketId = accepted(h).ticketId!
@@ -1850,6 +1944,19 @@ describe('P1 plan gate', () => {
     h.tick(1); h.engine.receive(trigger('9', { text: '1', threads: [{ source: 'chat', id: 't9' }], meta: { direct: true } }))
     expect(h.repo.tickets.get(ticketId)!.phase).toBe('implement')
     expect(h.repo.triggers.disposition('9')).toMatchObject({ fanout: [], acked: [ticketId] })
+  })
+  it('takes an exact choice label a person types as the card choice, with that choice\'s own direction', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    const ticket = () => h.repo.tickets.get(ticketId)!
+    h.tick(1); h.engine.submitPlan(ticketId, PLAN, '先上 A 还是先上 B？', [
+      { label: '先上 A', decision: 'approve', note: '先上 A，再补 B' },
+      { label: '先上 B', decision: 'revise', note: '走 B，先上工具链' },
+    ])
+    h.tick(1); h.engine.receive(trigger('2', { text: '先上 A' }))
+    expect(ticket().phase).toBe('implement')
+    expect(ticket().plan).toMatchObject({ approved: { option: '先上 A' } })
+    expect(h.repo.threads.get('chat:t1')?.pending).not.toContain('2')
   })
   it('takes 2 as another direction and 3 as a stop, and ignores a bot\'s digit', () => {
     const h = harness()

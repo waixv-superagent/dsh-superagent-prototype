@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Ticket, Trigger } from '../src/core/index.ts'
 import { notifyChat, notifyPlan, type PlanHost } from '../src/app/plan.ts'
 
-const ticket = { id: 'a'.repeat(32), title: 'Fix', origin: { triggerId: 't1', triggerIds: ['t1'] } } as Ticket
+const ticket = { id: 'a'.repeat(32), title: 'Fix', origin: { triggerId: 't1', triggerIds: ['t1'] }, channels: [] } as unknown as Ticket
 function trigger(overrides: Partial<Trigger> = {}): Trigger {
   return { id: 't1', source: 'feishu', threads: [{ source: 'feishu', id: 'c1' }], actor: { source: 'feishu', id: 'u1' }, human: true,
     at: '2026-09-23T00:00:00Z', text: 'fix it', channel: { source: 'feishu', thread: 'c1', address: { chatId: 'oc_dm' } }, meta: { direct: true }, ...overrides }
@@ -37,6 +37,27 @@ describe('notifying a waiting plan', () => {
     const { host, send } = makeHost()
     expect(await notifyPlan(host, { ...ticket, plan })).toBe('om_9')
     expect((send.mock.calls[0]![0] as string[]).slice(0, 4)).toEqual(['im', '+messages-send', '--chat-id', 'oc_dm'])
+  })
+  it('replies in the ticket source thread, so the card appears where the person works', async () => {
+    const { host, send } = makeHost()
+    const threaded = { ...ticket, channels: [{ source: 'feishu', thread: 'feishu:oc_dm', address: { chatId: 'oc_dm', messageId: 'om_source' } }] } as Ticket
+    expect(await notifyPlan(host, { ...threaded, plan })).toBe('om_9')
+    const args = send.mock.calls[0]![0] as string[]
+    expect(args.slice(0, 6)).toEqual(['im', '+messages-reply', '--message-id', 'om_source', '--msg-type', 'interactive'])
+    expect(args).toContain('--reply-in-thread')
+    expect(args).not.toContain('--chat-id')
+  })
+  it('carries the worker question and the choices it wrote on the card', async () => {
+    const { host, send } = makeHost()
+    const asked = { ...plan, question: '先上 A 还是先上 B？', options: [
+      { label: '先上 A', decision: 'approve' as const, note: '先上 A，再补 B' },
+      { label: '先上 B', decision: 'revise' as const, note: '走 B，先上工具链' },
+    ] }
+    expect(await notifyPlan(host, { ...ticket, plan: asked })).toBe('om_9')
+    const args = send.mock.calls[0]![0] as string[]
+    const card = JSON.parse(args[args.indexOf('--content') + 1]!)
+    expect(JSON.stringify(card)).toContain('先上 A 还是先上 B？')
+    expect(JSON.stringify(card)).toContain('先上 B')
   })
   it('does nothing for an approved plan, and says why when a ticket has no chat or the Source is off', async () => {
     const { host: approvedHost, send } = makeHost()
