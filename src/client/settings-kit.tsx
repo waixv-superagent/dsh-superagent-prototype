@@ -248,7 +248,11 @@ export function SourceField({ field, value, saved, fact, onChange, labels, refre
     case 'switch': return <SwitchRow label={label} hint={hint} checked={value === true} onChange={onChange} />
     case 'select': return <Field label={label} hint={hint}>
       <SegmentedControl className="dt-segmented dt-field-segmented" label={label} value={String(value ?? field.options[0]!.value)}
-        options={field.options.map(option => ({ value: option.value, label: localized(t, option.label) }))} onChange={onChange} />
+        options={field.options.map(option => ({ value: option.value, label: option.emoji
+          // The Feishu emoji itself when the option names one; its text label stays, and a blocked image leaves only the text.
+          ? <span className="dt-segment-emoji"><img src={option.emoji} alt="" width={16} height={16}
+            onError={event => { event.currentTarget.style.display = 'none' }} />{localized(t, option.label)}</span>
+          : localized(t, option.label) }))} onChange={onChange} />
     </Field>
     case 'number': return <Field label={label} hint={hint}>
       <Input type="number" min={field.min} max={field.max} required value={String(value ?? '')}
