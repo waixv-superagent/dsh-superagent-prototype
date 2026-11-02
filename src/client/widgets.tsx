@@ -8,6 +8,11 @@ import { settingsRoute, type SettingsGroup } from './route.ts'
 import { errorText, fullTime, readableMarkers, setupText, when, checkLines, type CheckLine } from './text.ts'
 
 const external = { target: '_blank', rel: 'noopener noreferrer' } as const
+/**
+ * A client scheme (`feishu://`, `lark://`) hands the URL to the desktop app, so it must not open a browser tab first:
+ * `target="_blank"` on such a link leaves an empty tab behind after the app opens.
+ */
+export const linkTarget = (href: string) => /^(?:feishu|lark):\/\//i.test(href) ? {} : external
 
 export function When({ at }: { at: string | undefined }) {
   const { t } = usePanel()
@@ -95,10 +100,10 @@ export function SessionButton({ sessionId, label,
     onClick={() => { openSession(sessionId).catch(error => notify(errorText(error))) }}>{label ?? t('openSession')}</Button>
 }
 export function ExternalLink({ href, children, icon = 'external' }: { href: string; children: ReactNode; icon?: IconName }) {
-  return <a className="dt-inline-link dt-icon-link" href={href} {...external}><Icon name={icon} size={13} />{children}</a>
+  return <a className="dt-inline-link dt-icon-link" href={href} {...linkTarget(href)}><Icon name={icon} size={13} />{children}</a>
 }
 export function ActionLink({ href, children, icon = 'external' }: { href: string; children: ReactNode; icon?: IconName }) {
-  return <a className="dt-btn dt-btn-outline dt-btn-sm" href={href} {...external}><span className="dt-btn-icon"><Icon name={icon}
+  return <a className="dt-btn dt-btn-outline dt-btn-sm" href={href} {...linkTarget(href)}><span className="dt-btn-icon"><Icon name={icon}
     size={14} /></span>{children}</a>
 }
 export function StageMark({ state, icon, label }: { state: DotState; icon: IconName; label: string }) {

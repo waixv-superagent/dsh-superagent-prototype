@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { OutboundMessage } from '../src/core/index.ts'
 import { CliError } from '../src/infra/commands.ts'
-import { feishuPostContent, sendFeishu } from '../src/sources/feishu-channel.ts'
+import { feishuClientLink, feishuPostContent, sendFeishu } from '../src/sources/feishu-channel.ts'
 
 const message = (text: string): OutboundMessage => ({
   id: 'reply-1',
@@ -61,6 +61,37 @@ describe('Feishu outbound replies', () => {
     expect(JSON.stringify(card)).toContain('先上 A 还是先上 B？')
     expect(JSON.stringify(card)).toContain('att-1')
     expect(saved['feishu-attention-cards']).toMatchObject({ om_card: { ticketId: 't1', attentionId: 'att-1' } })
+  })
+  it('remembers the question card\'s own message link, so the panel opens that question', async () => {
+    const link = 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1&thread_position=9'
+    const lark = vi.fn(async (args: string[]) => args.includes('+messages-mget')
+      ? { data: { messages: [{ message_app_link: link }] } }
+      : { data: { message_id: 'om_card' } })
+    const saved: Record<string, unknown> = {}
+    const host = { commands: { lark }, state: { get: () => undefined, set: (key: string, value: unknown) => { saved[key] = value } } } as never
+    const asked = { ...message('这个取舍能不能定？'), attention: { ticketId: 't1', attentionId: 'att-1', options: ['能定', '再改改'] } }
+    expect(await sendFeishu(host, asked)).toBe('sent')
+    expect(lark).toHaveBeenCalledWith(['im', '+messages-mget', '--message-ids', 'om_card'])
+    expect(saved['feishu-attention-cards']).toMatchObject({ om_card: { ticketId: 't1', attentionId: 'att-1', url: link } })
+  })
+  it('keeps the answer even when the card link cannot be fetched', async () => {
+    const lark = vi.fn(async (args: string[]) => {
+      if (args.includes('+messages-mget')) throw new Error('mget failed')
+      return { data: { message_id: 'om_card' } }
+    })
+    const saved: Record<string, unknown> = {}
+    const host = { commands: { lark }, state: { get: () => undefined, set: (key: string, value: unknown) => { saved[key] = value } } } as never
+    const asked = { ...message('这个取舍能不能定？'), attention: { ticketId: 't1', attentionId: 'att-1', options: ['能定', '再改改'] } }
+    expect(await sendFeishu(host, asked)).toBe('sent')
+    expect(saved['feishu-attention-cards']).toMatchObject({ om_card: { ticketId: 't1', attentionId: 'att-1' } })
+  })
+  it('turns an AppLink into the client scheme that skips Feishu\'s browser landing page', () => {
+    expect(feishuClientLink('https://applink.feishu.cn/client/thread/open?open_thread_id=omt_1&thread_position=9'))
+      .toBe('feishu://applink/client/thread/open?open_thread_id=omt_1&thread_position=9')
+    expect(feishuClientLink('https://applink.larksuite.com/client/chat/open?openChatId=oc_1'))
+      .toBe('lark://applink/client/chat/open?openChatId=oc_1')
+    // Another Source's links stay ordinary web links.
+    expect(feishuClientLink('https://github.com/acme/widgets/pull/42')).toBe('https://github.com/acme/widgets/pull/42')
   })
   it('carries the worker\'s context sections onto the question card', async () => {
     const lark = vi.fn(async (_args: string[]) => '{"data":{"message_id":"om_card"}}')

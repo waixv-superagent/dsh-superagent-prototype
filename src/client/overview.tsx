@@ -7,7 +7,7 @@ import { useAction, usePanel, usePanelData } from './provider.tsx'
 import { ThreadChip } from './rows.tsx'
 import { setupPage, settingsRoute, type Route } from './route.ts'
 import { healthText, localized, reasonLabel, valueLabel, readableMarkers, type T } from './text.ts'
-import { CheckSetupButton, ConfirmButton, LoadState, SetupMessage, VerificationChecks, When } from './widgets.tsx'
+import { CheckSetupButton, ConfirmButton, LoadState, SetupMessage, VerificationChecks, When, linkTarget } from './widgets.tsx'
 
 /** "22:30" in the viewer's own clock; the row says since when, not a relative age that needs mental arithmetic. */
 function clock(at: string | null): string {
@@ -135,7 +135,7 @@ function DecisionCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
         label={t('retry')} title={t('retryTitle')} message={t('retryConfirm', { title: ticket.title })}
         onConfirm={() => after(call('POST tickets/:id/retry', { id: ticket.id }))} />}
       {action === 'answer' && ticket.reply && <a className="dt-btn dt-btn-outline dt-btn-sm" href={ticket.reply.url}
-        target="_blank" rel="noopener noreferrer"><span className="dt-btn-icon"><Icon name="message" size={14} /></span>
+        {...linkTarget(ticket.reply.url)}><span className="dt-btn-icon"><Icon name="message" size={14} /></span>
         {t('answerIn', { source: valueLabel(t, 'source', ticket.reply.source) })}</a>}
       {action !== 'review' && action !== 'answer' && <Button variant="ghost" size="sm" onClick={open}>{t('boardOpen')}</Button>}
       {ticket.actions.stop && <span className="dt-deck-card-foot-end"><ConfirmButton variant="ghost" icon="stop" label={t('stop')}

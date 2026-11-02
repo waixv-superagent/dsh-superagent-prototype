@@ -3,7 +3,7 @@ import type { OutboundMessage } from '../core/index.ts'
 import { KV } from '../kv.ts'
 import { CliError } from '../infra/commands.ts'
 import { checkedImText } from '../infra/text.ts'
-import { attentionCard, messageIdOf } from './feishu-card.ts'
+import { attentionCard, messageIdOf, messageLink } from './feishu-card.ts'
 import { releaseReceipt } from './feishu-receipt.ts'
 import { cmdSafe, feishuPostContent } from './feishu-text.ts'
 import { feishuTriggerId } from './feishu-trigger.ts'
@@ -16,6 +16,14 @@ const CARD_KEEP_MS = 48 * 3600_000
 /** Feishu or Lark AppLink that opens a chat; used when the message's own link was not delivered with the event. */
 export const feishuChatLink = (brand: 'feishu' | 'lark', chatId: string): string =>
   `https://applink.${brand === 'lark' ? 'larksuite.com' : 'feishu.cn'}/client/chat/open?openChatId=${encodeURIComponent(chatId)}`
+/**
+ * Feishu documents the degraded scheme `feishu://applink/<path>` for AppLinks used outside Feishu: it opens the installed
+ * client directly, while the `https://applink…` URL first renders Feishu's own landing page in the browser, which is the
+ * tab a person has to close after answering. Non-AppLink URLs, such as another Source's, pass through unchanged.
+ */
+export const feishuClientLink = (url: string): string => url
+  .replace(/^https:\/\/applink\.feishu\.cn\//i, 'feishu://applink/')
+  .replace(/^https:\/\/applink\.larksuite\.com\//i, 'lark://applink/')
 /**
  * True when Feishu permanently rejects a reply because the target message was recalled, withdrawn, not found, or never
  * existed. Only a Feishu response carrying one of these errors means the target is gone; timeouts or crashes do not. The
@@ -45,10 +53,13 @@ export async function sendFeishu(host: ChannelHost, message: OutboundMessage): P
         '--reply-in-thread', '--idempotency-key', message.id])
       const id = messageIdOf(sent)
       if (id) {
+        // The card's own link is what the panel's answer button opens, so it lands on the question rather than the chat.
+        const url = await messageLink(host, id).catch(() => undefined)
         const keep = Date.now() - CARD_KEEP_MS
         const cards = Object.fromEntries(Object.entries(host.state.get(KV.feishu.attentionCards) ?? {})
           .filter(([key, ref]) => key === id || Date.parse(ref.at) >= keep))
-        host.state.set(KV.feishu.attentionCards, { ...cards, [id]: { ticketId: message.attention.ticketId, attentionId: message.attention.attentionId, at: new Date().toISOString() } })
+        host.state.set(KV.feishu.attentionCards, { ...cards, [id]: { ticketId: message.attention.ticketId,
+          attentionId: message.attention.attentionId, at: new Date().toISOString(), ...url ? { url } : {} } })
       }
       await releaseReceipt(host, messageId)
       return 'sent'
