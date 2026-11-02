@@ -80,12 +80,19 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
     }),
     tool({
       name: 'orchestrator_plan',
-      description: 'Submit the P1 plan before any code change: the fixed template 现象/代码线/资产线/配置线/修复锚点/影响面/验证方案/预算, one label per line, each with evidence or what it ruled out. A person answers 1 (approve), 2 (change direction) or 3 (stop); writing files and shells stay refused until 1.',
+      description: 'Submit the P1 plan before any code change: 现象/代码线/资产线/配置线/修复锚点/影响面/验证方案/预算, one label per line with evidence. A person answers 1 (approve), 2 (change direction) or 3 (stop); the card question and 2–4 choices may use your own wording. Files and shells stay refused until 1.',
       schema: z.object({
         plan: z.string().trim().min(40).max(6000).describe('The plan as label：content lines, in template order, each with evidence.'),
+        question: z.string().trim().min(1).max(200).optional().describe('The card question in your own words, from the conversation; the standard wording when omitted.'),
+        options: z.array(z.object({ label: z.string().trim().min(1).max(24), decision: z.enum(['approve', 'revise', 'stop']),
+          note: z.string().trim().max(200).optional() }).strict()).min(2).max(4).optional()
+          .describe('2–4 card choices; a revise choice without a note opens the feedback form, one with a note records that direction directly.'),
+        sections: z.array(z.object({ label: z.string().trim().min(1).max(20), text: z.string().trim().min(1).max(800),
+          fold: z.boolean().optional() }).strict()).min(1).max(6).optional()
+          .describe('Optional card context sections in your own words when the standard 8-line layout does not fit; omit to keep the standard layout.'),
       }).strict(),
       execute: async args => {
-        const updated = host.engine.submitPlan(ticketId, args.plan)
+        const updated = host.engine.submitPlan(ticketId, args.plan, args.question, args.options, args.sections)
         const message = await host.notifyPlan(updated)
         return { submitted: true, phase: ticketPhase(updated), notified: message !== undefined }
       },
@@ -106,7 +113,12 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
         state: z.enum(['progress', 'ready', 'blocked', 'failed', 'dropped']),
         summary: z.string().min(1),
         human_action: z.string().trim().min(1).max(1000).nullish().describe('One concrete question for a person, also with state=progress; omit to keep the pending one, null to clear it.'),
+        options: z.array(z.string().trim().min(1).max(24)).min(2).max(4).optional()
+          .describe('With human_action: 2–4 choices at a key node where a click is fastest, such as confirming a plan; everyday questions stay plain text.'),
         question_for_trigger_id: z.string().optional().describe('With human_action: the human message that raised the question, which is asked where that person wrote.'),
+        sections: z.array(z.object({ label: z.string().trim().min(1).max(20), text: z.string().trim().min(1).max(800),
+          fold: z.boolean().optional() }).strict()).min(1).max(6).optional()
+          .describe('With human_action: optional context sections when the question needs more than its own line.'),
         pr_number: z.number().int().positive().nullish().describe(`The ticket's PR: its source PR, or one by ${host.github.deployment.github.login} from a branch named after this ticket (DSH_SUPERAGENT_NAME).`),
         changelist: z.number().int().positive().nullish().describe('p4: the shelved changelist this report delivers, so the board and a person can see what to submit.'),
         swarm_review: z.string().trim().max(200).nullish().describe('p4: the Swarm review id or URL opened on that changelist.'),
@@ -124,6 +136,7 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           const delivery = { ...(args.changelist != null ? { changelist: args.changelist } : {}),
             ...(args.swarm_review ? { review: args.swarm_review } : {}), ...(args.verification ? { verification: args.verification } : {}) }
           const report = { state: args.state, summary: args.summary, ...(args.human_action !== undefined ? { question: args.human_action } : {}),
+            ...(args.options ? { options: args.options } : {}), ...(args.sections ? { sections: args.sections } : {}),
             ...(args.question_for_trigger_id ? { askedBy: args.question_for_trigger_id } : {}),
             ...(args.reply_to_trigger_id ? { answers: args.reply_to_trigger_id } : {}),
             ...(Object.keys(delivery).length ? { delivery } : {}) }

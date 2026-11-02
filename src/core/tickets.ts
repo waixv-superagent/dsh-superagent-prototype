@@ -2,12 +2,12 @@
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, latestReport, liveTicket, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
-import type { Assignment, ChannelRef, Evaluation, Follow, Mandate, PolicyEffect, ThreadRef, Ticket, TicketEndBy, TicketInput, TicketOutcome,
+import type { Assignment, ChannelRef, Evaluation, Follow, Mandate, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketEndBy, TicketInput, TicketOutcome,
   TicketPipeline, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
-import { missingPlanLabels, pendingPlan, planOverdue, PLAN_GATE_HOURS, PLAN_QUESTION, ticketPhase, type PlanDecision, type PlanVia,
-  type TicketPhase } from './plan.ts'
+import { missingPlanLabels, pendingPlan, planOverdue, PLAN_GATE_HOURS, PLAN_QUESTION, ticketPhase, validCardOptions, validQuestionSections, type PlanDecision,
+  type PlanOption, type PlanVia, type TicketPhase } from './plan.ts'
 import type { Replies } from './replies.ts'
 import { canRetry } from './stage.ts'
 
@@ -338,18 +338,28 @@ export class Tickets extends EnginePart {
   }
   /**
    * A worker's P1 plan, as the fixed template with evidence, now waits for a person: the ticket stays in `plan`, its
-   * attention asks the plan question, and its deadline stops it if nobody answers (see `PLAN_GATE_HOURS`).
-   * @throws UserError when the ticket is unknown or ended, its plan was approved already, or a template line is missing.
+   * attention asks the plan question, and its deadline stops it if nobody answers (see `PLAN_GATE_HOURS`). A worker may
+   * word the card's question and offer 2–4 choices that map to the gate's own decisions.
+   * @throws UserError when the ticket is unknown or ended, its plan was approved already, a template line is missing, or
+   * the question or choices are not a card's.
    */
-  submitPlan(ticketId: string, text: string): Ticket {
+  submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[]): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     if (ticket.plan?.approved) throw new UserError('phaseOutOfOrder', { from: ticketPhase(ticket) })
     const missing = missingPlanLabels(text)
     if (missing.length) throw new UserError('planIncomplete', { labels: missing.join(', ') })
+    const asked = question?.trim()
+    if (asked !== undefined && (!asked || Array.from(asked).length > 200)) throw new UserError('planQuestion')
+    const choices = options?.map(option => ({ ...option, label: option.label.trim() }))
+    if (choices && (!validCardOptions(choices.map(option => option.label))
+      || choices.some(option => !['approve', 'revise', 'stop'].includes(option.decision)))) throw new UserError('planOptions')
+    if (sections && !validQuestionSections(sections)) throw new UserError('planSections')
+    const context = sections?.map(section => ({ ...section, label: section.label.trim(), text: section.text.trim() }))
     const at = this.now()
     const previous = ticket.attention
-    ticket.plan = { text, at, waiting: true, deadline: new Date(Date.parse(at) + PLAN_GATE_HOURS * 3_600_000).toISOString() }
+    ticket.plan = { text, at, waiting: true, deadline: new Date(Date.parse(at) + PLAN_GATE_HOURS * 3_600_000).toISOString(),
+      ...(asked ? { question: asked } : {}), ...(choices?.length ? { options: choices } : {}), ...(context?.length ? { sections: context } : {}) }
     ticket.phase = 'plan'
     ticket.attention = { id: key('attention', ticketId, PLAN_QUESTION, at), question: PLAN_QUESTION }
     if (previous && previous.id !== ticket.attention.id) this.replies.withdrawAttention(previous.id)
@@ -359,31 +369,33 @@ export class Tickets extends EnginePart {
   }
   /**
    * A person's decision on the waiting plan: `1` approves it and moves the ticket to implement, `2` asks for another
-   * direction with `note` and leaves the plan phase for the worker to revise, `3` stops the ticket.
+   * direction with `note` and leaves the plan phase for the worker to revise, `3` stops the ticket. `option` is the label
+   * of the card choice that was clicked, recorded with the decision when the card offered choices.
    * @throws UserError when the ticket is unknown or no plan of it waits for a decision.
    */
-  decidePlan(ticketId: string, decision: PlanDecision, note = '', via: PlanVia = 'feishu'): Ticket {
+  decidePlan(ticketId: string, decision: PlanDecision, note = '', via: PlanVia = 'feishu', option = ''): Ticket {
     const ticket = this.require(ticketId)
     const plan = pendingPlan(ticket)
     if (!plan) throw new UserError('planNotPending')
     const at = this.now()
     const where = via === 'panel' ? '面板' : via === 'session' ? '会话' : '飞书'
+    const choice = option.trim()
     delete ticket.attention
     if (decision === 'approve') {
-      plan.approved = { at, via }
+      plan.approved = { at, via, ...(choice ? { option: choice } : {}) }
       delete plan.waiting
       ticket.phase = 'implement'
       ticket.updatedAt = at
       this.repo.tickets.save(ticket)
       this.addInput(ticket, { id: key('input', ticketId, 'plan-approved', at), kind: 'text', at,
-        text: `人已通过 P1 方案（${where}）。进入实现阶段：可以改文件。实现完成后调用 orchestrator_phase 进入 verify，验证通过后进入 deliver。` })
+        text: `人已通过 P1 方案（${where}${choice ? ` · ${choice}` : ''}）。进入实现阶段：可以改文件。实现完成后调用 orchestrator_phase 进入 verify，验证通过后进入 deliver。` })
     } else if (decision === 'revise') {
-      plan.feedback = [...plan.feedback ?? [], { text: note || '请换一个方向，重新给方案。', at, via }]
+      plan.feedback = [...plan.feedback ?? [], { text: note || '请换一个方向，重新给方案。', at, via, ...(choice ? { option: choice } : {}) }]
       delete plan.waiting
       ticket.updatedAt = at
       this.repo.tickets.save(ticket)
       this.addInput(ticket, { id: key('input', ticketId, 'plan-revise', at), kind: 'text', at,
-        text: `人要求换方向（${where}）：${note || '（没有附说明）'}\n仍处于方案阶段：继续只读定位，再用 orchestrator_plan 交新方案。` })
+        text: `人要求换方向（${where}${choice ? ` · ${choice}` : ''}）：${note || '（没有附说明）'}\n仍处于方案阶段：继续只读定位，再用 orchestrator_plan 交新方案。` })
     } else {
       // A stop answers the gate too: clear `waiting` so a later resume does not reopen a plan a person already closed.
       delete plan.waiting
@@ -391,6 +403,25 @@ export class Tickets extends EnginePart {
       this.repo.tickets.save(ticket)
       this.end(ticketId, 'human', 'stopped', at, `人停在 P1 方案门（${where}）`)
     }
+    return this.require(ticketId)
+  }
+  /**
+   * A person clicked one of a question card's choices: the answer is recorded as their message to the worker, the question
+   * is cleared, and the answer is delivered to the running Assignment (or starts one) so the worker continues from it.
+   * @throws UserError when the ticket is unknown or ended, its question is gone or was replaced, or the option is not one
+   * the question offered.
+   */
+  answerAttention(ticketId: string, attentionId: string, option: string): Ticket {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    const attention = ticket.attention
+    if (!attention || attention.id !== attentionId) throw new UserError('notAttention')
+    if (!attention.options?.includes(option)) throw new UserError('notAttentionOption')
+    const at = this.now()
+    this.replies.withdrawAttention(attention.id)
+    delete ticket.attention
+    this.addInput(ticket, { id: key('input', ticketId, 'answer', attentionId, at), kind: 'text', at,
+      text: `人对「${attention.question}」选了：${option}` })
     return this.require(ticketId)
   }
   /**

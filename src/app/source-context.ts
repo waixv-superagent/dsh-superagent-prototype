@@ -11,7 +11,7 @@ import type { Store } from './store.ts'
 export interface SourceContextDeps {
   readonly store: Pick<Store, 'atomic' | 'get' | 'set' | 'delete' | 'keys' | 'threads' | 'tickets' | 'triggers' | 'read'>
   readonly outbox: Pick<Outbox, 'send'>
-  readonly engine: Pick<EngineForSources, 'bindThread' | 'retarget' | 'threadClosed' | 'admissible' | 'decidePlan'>
+  readonly engine: Pick<EngineForSources, 'bindThread' | 'retarget' | 'threadClosed' | 'admissible' | 'decidePlan' | 'answerAttention'>
   readonly commands: Commands
   readonly sources: SourceRegistry
   /** Throws when accessed before initial setup completes. */
@@ -63,7 +63,8 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
     triggers: { get: id => store.triggers.get(id), latest: thread => store.read.threadTriggers(thread, 1)[0],
       disposition: id => store.triggers.disposition(id) },
     notify: message => { deps.outbox.send(message) },
-    decidePlan: (id, decision, note, via) => deps.engine.decidePlan(id, decision, note, via),
+    decidePlan: (id, decision, note, via, option) => deps.engine.decidePlan(id, decision, note, via, option),
+    answerAttention: (id, attentionId, option) => deps.engine.answerAttention(id, attentionId, option),
     report: (entry, value) => {
       if (!kind.health.includes(entry)) throw new Error(`The ${kind.kind} Source has no health entry ${entry}`)
       health.get(entry)?.set(value)

@@ -12,12 +12,13 @@ Opening the panel answers three questions, in this order:
 
 ## Tabs
 
-The tabs follow the workflow: **Overview**, **Source**, **Trigger**, **Eval**, **Execution**, and **Settings**. Until repository and account setup succeeds, Overview shows what is missing and links to the relevant setting.
+The tabs follow the workflow: **Overview**, **Agent status**, **Source**, **Trigger**, **Eval**, **Execution**, and **Settings**. Overview is the editor board; Agent status is the duty desk. Until repository and account setup succeeds, Overview shows what is missing and links to the relevant setting.
 
 | Tab | Shows |
 | --- | --- |
-| Overview | The duty desk as a five-lane board: **Needs your decision · To verify · 流水线 · Running · Recently ended**. The pipeline lane shows blocked follow-ups first, then the oldest running check. The header sums what waits on a person, each lane links to its filtered list, and ended cards name who verified the work (you, the pipeline, or nobody). Compact system problems and the day's counts sit above the board |
-| Source | Source state, setup problems and non-zero counts. Filtered Triggers and dropped messages cover the same 24-hour window as Overview |
+| Overview | The machine's editor board: who holds the Unreal Editor now (you, an agent, free, or unknown, treated as you), the last-hour timeline, every running or queued Ticket with its live tool, digest, elapsed time and latest progress, and what waits on a person. Read-only: it never starts, stops or hands over the editor |
+| Agent status | The duty desk as a five-lane board: **Needs your decision · To verify · 流水线 · Running · Recently ended**. The pipeline lane shows blocked follow-ups first, then the oldest running check. The header sums what waits on a person, each lane links to its filtered list, and ended cards name who verified the work (you, the pipeline, or nobody). Compact system problems and the day's counts sit above the board |
+| Source | Source state, setup problems and non-zero counts. Filtered Triggers and dropped messages cover the same 24-hour window as Agent status |
 | Trigger | Threads filtered by Subscribed, Evaluating, New Triggers in 24 h, or All Threads. Each Thread shows its Triggers newest first, Decisions and Subscriptions |
 | Eval | Decisions with their reason and matched rules, filtered by 接单与续做 / 闲聊 / 停止 / 忽略 / 未完成 / 全部. 一条带 escalation 的闲聊决策额外显示「升级为工单」和它的类别（缺陷 / 需求），并链到它建的工单 |
 | Execution | Executor state, Pause processing, and Tickets filtered by Open, Pending, To verify, Unverified, Working, Waiting for a Trigger or Ended. Ticket details show a local-verification gate for delivered work and a pipeline gate once the follow-up starts — a merged pipeline is history, so a Ticket a person's later message resumed shows no pipeline gate again — plus actions, authorization, waiting Inputs, Subscriptions and Assignments. A running Ticket leads with a compact **Now** block: the current tool, its latest progress report and who acts next — never a reasoning stream or token speed. The p4 settings also hold the Jenkins URL, account and API token used by the read-only pipeline check; the token is redacted from tool results and never written to prompts, logs or commits |
@@ -45,7 +46,7 @@ Ticket details show the execution history built from its Assignments, Inputs and
 
 The header search finds Triggers by text, id, Feishu message id or a stored link, such as a GitHub comment URL. A Feishu link missing from the original message becomes searchable only after the host reads it during the current process lifetime.
 
-The ticket finder on Overview searches titles, ticket ids, changelists, reviews, Thread ids, actors and summaries. It waits for two characters, queries numbers (ticket ids and CLs) immediately, and shows why each hit matched. Archived Tickets stay searchable and are marked **Archived**; the card shows the first eight characters of a ticket id.
+The ticket finder on Agent status searches titles, ticket ids, changelists, reviews, Thread ids, actors and summaries. It waits for two characters, queries numbers (ticket ids and CLs) immediately, and shows why each hit matched. Archived Tickets stay searchable and are marked **Archived**; the card shows the first eight characters of a ticket id.
 
 Search also finds Threads by references such as `#12` or a GitHub URL, and Tickets by title or a matching Thread.
 
@@ -53,7 +54,7 @@ Search also finds Threads by references such as `#12` or a GitHub URL, and Ticke
 
 1. **Focus on what matters.** Every element answers one of the three questions, or it is removed. A number appears only when it changes what the supervisor does.
 2. **Precise definitions.** Categories have checkable definitions, are mutually exclusive and cover every case, as the Ticket stages do. A label says whom a row waits for and what it needs, not an internal status code.
-3. **One place per concept.** Source state belongs in Source; Threads and Triggers in Trigger; Decisions in Eval; Tickets in Execution. Settings are grouped by the concept they configure. Overview summarizes these pages and links to them instead of becoming another detailed view.
+3. **One place per concept.** Source state belongs in Source; Threads and Triggers in Trigger; Decisions in Eval; Tickets in Execution. Settings are grouped by the concept they configure. The two overviews summarize these pages and link to them instead of becoming another detailed view: Overview is the editor board, Agent status the duty desk.
 4. **Domain structure.** The panel uses the domain terms. Internal identifiers appear only in folded details, and names replace identifiers where they can be resolved.
 5. **Honest state.** A count equals the length of the list it links to, and no state contradicts another fact.
 6. **Quiet by default.** Healthy states take no extra space. Problems must be actionable; a one-off network error is not enough. Rows needing a person offer their action directly; a reply whose CLI refused its arguments offers **Retry** and **Withdraw** instead of a growing retry count. Keep page explanations to one sentence and put further detail in the (?) tooltip. Destructive actions require confirmation.

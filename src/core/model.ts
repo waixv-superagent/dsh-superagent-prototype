@@ -285,8 +285,10 @@ export interface PolicyEffect {
 export type TicketEndBy = 'executor' | 'human'
 /** How a ticket ended: with its result, with its pull request merged or closed unmerged, with nothing to do, or stopped by a person. */
 export type TicketOutcome = 'completed' | 'merged' | 'closed' | 'dropped' | 'stopped'
+/** One context block a worker puts on a question card: its own label and text; `fold` puts it behind the detail tap. */
+export interface QuestionSection { label: string; text: string; fold?: boolean }
 /** A question for a person; `triggerId` is the human message that raised it, whose conversation it goes back to. */
-export interface Attention { id: string; question: string; triggerId?: string }
+export interface Attention { id: string; question: string; /** The worker's choices, when it offers any; a card shows them and a click answers. */ options?: string[]; /** The context the worker adds, in its own order; absent keeps the card's default layout. */ sections?: QuestionSection[]; triggerId?: string }
 /** Ticket aggregate: an authorized work item with its assignments, channels, thread bindings, and inputs. */
 export interface Ticket {
   id: string

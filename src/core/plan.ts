@@ -1,5 +1,5 @@
 /** The P1 plan gate (docs/012): a ticket's phases, the worker's fixed plan template, and the person's one-word decision. */
-import { liveTicket, type Ticket } from './model.ts'
+import { liveTicket, type QuestionSection, type Ticket } from './model.ts'
 
 /** The phases a ticket passes, from the P1 plan gate to delivery; the submit after delivery stays a person's (P5). */
 export type TicketPhase = 'plan' | 'implement' | 'verify' | 'deliver'
@@ -11,13 +11,22 @@ export interface Plan {
   text: string
   at: string
   /** A person's approval, which moves the ticket to implement. */
-  approved?: { at: string; via?: PlanVia }
+  approved?: { at: string; via?: PlanVia; option?: string }
   /** What a person asked to change instead of approving, oldest first; the worker revises and submits again. */
-  feedback?: { text: string; at: string; via?: PlanVia }[]
+  feedback?: { text: string; at: string; via?: PlanVia; option?: string }[]
   /** True from a submission until a person answers it; the plan waits then and the worker may not change files. */
   waiting?: true
   /** When the gate stops the ticket if nobody answers (see `PLAN_GATE_HOURS`). */
   deadline?: string
+  /** The worker's own question for the card, from the conversation; the card's standard wording when absent. */
+  question?: string
+  /** The choices the worker puts on the card; the standard three when absent, and at most four. */
+  options?: PlanOption[]
+  /**
+   * The context the worker puts on the card, in its own order, when the fixed template does not fit the conversation;
+   * absent keeps the standard 8-line layout, which stays the style reference for bug-fix and requirement plan cards.
+   */
+  sections?: QuestionSection[]
 }
 /** The labels of the fixed plan template, in the order a worker writes them (docs/012 §2). */
 export const PLAN_LABELS = ['现象', '代码线', '资产线', '配置线', '修复锚点', '影响面', '验证方案', '预算'] as const
@@ -28,6 +37,35 @@ export const PLAN_REPLY_HINT = '回 1 通过 ｜ 回 2 换方向（附一句）�
 /** Hours a plan gate waits before it stops the ticket: a gate that nobody answered defaults to stop, never to continue. */
 export const PLAN_GATE_HOURS = 24
 export type PlanDecision = 'approve' | 'revise' | 'stop'
+/**
+ * A choice a plan card offers: the label a person sees, the decision it records, and, for `revise`, the new direction that
+ * records without the form. The decision set is the gate's own, so a worker words the buttons without changing what they do.
+ */
+export interface PlanOption {
+  label: string
+  decision: PlanDecision
+  /** A revise option's new direction; absent means the option opens the form so the person writes one. */
+  note?: string
+}
+/** The card's question when the worker does not write one; the gate's own question stays `PLAN_QUESTION` for plain replies. */
+export const PLAN_CARD_QUESTION = '这版方案能不能开工'
+/** How many choices a card shows, and how long each label may be before the row no longer reads as buttons. */
+export const PLAN_OPTION_LIMITS = { min: 2, max: 4, label: 24 } as const
+/** The same bounds for a question card's choice labels. */
+export const CARD_OPTION_LIMITS = PLAN_OPTION_LIMITS
+/** Whether labels are 2–4, unique, non-empty and short enough for a button row. */
+export const validCardOptions = (options: readonly string[]): boolean =>
+  options.length >= CARD_OPTION_LIMITS.min && options.length <= CARD_OPTION_LIMITS.max
+  && new Set(options).size === options.length
+  && options.every(label => label.trim().length > 0 && Array.from(label).length <= CARD_OPTION_LIMITS.label)
+/** How many context blocks a question card shows, and how long each label and its text may be. */
+export const QUESTION_SECTION_LIMITS = { min: 1, max: 6, label: 20, text: 800 } as const
+/** Whether context sections are 1–6, each a short unique label and its own non-empty text. */
+export const validQuestionSections = (sections: readonly QuestionSection[]): boolean =>
+  sections.length >= QUESTION_SECTION_LIMITS.min && sections.length <= QUESTION_SECTION_LIMITS.max
+  && new Set(sections.map(section => section.label.trim())).size === sections.length
+  && sections.every(section => section.label.trim().length > 0 && Array.from(section.label).length <= QUESTION_SECTION_LIMITS.label
+    && section.text.trim().length > 0 && Array.from(section.text).length <= QUESTION_SECTION_LIMITS.text)
 /**
  * A ticket's phase; tickets stored before the P1 gate existed count as implementing, so an upgrade does not block work that
  * a person already authorized.
@@ -42,10 +80,22 @@ export const planOverdue = (ticket: Pick<Ticket, 'plan' | 'ended'>, now: string)
   return !!plan?.deadline && plan.deadline <= now
 }
 /** How a person's reply decides a waiting plan: `1` approves, `2` asks for another direction with the words after it, `3` stops. */
-export function planDecision(text: string): { decision: PlanDecision; note: string } | undefined {
+export function planDecision(text: string): { decision: PlanDecision; note: string; option?: string } | undefined {
   const match = /^\s*(?:回\s*)?([123])(?!\d)\s*[.、:：,，]?\s*(.*)$/s.exec(text)
   if (!match) return undefined
-  return { decision: match[1] === '1' ? 'approve' : match[1] === '2' ? 'revise' : 'stop', note: (match[2] ?? '').trim() }
+  const rest = (match[2] ?? '').trim()
+  if (match[1] === '2') return { decision: 'revise', note: rest }
+  // Only a bare number, or the number with its own label, approves or stops: ordinary prose that happens to start with a
+  // digit ("3 个地方要改", "1 点前别动") must reach the worker as a message, not end or approve the gate.
+  const label = match[1] === '1' ? /^(?:通过|可以|开工|ok|approve|go)$/i : /^(?:停|停止|stop)$/i
+  if (rest && !label.test(rest)) return undefined
+  return { decision: match[1] === '1' ? 'approve' : 'stop', note: '' }
+}
+/** How an exact choice label from the card decides the plan; a revise label's own note is the direction it records. */
+export function planChoice(text: string, plan: Pick<Plan, 'options'> | undefined): { decision: PlanDecision; note: string; option: string } | undefined {
+  const answer = text.trim()
+  const choice = plan?.options?.find(option => option.label === answer)
+  return choice ? { decision: choice.decision, note: choice.note ?? '', option: choice.label } : undefined
 }
 /** The plan's lines as label and content, for the card and the panel; text before the first label is dropped. */
 export function planLines(text: string): { label: string; text: string }[] {
