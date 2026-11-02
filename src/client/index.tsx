@@ -12,15 +12,28 @@ import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { openKnownSession, SessionNavigationError } from '../navigation.ts'
 import { App } from './app.tsx'
+import { Icon } from './controls.tsx'
 import { PluginConfig, usePageForm } from './deployment.tsx'
 import { en, zh } from './locales.ts'
 import type { T } from './text.ts'
+import TICKET_LINK_STYLES from './ticket-link.css?raw'
 
 type ClientContext = Context & { sessions: ISessions }
 const NS = 'dshSuperagent'
 const PANEL_ID = 'dsh-superagent' as MainPanelId
 const ENTRY = 'dsh-superagent'
 const ROUTE_KEY = 'dsh-superagent/route'
+const TICKET_LINK_STYLE_ID = 'dsh-superagent-ticket-link'
+
+/** The header action renders outside the panel, where provider.tsx injects the panel stylesheet, so inject its own style once. */
+function ensureTicketLinkStyles(): void {
+  if (typeof document === 'undefined' || document.getElementById(TICKET_LINK_STYLE_ID)) return
+  const style = document.createElement('style')
+  style.id = TICKET_LINK_STYLE_ID
+  style.textContent = TICKET_LINK_STYLES
+  document.head.append(style)
+}
+ensureTicketLinkStyles()
 
 function HammerIcon({ size }: SidebarPanelIconOwnerProps) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -62,7 +75,9 @@ const ticketOf = (sessionId: SessionId): string | undefined =>
 function TicketLink({ ctx, sessionId, t }: { ctx: ClientContext; sessionId: SessionId; t: T }) {
   const ticketId = ticketOf(sessionId)
   if (!ticketId) return null
-  return <button type="button" title={t('ticketLinkHint')} onClick={() => openTicket(ctx, ticketId)}>{`🛠️ ${t('ticketLink')}`}</button>
+  return <button type="button" className="dt-header-ticket" title={t('ticketLinkHint')} onClick={() => openTicket(ctx, ticketId)}>
+    <Icon name="review" size={14} />{t('ticketLink')}
+  </button>
 }
 
 /** Sidebar row marker on a worker Session: the same jump, reachable from the Session list. */
