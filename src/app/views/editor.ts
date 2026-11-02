@@ -1,4 +1,4 @@
-/** Editor page view: who holds the shared editor, which Tickets are working with their live tool, and what waits on a person. */
+/** Editor page view: who holds the Unreal Editor, which Tickets are working with their live tool, and what waits on a person. */
 import { completedArchived, ticketStage, type Ticket } from '../../core/index.ts'
 import { mcpToolName, type Activity, type ActivityView } from '../activity.ts'
 import type { EditorView } from '../editor.ts'

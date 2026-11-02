@@ -61,14 +61,16 @@ export function fullTime(value: string | undefined, lang: string): string {
   const date = new Date(value ?? '')
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(timeLocale(lang))
 }
-export interface CheckLine { text: string; state: 'pass' | 'fail' | 'skip' }
+export interface CheckLine { text: string; state: 'pass' | 'fail' | 'skip' | 'note' }
 /**
  * Splits a worker's free-text verification summary into scannable check lines. The worker writes prose, not structured
- * results, so this only classifies what each line says; the full text stays available as the original evidence.
+ * results, so this only classifies what each line says; the full text stays available as the original evidence. A line
+ * that neither ran nor failed is a recorded fact (`note`), not a check that was skipped: calling a shelve or a review
+ * link "not run" would misreport work the worker actually did.
  */
 export function checkLines(text: string): CheckLine[] {
   return text.split(/\r?\n|；|;/).map(line => line.trim()).filter(Boolean).slice(0, 8).map(line => ({ text: line.slice(0, 200),
     state: /未运行|未跑|没有跑|未执行|未测|没测|not run|skipped|unable to run/i.test(line) ? 'skip'
       : /失败|未通过|不通过|\bfail(?:ed|ure)?\b|✗|×/i.test(line) ? 'fail'
-      : /通过|成功|\bpass(?:ed)?\b|\bsucceed(?:ed)?\b|✓/i.test(line) ? 'pass' : 'skip' })) as CheckLine[]
+      : /通过|成功|已检查|已验证|\bpass(?:ed)?\b|\bsucceed(?:ed)?\b|✓/i.test(line) ? 'pass' : 'note' })) as CheckLine[]
 }

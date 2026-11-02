@@ -1,5 +1,5 @@
 /**
- * Editor page: who holds the shared editor, which Tickets are working with their live tool, and what waits on a person.
+ * Editor page: who holds the Unreal Editor, which Tickets are working with their live tool, and what waits on a person.
  * It only reports facts the host already holds; it never starts, stops or hands over the editor.
  */
 import { useState } from 'react'

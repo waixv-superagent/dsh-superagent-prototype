@@ -484,6 +484,7 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 }
 /* The board: five lanes, each one a stage that matters to a person; every card says what is being waited on. */
 .dt-page > .dt-column:has(> .dt-board) { max-width: 1440px; }
+/* The editor page uses the board's working width, not the 960px reading column: its live list and waiting rail need room. */
 .dt-page > .dt-column:has(.dt-editor-grid) { max-width: 1440px; }
 .dt-board { display: grid; grid-template-columns: 1.02fr .78fr 1.18fr 1.02fr .9fr; gap: 12px; align-items: stretch; }
 .dt-board-col { --dt-col: var(--dsw-alias-label-caption); display: flex; flex-direction: column; min-width: 0; padding: 10px 10px 9px; border: .5px solid var(--dsw-alias-border-l2); border-top: 2px solid color-mix(in srgb, var(--dt-col) 68%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--dt-col) 3%, transparent); }

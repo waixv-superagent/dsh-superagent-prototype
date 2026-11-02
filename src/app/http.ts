@@ -25,8 +25,8 @@ import type { TextCache } from './cache.ts'
 import type { LinkTarget, ViewHost } from './views/records.ts'
 import type { Variable } from './execution-environment.ts'
 import { policyHistory } from './settings-history.ts'
-import { overview } from './views/overview.ts'
 import { editorPage } from './views/editor.ts'
+import { overview } from './views/overview.ts'
 import { settingsView } from './views/settings.ts'
 import { sourcesStatus, type SetupState } from './views/sources.ts'
 import { decisionList, search, threadDetail, threadList } from './views/threads.ts'
@@ -167,8 +167,9 @@ const PipelineRequest = z.object({ state: z.enum(['running', 'blocked', 'merged'
 function routes(runtime: HttpHost): Routes {
   const { store } = runtime
   const ticket = (id: string) => { if (!store.tickets.get(id)) throw new RouteError(404, 'Ticket not found'); return id }
+  const executor = () => ({ ...executorLoad(store, runtime.executor.activeCount()),
+    maxWorkers: store.settings().executor.maxWorkers })
   const promptBody = (input: { body: (maxBytes?: number) => Promise<unknown> }) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096)
-  const executor = () => ({ ...executorLoad(store, runtime.executor.activeCount()), maxWorkers: store.settings().executor.maxWorkers })
   return {
     'GET state': () => stateView(runtime),
     'GET overview': () => overview(views(runtime), runtime.health, policyVersion(store.settings()),
