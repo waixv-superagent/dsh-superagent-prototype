@@ -59,6 +59,16 @@ describe('notifying a waiting plan', () => {
     expect(JSON.stringify(card)).toContain('先上 A 还是先上 B？')
     expect(JSON.stringify(card)).toContain('先上 B')
   })
+  it('replies in the ticket topic when its replies moved there', async () => {
+    const { host, send } = makeHost()
+    const moved = { ...ticket, replyChannel: { source: 'feishu' as const, thread: 'feishu:oc_topic',
+      address: { chatId: 'oc_topic', messageId: 'om_topic' } } } as Ticket
+    expect(await notifyPlan(host, { ...moved, plan })).toBe('om_9')
+    const args = send.mock.calls[0]![0] as string[]
+    expect(args.slice(0, 4)).toEqual(['im', '+messages-reply', '--message-id', 'om_topic'])
+    expect(args).toContain('--reply-in-thread')
+    expect(args).not.toContain('--chat-id')
+  })
   it('does nothing for an approved plan, and says why when a ticket has no chat or the Source is off', async () => {
     const { host: approvedHost, send } = makeHost()
     expect(await notifyPlan(approvedHost, { ...ticket, plan: { ...plan, approved: { at: '2026-09-23T00:00:01Z' } } })).toBeUndefined()
@@ -68,7 +78,7 @@ describe('notifying a waiting plan', () => {
     expect(off.warn).toHaveBeenCalledWith(expect.stringContaining('Feishu Source'))
     const group = makeHost({ source: trigger({ meta: { direct: false } }) })
     expect(await notifyPlan(group.host, { ...ticket, plan })).toBeUndefined()
-    expect(group.warn).toHaveBeenCalledWith(expect.stringContaining('no private chat'))
+    expect(group.warn).toHaveBeenCalledWith(expect.stringContaining('no Feishu conversation'))
   })
   it('remembers the card message link, so the panel opens the question rather than the chat', async () => {
     const send = vi.fn(async (args: string[]) => args.includes('+messages-mget')

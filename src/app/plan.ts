@@ -1,8 +1,8 @@
 /**
- * Sends a ticket's P1 plan to the person who decides it, in the thread the ticket started in when it has one: a Feishu
- * thread card replies to the ticket's source message, so a person who works in that thread can see and click it. Without a
- * Feishu source thread it uses the private chat the Feishu Source names for intervention cards, or the direct chat the
- * ticket started in. The card itself is built by `sources/feishu-card.ts`.
+ * Sends a ticket's P1 plan to the person who decides it, in the ticket's Feishu conversation: the topic its replies moved to,
+ * else the chat the ticket started in, so a person who works in that thread can see and click it. Without a Feishu
+ * conversation it uses the private chat the Feishu Source names for intervention cards. The card itself is built by
+ * `sources/feishu-card.ts`.
  */
 import { key, pendingPlan, type Ticket } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
@@ -38,10 +38,12 @@ export async function notifyPlan(host: PlanHost, ticket: Ticket): Promise<string
   const plan = pendingPlan(ticket)
   if (!plan) return undefined
   if (!host.sources.instance('feishu')?.enabled) { host.warn(`Ticket ${ticket.id}: its plan card needs the Feishu Source, which is off`); return undefined }
-  const source = ticket.channels?.find(channel => channel.source === 'feishu')
-  const replyTo = source?.address.messageId
-  const chat = source?.address.chatId ?? notifyChat(host.store, ticket)
-  if (!chat) { host.warn(`Ticket ${ticket.id}: no private chat for its plan card; set one in the Feishu Source`); return undefined }
+  // The ticket's own conversation first: the topic its replies moved to, else the Feishu chat it started in. The private
+  // chat is only for a ticket with no Feishu conversation at all.
+  const channel = ticket.replyChannel ?? ticket.channels?.find(item => item.source === 'feishu')
+  const chat = channel?.address.chatId ?? notifyChat(host.store, ticket)
+  const replyTo = channel?.address.messageId
+  if (!chat) { host.warn(`Ticket ${ticket.id}: no Feishu conversation for its plan card; set a private chat in the Feishu Source`); return undefined }
   try {
     const message = await sendCard(host, chat, planCard(ticket, plan), `plan-${key('plan', ticket.id, plan.at)}`, replyTo)
     // Remember which plan the card asks about, so its buttons can decide without matching a chat thread, and drop old entries.
