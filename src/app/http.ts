@@ -154,7 +154,6 @@ const SourceBlock = z.templateLiteral(['source:', z.string().regex(/^[a-z][a-z0-
 const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), SourceBlock])
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
 const PlanRequest = z.object({ decision: z.enum(['approve', 'revise', 'stop']), note: z.string().trim().max(2000).optional() })
-const ActivityQuery = z.object({ after: count.default(0), thinking: z.literal('1').optional() })
 const VerificationRequest = z.object({ note: z.string().trim().max(2000).optional() })
 /** A follow-up observation: `merged` completes, `blocked` needs a person, `running` records a check still in flight. */
 const PipelineRequest = z.object({ state: z.enum(['running', 'blocked', 'merged']),
@@ -217,10 +216,7 @@ function routes(runtime: HttpHost): Routes {
       return ticketSearch(views(runtime), q, limit)
     },
     'GET tickets/:id': ({ params }) => ticketPage(runtime, params.id),
-    'GET tickets/:id/activity': ({ params, query }) => {
-      const { after, thinking } = ActivityQuery.parse(query)
-      return runtime.activity.read(ticket(params.id), after, thinking === '1')
-    },
+    'GET tickets/:id/activity': ({ params }) => runtime.activity.read(ticket(params.id)),
     'POST tickets/:id/retry': ({ params }) => { const id = ticket(params.id); runtime.engine.retryTicket(id); return { retried: true } },
     'POST tickets/:id/plan': async ({ params, body }) => {
       const id = ticket(params.id)

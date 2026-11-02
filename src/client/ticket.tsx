@@ -1,6 +1,6 @@
 /** Ticket detail page: stage and actions, Mandate details, undelivered/delivered Inputs, subscribed Threads, and Assignments. */
 import { useState, type ReactNode } from 'react'
-import { LiveActivity } from './activity.tsx'
+import { TicketNow } from './activity.tsx'
 import { ApiError, usePoll, type TicketPageView } from './api.ts'
 import { Button, DisclosureRow, Dot, Icon, Tag, type IconName } from './controls.tsx'
 import { decisionMark, reportDot, ticketMark } from './marks.ts'
@@ -519,7 +519,8 @@ export function TicketPage({ id }: { id: string }) {
       {data.reply && <div className="dt-banner-actions">
         <ActionLink href={data.reply.url} icon="message">{t('answerIn', { source: valueLabel(t, 'source', data.reply.source) })}</ActionLink>
       </div>}</div>}
-    <LiveActivity id={data.id} sessionId={data.sessionId} />
+    {data.stage === 'working' && <TicketNow id={data.id} queued={data.action === 'queued'} updatedAt={data.updatedAt}
+      startedAt={data.assignments.filter(assignment => assignment.startedAt).at(-1)?.startedAt} summary={data.summary} />}
     {/* Ordinary progress stays in the Session/Channels; only a report that halted work (blocked/failed) is shown here. */}
     {data.actions.retry && data.summary && <p className={`dt-banner${failed ? ' dt-danger' : ''}${failedText ? ' dt-mono' : ''}`}>
       <span className="dt-banner-label">{t(failed ? 'failedPrefix' : 'blockedPrefix')}</span>{data.summary}

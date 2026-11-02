@@ -41,7 +41,7 @@ export interface Api {
   'GET tickets/search': { query: { q: string; limit?: number }; response: TicketSearchView }
   'GET tickets/:id': { response: TicketPageView }
   /** Live execution activity of the ticket's worker; the panel polls the summary collapsed and the reasoning text expanded. */
-  'GET tickets/:id/activity': { query?: { after?: number; thinking?: '1' }; response: ActivityView }
+  'GET tickets/:id/activity': { response: ActivityView }
   'POST tickets/:id/retry': { response: { retried: true } }
   /** A person answers the waiting P1 plan from the ticket page, with no chat round-trip. */
   'POST tickets/:id/plan': { body: { decision: PlanDecision; note?: string }; response: { decided: true } }

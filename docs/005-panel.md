@@ -20,7 +20,7 @@ The tabs follow the workflow: **Overview**, **Source**, **Trigger**, **Eval**, *
 | Source | Source state, setup problems and non-zero counts. Filtered Triggers and dropped messages cover the same 24-hour window as Overview |
 | Trigger | Threads filtered by Subscribed, Evaluating, New Triggers in 24 h, or All Threads. Each Thread shows its Triggers newest first, Decisions and Subscriptions |
 | Eval | Decisions with their reason and matched rules, filtered by 接单与续做 / 闲聊 / 停止 / 忽略 / 未完成 / 全部. 一条带 escalation 的闲聊决策额外显示「升级为工单」和它的类别（缺陷 / 需求），并链到它建的工单 |
-| Execution | Executor state, Pause processing, and Tickets filtered by Open, Pending, To verify, Unverified, Working, Waiting for a Trigger or Ended. Ticket details show a local-verification gate for delivered work and a pipeline gate once the follow-up starts, plus actions, authorization, waiting Inputs, Subscriptions and Assignments |
+| Execution | Executor state, Pause processing, and Tickets filtered by Open, Pending, To verify, Unverified, Working, Waiting for a Trigger or Ended. Ticket details show a local-verification gate for delivered work and a pipeline gate once the follow-up starts, plus actions, authorization, waiting Inputs, Subscriptions and Assignments. A running Ticket leads with a compact **Now** block: the current tool, its latest progress report and who acts next — never a reasoning stream or token speed |
 | Settings | Sources, Eval, Execution, Prompts and Deployment. Each group includes its save history |
 
 ### Reading individual records

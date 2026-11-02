@@ -92,7 +92,7 @@ export interface PanelServer {
   prompts: PromptsView
   tickets: { open: TicketRow[]; ended: TicketRow[] }; ticketDetails: Record<string, TicketPageView>
   /** Live worker activity the Ticket page polls; tests replace it to simulate a running worker. */
-  activity: (ticketId: string, query: { after?: string; thinking?: string }) => ActivityView | undefined
+  activity: (ticketId: string) => ActivityView | undefined
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; verification: TicketRow[]; working: TicketRow[]; idle: TicketRow[]; pipeline: TicketRow[]; ended: TicketRow[]
@@ -362,8 +362,8 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET tickets': { query: ['state', 'offset', 'limit'], answer: ({ query }) => page(server.tickets[query.state === 'ended' ? 'ended'
     : 'open']) },
   'GET tickets/:id': { answer: ({ params }) => server.ticketDetails[params.id] ?? refuse(404, 'Ticket not found') },
-  'GET tickets/:id/activity': { query: ['after', 'thinking'], answer: ({ params, query }) => server.activity(params.id, query) ?? {
-    live: false, startedAt: 0, updatedAt: 0, tool: null, calls: 0, tokens: 0, rate: null } },
+  'GET tickets/:id/activity': { answer: ({ params }) => server.activity(params.id) ?? {
+    live: false, updatedAt: 0, tool: null } },
   'POST tickets/:id/plan': { body: true, answer: ({ params }) => ticketOf(params.id) ? { decided: true } : refuse(404, 'Ticket not found') },
   'POST tickets/:id/retry': { answer: ({ params }) => {
     const ticket = ticketOf(params.id)
