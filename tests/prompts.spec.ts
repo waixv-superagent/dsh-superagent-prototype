@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Store } from '../src/app/store.ts'
-import { Prompts, builtInBase, composePrompt, defaultPrompts, policySection, promptParts, type PromptConfig } from '../src/app/prompts.ts'
+import { Prompts, builtInBase, composePrompt, composeSkill, defaultPrompts, policySection, promptParts, type PromptConfig } from '../src/app/prompts.ts'
 import { USER_ERRORS, UserError } from '../src/core/index.ts'
 import { KV } from '../src/kv.ts'
 import { SettingsSchema, policyVersion } from '../src/policy.ts'
@@ -120,6 +120,12 @@ it('registers the built-in Source skills, Feishu only with a Feishu bot, before 
     expect(skills[2]![1]).toBe('Tag releases.')
     expect(new Prompts(store, () => 100000, variables, () => false).skills(config).map(([name]) => name)).toEqual(['github', 'release'])
   })
+})
+
+it('tells the Feishu skill to create a document as its ticket requester', () => {
+  const skill = composeSkill(defaultPrompts(), 'feishu')
+  expect(skill).toContain('created and edited with the ticket requester\'s own Feishu user identity')
+  expect(skill).toContain('Never create such a document as the bot')
 })
 
 

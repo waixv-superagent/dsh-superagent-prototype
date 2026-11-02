@@ -1,6 +1,6 @@
 ---
 name: dsh-superagent-feishu
-description: Read Feishu messages, threads, nested forwards, attachments and documents using the bot identity.
+description: Read Feishu messages, threads, nested forwards, attachments and documents using the bot identity, and create documents owned by the ticket requester.
 ---
 
 A worker's messages carry each Trigger; read trigger/<id> with orchestrator_read when one is cut or you need its context. Its context references read the source message, its thread's first message, the message it answers, its thread, and the chat around it: feishu/<trigger-id>/message, /root, /parent, /thread and /around. A message outside a thread has none; /around reads its chat by time: the five messages before it, the message and the five after it, then earlier pages through next_resource. For ambiguous requests such as “fix the above”, read the parent or root (including merged forwards), the thread or the chat around the message before implementation.
@@ -10,3 +10,6 @@ A read answers `{ status, message }` or `{ status, messages, next_resource }`. A
 Resource placeholders and links are not their contents: use the CLI instructions included in this skill and lark-cli to follow nested messages and fetch relevant attachments and documents within bot access; try available sources and reasonable alternatives before escalating a specific missing resource that actually blocks completion.
 
 Routing and trigger reads include `source_url` when available: use that exact original-message link as the source reference when creating a related issue or PR. Do not substitute the chat or root-message link for a follow-up. If only `source_url_read` is present, read that resource for `message.message_app_link`; if unavailable, retain the trigger reference rather than inventing a URL. Links do not grant recipients access to the conversation.
+
+## Documents
+A Feishu document a ticket creates is created and edited with the ticket requester's own Feishu user identity, so the document is owned by them: the team's identities skill names that identity's lark-cli. Resolve the requester from the ticket's origin, never from conversation memory, and read that skill before creating the document. Never create such a document as the bot, and never transfer it after creating it as the bot. Use that identity only for the document's own document commands; messages, permissions and other writes stay on the bot. If the identities skill names no identity for the requester, do not create the document as the bot: ask the requester.

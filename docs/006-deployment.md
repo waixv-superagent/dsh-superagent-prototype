@@ -68,6 +68,19 @@ Both presets run with `danger-full-access` as the operator's OS user and read me
 
    Both configurations share the keychain entry for the app secret. To remove only the bot configuration, delete its directory; do not run `lark-cli config remove`, which would affect the shared secret.
 
+3. To create a document owned by the person who requested it, give that person's Feishu user identity its own `lark-cli` configuration and wrapper, and record it in an `identities` team skill (**Prompts** in the panel):
+
+   ```sh
+   cat > ~/.local/bin/lark-user <<'EOF'
+   #!/bin/sh
+   export LARKSUITE_CLI_CONFIG_DIR="$HOME/.lark-cli"
+   exec lark-cli "$@"
+   EOF
+   chmod +x ~/.local/bin/lark-user
+   ```
+
+   Use the configuration that holds that person's user login for the app; if the personal configuration is not for this app, create another configuration directory and log in as that person. The bot configuration above stays restricted to the bot identity. A worker creates and edits a document with the requester's identity, so the document is owned by that person, and uses the bot for everything else. The host does not check this second CLI; the `identities` skill is what tells the agents to use it and for what, and the built-in Feishu skill states the rule. In the skill, name the person's `open_id` and the command, for example: `Alice (ou_…): her documents use ~/.local/bin/lark-user, which logs in as her.`
+
 ## Install
 
 Run this block once, on a machine that has no `superagent` profile yet:
