@@ -16,9 +16,13 @@ Setup has many steps, so an agent does it with you. Ask your coding agent:
 
 It asks one short question at a time, shows the full plan once, and then installs and configures everything. [SETUP.md](SETUP.md) is what it follows.
 
+## Configuration
+
+After setup, change Sources, Policy, Execution and Prompts in the panel's **Settings** page. [015 Configuration guide](docs/015-configuration-guide.md) walks through each field, the Feishu topic chat, what restarts when a save is made, and how to check that a change worked.
+
 ## Documentation
 
-Read the numbered documents in order; each builds only on the ones before it.
+Read the numbered documents in order; each builds only on the ones before it. These pages live in the repository, so a behavior change and its documentation land in the same reviewed pull request; `pnpm test` checks their numbering and local links.
 
 - [000 Philosophy](docs/000-philosophy.md)
 - [001 Domain model](docs/001-domain.md)
@@ -30,6 +34,8 @@ Read the numbered documents in order; each builds only on the ones before it.
 - [007 Architecture](docs/007-architecture.md)
 - [008 Cookbook](docs/008-cookbook.md): adding a Source
 - [009 p4 and Swarm delivery](docs/009-p4-swarm.md): the Perforce backend, shelved changelists and reviews
+
+Practical companion: [015 Configuration guide](docs/015-configuration-guide.md).
 
 ## Development
 

@@ -76,4 +76,4 @@ Send one message, under 300 words: what will be installed, the accounts and CLIs
 - The panel URL, and that the **Superagent** entry in the sidebar is where to look.
 - How to try it: from an account on the allowed list, comment `@<agent login> <request>` on an issue in the repository. A Ticket appears on the overview within about a minute.
 - Three rules for the operator, from the Responsibility section of `docs/000-philosophy.md`: start narrow, tune for less noise, own what the agent says.
-- Where to read more: the numbered documents in `docs/`, in order.
+- Where to read more: the numbered documents in `docs/`, in order. To change Sources, Policy or Execution later, follow [docs/015-configuration-guide.md](docs/015-configuration-guide.md); it also covers the Feishu topic chat.

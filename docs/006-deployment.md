@@ -184,10 +184,10 @@ Limits:
 
 ## Settings
 
-Setup must succeed before polling or work starts. Overview lists missing requirements and links to their settings. A settings change runs setup again. If you fix something outside the application, such as CLI authentication, choose **Check again**.
+Setup must succeed before polling or work starts. Overview lists missing requirements and links to their settings. A save that changes a field setup reads, namely the GitHub repository or agent CLI or the Feishu bot CLI, runs setup again and restarts dsh-superagent; other saves apply without a restart. If you fix something outside the application, such as CLI authentication, choose **Check again**.
 
 1. **Sources.** Set the GitHub repository (`owner/name`) and agent CLI, for example `/home/me/.local/bin/gh-agent`. Requests normally arrive through the agent account's notifications. A new Issue or comment mentioning the account arrives on the next poll; adding a mention by editing an existing Issue body does not. Post a new comment instead. For Feishu, set the bot CLI, chats, each chat's receive-all or mentions-only mode, whether to receive direct messages, and optionally a topic chat (listed with receive-all) where each accepted ticket gets its own topic.
-2. **Policy.** The two example rules can be edited or removed. Under **On each Source**, add the GitHub accounts and Feishu users who may ask for work; until a list has someone, no request can become a Ticket. With Feishu, a chat can be chosen to sync the list from, at startup and on **Sync now**.
+2. **Policy.** The two example rules can be edited or removed. Under **On each Source**, add the GitHub accounts and Feishu users who may ask for work, and set each receiving scope's admission cells; until a list or a cell admits someone, a request does not become a Ticket. With Feishu, a chat can be chosen to sync the list from, at startup and on **Sync now**.
 3. **Execution.** The directory root and a prepare command. To give each Ticket a checkout of the repository:
 
    ```sh
