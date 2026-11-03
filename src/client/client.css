@@ -640,7 +640,9 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
   .dt-board { gap: 9px; }
   .dt-board-col { padding: 9px 8px 8px; }
 }
-@container (max-width: 1040px) {
+/* Five lanes stay readable down to a 900px page: a 1344px Mac window keeps ~968px after the 280px sidebar and the
+   48px page padding, and the lanes hold their 960px board width there. Narrower pages read better as two columns. */
+@container (max-width: 900px) {
   .dt-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @container (max-width: 700px) {
