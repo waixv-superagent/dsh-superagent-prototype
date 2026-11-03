@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { TextCache } from '../src/app/cache.ts'
 import { Store } from '../src/app/store.ts'
 import { SettingsSchema } from '../src/policy.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
@@ -9,7 +10,7 @@ import { feishuKind } from '../src/sources/feishu.ts'
 import { githubKind } from '../src/sources/github.ts'
 import { snapshot, threadSummary, ticketSummary, triggerView } from '../src/app/views/records.ts'
 import { basisFacts, ticketDetail, ticketRow, ticketSearch } from '../src/app/views/tickets.ts'
-import { threadDetail } from '../src/app/views/threads.ts'
+import { search, threadDetail } from '../src/app/views/threads.ts'
 import { droppedReplies, sourcesStatus } from '../src/app/views/sources.ts'
 import { editorPage, editorUse, shortTitle } from '../src/app/views/editor.ts'
 import { overview } from '../src/app/views/overview.ts'
@@ -66,6 +67,16 @@ const live = (id: string) => store.tickets.save({ id, title: id, decisionId: 'd'
   origin: { triggerId: 'e0', triggerIds: ['e0'] }, assignments: [], inputs: [] })
 const message = (id: string, actor: { source: string; id: string }, human = true) => ({ id, source: actor.source,
   threads: [{ source: 'feishu', id: 'oc_1:om_root' }], actor, human, at, text: `message ${id}`, meta: {} })
+
+it('reports the Source a Ticket was accepted from beside its search result', () => {
+  const host = views()
+  live('a240d309cb49fb2b7180d55d5863be51')
+  const ticket = store.tickets.get('a240d309cb49fb2b7180d55d5863be51')!
+  store.tickets.save({ ...ticket, title: 'search wording check',
+    mandate: { ...ticket.mandate, actor: { source: 'tapd', id: 'bug-9' } } })
+  expect(search(host, 'search wording', new TextCache(1000)).tickets.map(hit => [hit.title, hit.source]))
+    .toEqual([['search wording check', 'tapd']])
+})
 
 it('names each sender as the Policy lists it, by its id where the id is readable, and as its kind names one it does not list', () => {
   const view = snapshot(views())

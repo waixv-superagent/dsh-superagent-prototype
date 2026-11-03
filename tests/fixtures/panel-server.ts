@@ -38,7 +38,7 @@ export function actor(source: string, id: string, human = true): Actor {
 }
 type TicketFields = Omit<TicketRow, 'stage' | 'action'>
 const TICKET = {
-  id: 't1', title: '修复回归', state: 'open', actions: { retry: false, stop: true, confirm: false, verify: false, rework: false }, strength: 'explicit', ended: undefined,
+  id: 't1', title: '修复回归', state: 'open', actions: { retry: false, stop: true, confirm: false, verify: false, rework: false }, strength: 'explicit', source: 'feishu', ended: undefined,
   attention: undefined, assignments: 1, inputs: 2, undelivered: 0, deliveryError: undefined, sessionId: 'worker-t1', directory: '/w/t1',
   summary: 'working on it', createdAt: '2026-09-22T00:00:00Z', updatedAt: '2026-09-23T00:00:00Z',
   threads: [{ key: 'github:42', source: 'github', title: '#42 Fix login', url: 'https://github.com/acme/widgets/pull/42',
@@ -103,7 +103,7 @@ export interface PanelServer {
   person: TicketRow[]; verification: TicketRow[]; working: TicketRow[]; idle: TicketRow[]; pipeline: TicketRow[]; ended: TicketRow[]
   /** Answers `GET tickets/search`; the Overview finder lets a test provide ranked hits. */
   ticketSearch?: (query: string) => ApiResponse<'GET tickets/search'>
-  search: Pick<ApiResponse<'GET search'>, 'items' | 'threads'>; history: HistoryView
+  search: Pick<ApiResponse<'GET search'>, 'items' | 'threads'> & { tickets?: ApiResponse<'GET search'>['tickets'] }; history: HistoryView
   requests: { path: string; method: string; body?: unknown }[]
   /** Requests with undeclared query params or invalid body presence; asserted empty after each test. */
   misuse: string[]
@@ -360,7 +360,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET search': { query: ['q'], answer: async ({ query }) => {
     const q = query.q ?? ''
     await server.searching?.(q)
-    return { tickets: [], threads: server.search.threads, items: server.search.items.filter(item => item.preview.includes(q)) }
+    return { tickets: server.search.tickets ?? [], threads: server.search.threads, items: server.search.items.filter(item => item.preview.includes(q)) }
   } },
   'GET sources': { answer: sourceStatuses },
   'GET settings': { answer: settingsView },
