@@ -6,7 +6,7 @@ import { usePanel, mount, remount, all, at, find, field, settle, tab, click, tex
 import { server, ticketSummary, threadSummary } from './fixtures/panel-server.ts'
 
 usePanel()
-/** The first tab is the editor view now; these cases exercise the board, so switch to it explicitly. */
+/** The overview opens on the board now; these cases still pin it explicitly. */
 const openOverview = async (dictionary = zh) => {
   const top = tab(dictionary['tab.editor'])
   if (top.getAttribute('aria-selected') !== 'true') await click(top)

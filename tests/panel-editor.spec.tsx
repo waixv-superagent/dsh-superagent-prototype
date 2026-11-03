@@ -6,25 +6,31 @@ import { usePanel, mount, mountHome, remount, all, click, tab } from './fixtures
 import { server, ticketSummary } from './fixtures/panel-server.ts'
 
 usePanel()
+/** 概览 opens on the board now; the editor cases enter through the switch. */
+const openEditor = async () => {
+  await click(tab(zh['tab.editor']))
+  await click(tab(zh.homeViewEditor))
+}
 const counts = () => all('.dt-editor-counts [data-count]').map(count => count.textContent)
 
-it('opens on the editor view, with the board one switch away', async () => {
+it('opens on the board view, with the editor one switch away', async () => {
   await mountHome()
   expect(tab(zh['tab.editor']).getAttribute('aria-selected')).toBe('true')
   expect(all('.dt-tabs [role="tab"]').map(tab => tab.textContent)).toEqual(['概览', '来源', '触发', '评估', '执行', '设置'])
   expect(all('.dt-home-switch [role="tab"]').map(tab => tab.textContent)).toEqual(['编辑器', '看板'])
-  expect(tab(zh.homeViewEditor).getAttribute('aria-selected')).toBe('true')
-  expect(document.querySelector('.dt-editor-hero')).not.toBeNull()
-  expect(document.querySelector('.dt-editor-timeline')).not.toBeNull()
-
-  await click(tab(zh.homeViewBoard))
   expect(tab(zh.homeViewBoard).getAttribute('aria-selected')).toBe('true')
   expect(document.querySelector('.dt-verdict')).not.toBeNull()
   expect(document.querySelector('.dt-editor-hero')).toBeNull()
-  // The switch is a view, not a second tab bar: the page tab stays 概览 while the board shows.
-  expect(tab(zh['tab.editor']).getAttribute('aria-selected')).toBe('true')
+
   await click(tab(zh.homeViewEditor))
+  expect(tab(zh.homeViewEditor).getAttribute('aria-selected')).toBe('true')
   expect(document.querySelector('.dt-editor-hero')).not.toBeNull()
+  expect(document.querySelector('.dt-editor-timeline')).not.toBeNull()
+  expect(document.querySelector('.dt-verdict')).toBeNull()
+  // The switch is a view, not a second tab bar: the page tab stays 概览 while the editor shows.
+  expect(tab(zh['tab.editor']).getAttribute('aria-selected')).toBe('true')
+  await click(tab(zh.homeViewBoard))
+  expect(document.querySelector('.dt-verdict')).not.toBeNull()
 })
 
 it('opens the board at the Tickets behind a hero count and rings just those cards', async () => {
@@ -33,7 +39,7 @@ it('opens the board at the Tickets behind a hero count and rings just those card
     ticketSummary({ id: 't6', title: '升级依赖' }, { stage: 'working', action: 'queued' }),
   ]
   await mount()
-  await click(tab(zh['tab.editor']))
+  await openEditor()
   const door = (focus: string) => all('.dt-editor-counts button').find(button => button.getAttribute('data-count') === focus)!
   // Every count with something behind it is a door, and its title says where it goes.
   expect(all('.dt-editor-counts button').map(button => button.getAttribute('data-count')))
@@ -76,7 +82,7 @@ it('says who holds the editor, lists working Tickets with their live tool, and t
       recent: [{ name: 'Bash', digest: 'E:/game/CompileSunGame.bat -target', at: callAt, endedAt: null }] }
     : undefined
   await mount()
-  await click(tab(zh['tab.editor']))
+  await openEditor()
   expect(tab(zh['tab.editor']).getAttribute('aria-selected')).toBe('true')
   expect(document.querySelector('.dt-editor-hero')?.getAttribute('data-holder')).toBe('person')
   expect(document.querySelector('.dt-editor-holder')?.textContent).toBe('你正在用')
@@ -137,7 +143,7 @@ it('reads a live MCP tool as using the editor and names its server in the tool t
     recent: [{ name: 'mcp__unreal__spawn_actor', digest: '{"actor":"BP_Test"}', at: callAt - 4_000, endedAt: null },
       { name: 'Read', digest: 'Content/Test.umap', at: callAt - 9_000, endedAt: callAt - 8_000 }] })
   await mount()
-  await click(tab(zh['tab.editor']))
+  await openEditor()
   const row = all('.dt-editor-run')[0]!
   expect(row.querySelector('.dt-editor-badge')?.textContent).toBe('正在用编辑器')
   expect(row.querySelector('.dt-editor-run-live')?.textContent).toBe('MCP unreal · spawn_actor · {"actor":"BP_Test"} · 4s')
@@ -151,7 +157,7 @@ it('reads a live MCP tool as using the editor and names its server in the tool t
 
 it('opens a Ticket waiting for verification from its row', async () => {
   await mount()
-  await click(tab(zh['tab.editor']))
+  await openEditor()
   await click(all('.dt-editor-wait[data-kind="verify"] button').find(button => button.textContent === '去验收')!)
   expect(server.requests.some(request => request.path === 'tickets/t8' && request.method === 'GET')).toBe(true)
 })
@@ -163,7 +169,7 @@ it('keeps an unreadable editor on the safe side and says when nothing is working
   server.person = []
   server.verification = []
   await mount()
-  await click(tab(zh['tab.editor']))
+  await openEditor()
   expect(document.querySelector('.dt-editor-hero')?.getAttribute('data-holder')).toBe('unknown')
   expect(document.querySelector('.dt-editor-holder')?.textContent).toBe('无法确认，按人在用')
   expect(document.querySelector('.dt-editor-title')?.getAttribute('title')).toBe('读取进程表失败，按人在用')
@@ -175,7 +181,7 @@ it('keeps an unreadable editor on the safe side and says when nothing is working
   server.editor = { holder: 'person', activity: 'editing', since: '2026-09-22T08:00:00.000Z', pid: 1, build: null,
     at: '2026-09-22T08:10:00.000Z' }
   await remount()
-  await click(tab(zh['tab.editor']))
+  await openEditor()
   expect(all('.dt-editor-empty p')[1]?.textContent).toBe('你用编辑器时，agent 的活会排到之后。')
 })
 
@@ -186,13 +192,13 @@ it('reads the editor as loading before the first probe, and as free while an age
       workers: [], hidden: 0 },
     counts: { working: 0, queued: 0, person: 0, verification: 0 } })
   await mount()
-  await click(tab(zh['tab.editor']))
+  await openEditor()
   expect(document.querySelector('.dt-editor-holder')?.textContent).toBe('读取中')
   server.editorPage = undefined
   // A host that predates the build holder still reports free + building; the page keeps that fallback.
   server.editor = { holder: 'none', activity: 'building', since: null, pid: null, build: null, at: '2026-09-22T08:10:00.000Z' }
   await remount()
-  await click(tab(zh['tab.editor']))
+  await openEditor()
   expect(document.querySelector('.dt-editor-holder')?.textContent).toBe('空着，agent 在编译')
 })
 
@@ -202,7 +208,7 @@ it('shows a running build as the holder and tags the Tickets delivered before it
     at: '2026-09-22T08:10:00.000Z' }
   server.build = { pid: 42, since, included: ['t8'] }
   await mount()
-  await click(tab(zh['tab.editor']))
+  await openEditor()
   expect(document.querySelector('.dt-editor-hero')?.getAttribute('data-holder')).toBe('build')
   expect(document.querySelector('.dt-editor-holder')?.textContent).toBe('编译中')
   expect(document.querySelector('.dt-editor-facts')?.textContent).toContain('编译前已交付 1 张待验单')
@@ -218,7 +224,7 @@ it('shows a running build as the holder and tags the Tickets delivered before it
   // A build that started before any delivery contains none of the waiting Tickets, and says so.
   server.build = { pid: 42, since, included: [] }
   await remount()
-  await click(tab(zh['tab.editor']))
+  await openEditor()
   expect(document.querySelector('.dt-editor-facts')?.textContent).toContain('编译前没有待验单交付')
   expect(all('.dt-editor-wait[data-kind="verify"] .dt-tag')).toHaveLength(0)
 })
@@ -230,7 +236,7 @@ it('shows the running build time beside a person who is also using the editor', 
     build: { pid: 42, since: buildSince }, at: '2026-09-22T08:10:00.000Z' }
   server.build = { pid: 42, since: buildSince, included: ['t8'] }
   await mount()
-  await click(tab(zh['tab.editor']))
+  await openEditor()
   const facts = document.querySelector('.dt-editor-facts')?.textContent ?? ''
   expect(document.querySelector('.dt-editor-hero')?.getAttribute('data-holder')).toBe('person')
   expect(facts).toMatch(/编译 \d{2}:\d{2} 起/)

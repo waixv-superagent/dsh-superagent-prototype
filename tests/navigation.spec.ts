@@ -59,7 +59,7 @@ it('reads each page a tab remembered with the parameters it takes, and leaves ou
   expect(parseRoute({ page: 'execution', id: 5, query: { filter: 'idle' } })).toEqual({ page: 'execution', query: { filter: 'idle' } })
   expect(parseRoute({ page: 'settings', query: { group: 'policy', source: 'feishu' } }))
     .toEqual({ page: 'settings', query: { group: 'source', source: 'feishu' } })
-  // The removed Agent-status tab opens the board view of 概览; an unknown view keeps the editor view.
+  // The removed Agent-status tab opens the board view of 概览; an unknown view falls back to the default board view.
   expect(parseRoute({ page: 'overview' })).toEqual({ page: 'editor', query: { view: 'board' } })
   expect(parseRoute({ page: 'editor', query: { view: 'board' } })).toEqual({ page: 'editor', query: { view: 'board' } })
   expect(parseRoute({ page: 'editor', query: { view: 'nope' } })).toEqual({ page: 'editor' })

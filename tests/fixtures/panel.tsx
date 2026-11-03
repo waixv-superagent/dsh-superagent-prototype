@@ -35,7 +35,7 @@ export async function settle() {
   })
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 }
-/** Most page tests start on the board (the 概览 tab's other view); only an explicit route or `mountHome` exercises the editor view. */
+/** Most page tests start on the board (the 概览 tab's default view); the editor cases enter through the switch. */
 export async function mount(dictionary: Record<string, string> = zh, route: object | null = { page: 'overview' }) {
   const key = 'dsh-superagent/route'
   if (route === null) sessionStorage.removeItem(key)
