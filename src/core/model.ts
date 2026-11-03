@@ -446,6 +446,27 @@ export const latestAssignment = (ticket: Ticket): Assignment | undefined => tick
 /** The latest report any of a ticket's Assignments made, which is what the ticket last said. */
 export const latestReport = (ticket: Pick<Ticket, 'assignments'>): Assignment['report'] => ticket.assignments.findLast(assignment => assignment.report)?.report
 /**
+ * Whether Inputs reached the Assignment's worker at or after its report, so it has been busy with newer work since: the test
+ * the Executor itself uses to decide a report no longer holds a handoff or an interrupted Assignment back.
+ */
+export function busySinceReport(assignment: Assignment | undefined): boolean {
+  const report = assignment?.report
+  return !!assignment?.deliveredAt && !!report && assignment.deliveredAt >= report.at
+}
+/**
+ * The latest Report while it still speaks for the Ticket, or undefined once it is history. Inputs that reached its worker
+ * after it supersede it, and a person's message lifts a blocked or failed one (`waitsForPerson`): the Executor continues the
+ * work by itself in exactly those cases, so the Ticket is working again rather than waiting on the old report. Only the
+ * latest Assignment's own Report can speak for the Ticket, so a retry or a re-dispatch reads as working until it reports.
+ */
+export function currentReport(ticket: Ticket): Assignment['report'] {
+  const assignment = latestAssignment(ticket)
+  const report = assignment?.report
+  if (!report) return undefined
+  if (report.state === 'blocked' || report.state === 'failed') return waitsForPerson(ticket) ? report : undefined
+  return busySinceReport(assignment) ? undefined : report
+}
+/**
  * Until when a ticket's worker had a turn to read what reached it: its latest report, but a progress report when `progress`
  * is false, or the end of its latest turn, whichever is later.
  */

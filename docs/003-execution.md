@@ -12,13 +12,15 @@ Each open Ticket has one stage, determined by what it is waiting for. Read the t
 | person / answer | It has an Attention | Awaiting answer |
 | pipeline / running, blocked | Delivered work is followed through its review and pipeline from the moment the worker reports it, including a change delivered into a pull request the Ticket opened, which a person approves and merges there; blocked covers a failing check the host cannot clear, an approval waiting for the submit, and a green review waiting for a person, and is pinned above running work | Pipeline · Blocked |
 | person / verify | Delivered work, a changelist or a review, still waits for the person's local check, recorded in parallel with the pipeline | Awaiting local verification |
-| person / review | The latest Report is `ready`, and no pull request the Ticket opened is still open | Awaiting review |
+| person / review | The latest Report is `ready`, no pull request the Ticket opened is still open, and no Input reached its worker after the Report | Awaiting review |
 | person / blocked, failed | The latest Report is `blocked` or `failed`, and no person's message reached the Ticket since | Blocked · Failed |
 | working / queued | No Assignment, or a pending one | Queued |
 | idle | The latest Report is `waiting`, or the Assignment ended | Waiting for a Trigger |
 | working | Everything else | Working |
 
 A `person` stage means the Ticket cannot continue without human input. A new human message releases a `blocked` or `failed` Ticket to its Executor, so it moves to the next matching stage, usually `working`.
+
+The latest Report speaks for the Ticket only while its worker has nothing newer to do. An Input delivered to its worker after the Report makes the Ticket `working` again, except that a `blocked` or `failed` Report keeps waiting for a person until a person's message lifts it: the Executor does not continue that one on its own. A retry or a re-dispatch starts a new Assignment, so the Ticket reads as working from that moment rather than holding the old Report, and the stage, summary and retry action of a Report that is history are no longer shown. This is the same test the Executor uses to hand off.
 
 An `idle` Ticket has finished its turn without an outstanding question. A Trigger on a subscribed Thread can continue it.
 
