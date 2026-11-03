@@ -46,6 +46,17 @@ export interface SourceContext {
    * acknowledge only messages the bot will take up, such as with a receipt reaction.
    */
   admissible(trigger: Trigger): boolean
+  /**
+   * Whether this Trigger's person may control the whole deployment from the conversation, such as pausing processing:
+   * true only for a person on the Policy's allowed list for the Trigger's Source.
+   */
+  mayControl(trigger: Trigger): boolean
+  /**
+   * Pauses or resumes processing on a person's command from this Source's own conversation, the same switch the panel's
+   * Pause control sets; returns whether processing is paused now. It applies even while paused, which is how a resume
+   * command gets through, and records the save under the `command` origin.
+   */
+  pauseProcessing(paused: boolean): Promise<boolean>
   atomic<T>(work: () => T): T
   /** Source-scoped KV records (such as read cursors); setting `undefined` removes an entry. */
   state: { get<V>(key: Key<V>): V | undefined; set<V>(key: Key<V>, value: V | undefined): void; keys<V>(family: Family<V, never>): Key<V>[] }

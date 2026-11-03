@@ -381,6 +381,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/feishu.ts` | The Feishu kind and plugin entry, exported as `./feishu-watch` |
 | `src/sources/feishu-receipt.ts` | The receipt reaction the bot puts on a message it takes, as one scope: `takeReceipt` adds it and records which reaction it is, `releaseReceipt` removes that one, and `sweepReceipts` releases the receipts nothing will answer any more |
 | `src/sources/feishu-trigger.ts` | Feishu messages as Triggers, by one rule for live events, history pages and topic pages |
+| `src/sources/feishu-control.ts` | Pauses or resumes processing from a Feishu conversation (`挂起`, `恢复`): it runs before the Engine, so the resume word gets through while paused, answers in the same thread, and records no Trigger; only a person on the Policy's allowed list may switch processing |
 | `src/sources/feishu-loops.ts` | The Feishu loops: the message and card-action event consumers, history recovery, chat names and polling of subscribed topics |
 | `src/sources/feishu-channel.ts` | The Feishu Channel: topic replies, `sent` or `gone` |
 | `src/sources/feishu-topic.ts` | Opens a ticket's Feishu topic: the root message carries the ticket brief, short id and original message link, the ticket's replies move there (`Ticket.replyChannel`, `Tickets.retarget`), and the original thread gets a back-link to the topic |
@@ -428,6 +429,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/policy.spec.ts` | Source scope, the gate, the admission table, Mandate revalidation, the Policy version, settings migrations and assessment outcomes |
 | `tests/registry.spec.ts` | `SourceRegistry`: instances, validation, Policy parts, Channels and Thread context |
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the receipt reactions a reply ends, the pull request rules, health |
+| `tests/feishu-control.spec.ts` | The Feishu processing controls: which whole messages pause or resume processing, resuming from chat while paused with its answer and no Trigger, replay idempotence, and the refusal of a sender outside the allowed list |
 | `tests/tapd.spec.ts` | The TAPD Source: the credentials it resolves, the `current_owner` read, normalization and paging, one Trigger per bug revision, and the execution variables it declares |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
 | `tests/feishu-status.spec.ts` | The Feishu status card script: the counts it reads, the card's state colors and phrases, the expandable Ticket detail and the card's dashboard link, and sending, updating, retiring and locking through a fake CLI |

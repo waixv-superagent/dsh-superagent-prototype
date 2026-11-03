@@ -202,6 +202,8 @@ Stops dispatch, new Evals, Eval timeouts, Input delivery and replies; a launch a
 
 Sources keep recording Triggers, and a running Executor turn is not interrupted.
 
+A person on a Source's allowed list can set the pause from the Source's own conversation. In Feishu a whole message of `挂起` pauses processing and `恢复` resumes it, even while processing is paused; the Source answers in the same thread, and that control message is not recorded as a Trigger. The other messages sent while paused wait as usual.
+
 A person's message to an ended Ticket waits: the first pass after the pause resumes the Ticket, if its Mandate holds under the Policy then.
 
 An Eval in progress does not expire during a pause; its deadline moves later by the pause's length.

@@ -13,6 +13,7 @@ import { readFeishu, type FeishuRef } from './feishu-read.ts'
 import { feishuRef, feishuTime, feishuTrigger, HistoricalMessageSchema, historyEvent, HistoryPageSchema, SOURCE, topicEvent }
   from './feishu-trigger.ts'
 import { CardActionSchema, handleCardAction } from './feishu-cards.ts'
+import { handleProcessingControl } from './feishu-control.ts'
 import { health, type SourceContext } from './host.ts'
 import { KV } from '../kv.ts'
 import { cursorAt, POLL_HORIZON_MS, polled, pollThreads as pollEach } from './poll.ts'
@@ -54,6 +55,9 @@ function activateTopic(ctx: SourceContext, trigger: Trigger): void {
   ctx.state.set(KV.feishu.active, active)
 }
 async function receive(ctx: SourceContext, trigger: Trigger): Promise<void> {
+  // A control word is the person's switch, not work for the Eval: applying it here is also what lets "恢复" through
+  // while processing is paused, when no Eval runs to read it.
+  if (await handleProcessingControl(ctx, trigger)) return
   const result = await ctx.receive(trigger)
   // A message that reached the bot keeps its topic open for follow-ups. Only a message the Policy admits is taken
   // with a receipt reaction: one the bot will ignore, such as a sender missing from the allowed list, must not show
