@@ -291,7 +291,7 @@ describe('subscription fan-out', () => {
     // Confirming records the person's decision only: the ticket's changelist is untouched, so submitting stays theirs.
     expect(h.repo.tickets.get(id)!.execution?.changelist).toBe(123456)
   })
-  it('opens local verification only for delivered work, then hands the verified change to the pipeline follow-up', () => {
+  it('opens local verification only for delivered work, follows its pipeline from the delivery, and completes on the submit', () => {
     const analysis = harness()
     const answer = accepted(analysis)
     // Analysis work has nothing to run locally: a ready report still ends the ticket as before.
@@ -306,7 +306,10 @@ describe('subscription fan-out', () => {
     const waiting = h.repo.tickets.get(id)!
     expect(waiting.ended).toBeUndefined()
     expect(waiting.verification).toEqual({ at: expect.any(String), state: 'pending' })
-    expect(ticketStage(waiting)).toEqual({ stage: 'person', action: 'verify' })
+    // The host follows the pipeline from delivery on; no person and no follow-up Assignment start it.
+    expect(waiting.pipeline).toMatchObject({ state: 'running' })
+    expect(ticketStage(waiting)).toEqual({ stage: 'pipeline', action: 'running' })
+    expect(waiting.assignments).toHaveLength(1)
 
     // Returning it starts a fresh Assignment whose first Input is the person's note; the delivery evidence stays.
     h.engine.reworkTicket(id, 'PIE 里 Q 技能仍然会卡住')
@@ -319,16 +322,16 @@ describe('subscription fan-out', () => {
     expect(returnNote?.kind === 'text' && returnNote.text).toContain('PIE 里 Q 技能仍然会卡住')
     expect(h.executor.start).toHaveBeenCalledTimes(2)
 
-    // The worker delivers again: the gate reopens, and passing it hands the delivered change to the independent pipeline
-    // follow-up; only a merged observation completes the Ticket, and it is recorded as the pipeline's, not a person's check.
+    // The worker delivers again: the gate reopens and the pipeline observation restarts for the new content. Passing the
+    // local check is recorded without ending the ticket and without another Assignment; only the submit ends it.
     h.engine.report(id, { state: 'ready', summary: 'fixed', delivery: { changelist: 123456 } })
     expect(h.repo.tickets.get(id)!.verification?.state).toBe('pending')
     const passed = h.engine.verifyTicket(id)
     expect(passed.ended).toBeUndefined()
     expect(passed.verification).toMatchObject({ state: 'passed', by: 'person' })
     expect(passed.pipeline).toMatchObject({ state: 'running' })
-    expect(passed.assignments.at(-1)).toMatchObject({ state: 'pending' })
-    expect(h.executor.start).toHaveBeenCalledTimes(3)
+    expect(passed.assignments).toHaveLength(2)
+    expect(h.executor.start).toHaveBeenCalledTimes(2)
     const merged = h.engine.recordPipeline(id, { state: 'merged', check: 'CL submitted; review merged' })
     expect(merged.ended).toMatchObject({ by: 'executor', outcome: 'completed' })
     expect(merged.verification).toMatchObject({ state: 'passed', by: 'person' })
@@ -336,6 +339,96 @@ describe('subscription fan-out', () => {
     expect(merged.confirmed).toBeUndefined()
     expect(() => h.engine.verifyTicket(id)).toThrow(/already recorded local verification/)
     expect(() => h.engine.reworkTicket(id, 'again')).toThrow(/Ticket has ended/)
+  })
+  it('follows a pipeline automatically: a new failure wakes the worker, green asks once, and the submit completes it', () => {
+    const h = harness()
+    const id = accepted(h).ticketId!
+    h.repo.tickets.save({ ...h.repo.tickets.get(id)!, execution: { name: 'w', directory: '/w', assignment: '', changelist: 123456, review: 'review/9' } })
+    h.engine.report(id, { state: 'ready', summary: 'delivered', delivery: { changelist: 123456, review: 'review/9' } })
+    h.settle()
+    const before = h.outbox.length
+
+    h.engine.observePipeline(id, { kind: 'failure', signature: '12:fail', check: 'Swarm 检查失败：ClientBuild',
+      detail: 'Swarm review review/9 的当前版本检查失败。\n失败项：\n- ClientBuild：https://ci/1' })
+    const failed = h.repo.tickets.get(id)!
+    expect(failed.pipeline).toMatchObject({ state: 'running', fixes: 1, observed: '12:fail' })
+    expect(h.outbox.length).toBe(before)
+    // The worker receives the failing check as a text Input, and the same signature is never handed over twice.
+    const nudge = failed.inputs.at(-1)!
+    expect(nudge.kind).toBe('text')
+    expect(nudge.kind === 'text' ? nudge.text : '').toContain('ClientBuild')
+    h.settle()
+    expect(h.delivered.some(([, inputId]) => inputId === nudge.id)).toBe(true)
+    h.engine.observePipeline(id, { kind: 'failure', signature: '12:fail', check: 'Swarm 检查失败：ClientBuild', detail: 'again' })
+    expect(h.repo.tickets.get(id)!.inputs).toHaveLength(failed.inputs.length)
+    expect(h.repo.tickets.get(id)!.pipeline?.fixes).toBe(1)
+
+    // A green review waits for a person: blocked+manual, one message, no repeat on the next poll.
+    h.engine.observePipeline(id, { kind: 'review', signature: '12:pass', check: 'Swarm 已通过，待人工审核', url: 'https://swarm/reviews/9' })
+    const green = h.repo.tickets.get(id)!
+    expect(green.pipeline).toMatchObject({ state: 'blocked', manual: true, check: 'Swarm 已通过，待人工审核' })
+    expect(ticketStage(green)).toEqual({ stage: 'pipeline', action: 'blocked' })
+    const asked = h.outbox.filter(message => message.text.includes('待人工审核'))
+    expect(asked).toHaveLength(1)
+    h.engine.observePipeline(id, { kind: 'review', signature: '12:pass', check: 'Swarm 已通过，待人工审核', url: 'https://swarm/reviews/9' })
+    expect(h.outbox.filter(message => message.text.includes('待人工审核'))).toHaveLength(1)
+    // A local check recorded during the wait does not end the ticket and does not reopen the pipeline.
+    h.engine.verifyTicket(id)
+    expect(h.repo.tickets.get(id)!.pipeline).toMatchObject({ state: 'blocked', manual: true })
+    expect(h.repo.tickets.get(id)!.ended).toBeUndefined()
+
+    // Approval moves it to the submit pipeline; the submit ends the ticket as the pipeline's completion.
+    h.engine.observePipeline(id, { kind: 'approved', signature: '12:approved', check: 'Swarm 已审核通过，等待提交' })
+    expect(h.repo.tickets.get(id)!.pipeline).toMatchObject({ state: 'running' })
+    expect(h.outbox.filter(message => message.text.includes('已审核通过')).length).toBe(1)
+    const merged = h.engine.observePipeline(id, { kind: 'merged', check: 'CL 已提交入库' })
+    expect(merged.ended).toMatchObject({ outcome: 'completed' })
+    // The person's local evidence stays attributed to them; only an unverified change is credited to the pipeline.
+    expect(merged.verification).toMatchObject({ state: 'passed', by: 'person' })
+    expect(h.outbox.filter(message => message.text.includes('已提交入库'))).toHaveLength(1)
+  })
+  it('credits the pipeline when it completes a change no person checked locally', () => {
+    const h = harness()
+    const id = accepted(h).ticketId!
+    h.repo.tickets.save({ ...h.repo.tickets.get(id)!, execution: { name: 'w', directory: '/w', assignment: '', changelist: 123456 } })
+    h.engine.report(id, { state: 'ready', summary: 'delivered', delivery: { changelist: 123456 } })
+    const merged = h.engine.observePipeline(id, { kind: 'merged', check: 'CL 已提交入库' })
+    expect(merged.ended).toMatchObject({ outcome: 'completed' })
+    expect(merged.verification).toMatchObject({ state: 'passed', by: 'pipeline' })
+  })
+  it('lets an AI verdict that posts after a green review still wake the worker', () => {
+    const h = harness()
+    const id = accepted(h).ticketId!
+    h.repo.tickets.save({ ...h.repo.tickets.get(id)!, execution: { name: 'w', directory: '/w', assignment: '', changelist: 123456, review: 'review/9' } })
+    h.engine.report(id, { state: 'ready', summary: 'delivered', delivery: { changelist: 123456, review: 'review/9' } })
+    h.engine.observePipeline(id, { kind: 'review', signature: '3:pass', check: 'Swarm 已通过，待人工审核' })
+    expect(h.repo.tickets.get(id)!.pipeline).toMatchObject({ state: 'blocked', manual: true })
+    const before = h.repo.tickets.get(id)!.inputs.length
+    h.engine.observePipeline(id, { kind: 'failure', signature: '3:ai', check: 'AI 审核未通过', detail: '按 AI 建议修改' })
+    const woken = h.repo.tickets.get(id)!
+    expect(woken.pipeline).toMatchObject({ state: 'running', fixes: 1, observed: '3:ai' })
+    expect(woken.inputs).toHaveLength(before + 1)
+  })
+  it('keeps a person\'s manual pipeline blocker until they resume it, and stops waking the worker', () => {
+    const h = harness()
+    const id = accepted(h).ticketId!
+    h.repo.tickets.save({ ...h.repo.tickets.get(id)!, execution: { name: 'w', directory: '/w', assignment: '', changelist: 123456, review: 'review/9' } })
+    h.engine.report(id, { state: 'ready', summary: 'delivered', delivery: { changelist: 123456, review: 'review/9' } })
+    h.engine.observePipeline(id, { kind: 'blocked', signature: 'stuck', reason: '同一失败连跑两次仍不过；请在 Jenkins 重跑', check: '失败后没有新结果' })
+    const blocked = h.repo.tickets.get(id)!
+    expect(blocked.pipeline).toMatchObject({ state: 'blocked', manual: true, reason: expect.stringContaining('Jenkins') })
+    expect(h.outbox.some(message => message.text.includes('流水线需要人工处理'))).toBe(true)
+    const inputs = blocked.inputs.length
+    h.engine.observePipeline(id, { kind: 'failure', signature: '13:fail', check: '又失败了', detail: 'detail' })
+    expect(h.repo.tickets.get(id)!.pipeline).toMatchObject({ state: 'blocked', manual: true })
+    expect(h.repo.tickets.get(id)!.inputs).toHaveLength(inputs)
+    const spent = h.repo.tickets.get(id)!
+    h.repo.tickets.save({ ...spent, pipeline: { ...spent.pipeline!, fixes: 2 } })
+    const resumed = h.engine.resumePipeline(id)
+    expect(resumed.pipeline).toMatchObject({ state: 'running' })
+    expect(resumed.pipeline?.manual).toBeUndefined()
+    // The person's decision grants a fresh set of automatic fix attempts.
+    expect(resumed.pipeline?.fixes).toBeUndefined()
   })
   it('records a person\'s local verification on a completed ticket that ended before the gate existed', () => {
     const h = harness()
@@ -518,14 +611,14 @@ describe('a merged pipeline after a resume', () => {
     expect(answered.verification).toMatchObject({ state: 'passed' })
     expect(answered.pipeline).toMatchObject({ state: 'merged' })
 
-    // A later round that delivers new work drops the merged observation and waits for the person's local check again.
+    // A later round that delivers new work reopens the local check and starts following the new change's pipeline.
     h.engine.receive(trigger('3', { actor: guest }))
     h.engine.report(id, { state: 'ready', summary: 'fixed more', delivery: { changelist: 654321 } })
     const redelivered = h.repo.tickets.get(id)!
     expect(redelivered).not.toHaveProperty('ended')
-    expect(redelivered).not.toHaveProperty('pipeline')
+    expect(redelivered.pipeline).toMatchObject({ state: 'running' })
     expect(redelivered.verification).toMatchObject({ state: 'pending' })
-    expect(ticketStage(redelivered)).toEqual({ stage: 'person', action: 'verify' })
+    expect(ticketStage(redelivered)).toEqual({ stage: 'pipeline', action: 'running' })
   })
 })
 describe('follow-ups', () => {

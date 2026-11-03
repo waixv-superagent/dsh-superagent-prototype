@@ -191,8 +191,19 @@ export class Assignments extends EnginePart {
     if (outcome === 'completed' && deliveredWork && !followup) {
       ticket.verification = { at, state: 'pending' }
       ticket.updatedAt = at
+      // The host follows the pipeline itself from the delivery facts on: no person and no follow-up Assignment start it.
+      // A re-delivery after a returned verification resets the observation, because the content it watched has changed.
+      this.tickets.beginPipeline(ticket, at, delivered)
       this.repo.tickets.save(ticket)
     } else if (outcome && !followup) this.tickets.end(ticketId, 'executor', outcome, at)
+    // A worker that cannot fix a failing pipeline asks for a person: the host stops waking it until that person resumes.
+    if ((report.state === 'blocked' || report.state === 'failed') && ticket.pipeline && ticket.pipeline.state !== 'merged'
+      && !(ticket.pipeline.state === 'blocked' && ticket.pipeline.manual)) {
+      ticket.pipeline = { ...ticket.pipeline, state: 'blocked', manual: true, at,
+        reason: report.summary.slice(0, 500), check: ticket.pipeline.check ?? '流水线跟进需要人工处理' }
+      ticket.updatedAt = at
+      this.repo.tickets.save(ticket)
+    }
     return this.require(ticketId)
   }
   /** The ticket, while it is open and `assignmentId` runs it. */

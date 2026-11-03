@@ -130,7 +130,12 @@ export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutco
 export function deliveryInstructions(backend: Backend): string {
   return backend === 'p4'
     ? '\nDeliver as one shelved changelist: p4 change -i, p4 reopen -c <CL> for the edits, p4 shelve -c <CL>, '
-      + 'then p4 describe -S <CL> and open the Swarm review. Reshelve with -f after review comments or a red pipeline. '
+      + 'then p4 describe -S <CL> and open the Swarm review. After you change something, reshelve the same changelist with -f. '
+      + 'A reshelve with no content change opens no new review version and triggers no Swarm rerun, so never reshelve just to rerun: '
+      + 'if a failing check is unrelated or flaky, report blocked naming who must rerun it. '
+      + 'The host follows the review itself after your ready report: it reads the testruns and AI verdict, and when a failure is '
+      + 'yours to fix it wakes you with the failing checks and Jenkins errors. Fix it in this workspace and reshelve; do not start '
+      + 'a polling subagent of your own. '
       + 'After shelving, keep your files and edits in the workspace: do not p4 revert them, so the change stays available for the '
       + 'person to test and for the next round. Once a person has submitted the changelist (p4 describe -S <CL> no longer says '
       + '*pending*) and you continue on those files, p4 sync them to the submitted revision and start a new changelist for the follow-up '

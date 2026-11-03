@@ -394,7 +394,26 @@ export interface TicketPipeline {
   manual?: boolean
   /** The last observed check, short enough for a board card. */
   check?: string
+  /** The review version and failure the follow-up last acted on, so the same failure is not handed to a worker twice. */
+  observed?: string
+  /** When the follow-up last looked at the pipeline. */
+  seenAt?: string
+  /** How many times a worker was woken to fix this pipeline. */
+  fixes?: number
+  /** When a worker was last woken for a failure, which bounds how long a stale result may wait. */
+  fixAt?: string
 }
+/**
+ * One fact the host observed about a delivered change. A `failure` carries the detail a worker needs to fix it; `review`
+ * is a green pipeline that waits for a person, `approved` is a review a person approved, and `merged` is the submit.
+ */
+export type PipelineObservation =
+  | { kind: 'running'; check: string; url?: string; signature?: string }
+  | { kind: 'review'; check: string; url?: string; signature?: string }
+  | { kind: 'approved'; check: string; url?: string; signature?: string }
+  | { kind: 'failure'; check: string; url?: string; signature: string; detail: string }
+  | { kind: 'blocked'; check: string; reason: string; url?: string; signature?: string }
+  | { kind: 'merged'; check?: string; url?: string }
 /** How many days a completed ticket stays on the board before it is archived. */
 export const COMPLETED_RETENTION_DAYS = 7
 /** Whether a completed ticket is past its board retention and should be treated as archived. */
