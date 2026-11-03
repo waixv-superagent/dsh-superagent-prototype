@@ -58,9 +58,11 @@ A failed command fails the Ticket and records its output. A retry or a person's 
 
 A Ticket holds a worker slot from the start of a launch, including preparation, or from the delivery that wakes its idle Executor. It also holds the slot throughout an active turn.
 
-The configured concurrency limit applies to these slots, with one extra slot for a person's message or a status request. Such a wake can use the extra slot when normal slots are full, and takes the next free slot before a new launch. New work therefore cannot prevent a person from continuing an existing Ticket.
+The configured concurrency limit applies to these slots per delivery environment: the target recorded on a Ticket (its repository or depot, see 009 p4 and Swarm delivery) names the environment, and each one runs up to `executor.maxWorkers` Tickets at once. A Ticket with no recorded target counts against the target its backend falls back to, and a pooled workspace still limits how many Tickets share it (`executor.workspaces[].slots`). The superagent repository and the SunGame depot therefore never hold each other's slots.
 
-Other Inputs, such as CI results, wait for a normal slot. A launch waits in `working / queued` until a slot is free. Launches run concurrently, so a slow prepare command delays only its own Ticket.
+Each environment gives one extra slot to a person's message or a status request. Such a wake can use the extra slot when its environment's normal slots are full, and takes the next free slot there before a new launch. New work therefore cannot prevent a person from continuing an existing Ticket.
+
+Other Inputs, such as CI results, wait for a normal slot in their environment. A launch waits in `working / queued` until a slot is free. Launches run concurrently, so a slow prepare command delays only its own Ticket.
 
 ### Execution variables
 

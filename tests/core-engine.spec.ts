@@ -2046,6 +2046,20 @@ describe('redispatch', () => {
     expect(ticket.undelivered).toHaveLength(1)
     expect(ticket.inputs.at(-1)).toMatchObject({ kind: 'text', text: expect.stringContaining('git 通道') })
   })
+  it('keeps a plan that waits for a person when the channel moves, so a move does not answer the P1 gate', () => {
+    const h = harness()
+    const ticketId = accepted(h, '3').ticketId!
+    h.engine.redispatchTicket(ticketId, 'p4')
+    h.tick(1)
+    h.engine.submitPlan(ticketId, PLAN)
+    h.engine.redispatchTicket(ticketId, 'git')
+    const ticket = h.repo.tickets.get(ticketId)!
+    expect(ticket.execution?.backend).toBe('git')
+    expect(ticket.phase).toBe('plan')
+    expect(ticket.plan).toMatchObject({ waiting: true })
+    h.engine.decidePlan(ticketId, 'approve', '', 'feishu')
+    expect(h.repo.tickets.get(ticketId)!.phase).toBe('implement')
+  })
   it('refuses an unknown ticket, an ended one, and gates a p4 dispatch behind the plan phase', () => {
     const h = harness()
     expect(() => h.engine.redispatchTicket('nope', 'git')).toThrow(new UserError('unknownTicket'))

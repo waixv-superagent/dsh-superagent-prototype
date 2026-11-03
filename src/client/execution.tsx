@@ -17,7 +17,7 @@ export function ExecutionStatus({ filter: current, state, reload }: {
   const { t, call, navigate } = usePanel()
   const [limit, setLimit] = useState(20)
   const { data, error, reload: reloadTickets } = usePoll(() => call('GET tickets', { query: { state: current, limit } }), [current, limit])
-  const { paused, load: { maxWorkers } } = state
+  const { paused } = state
   // Pausing uses its own block revision so toggling pause does not invalidate an open Execution settings draft.
   const pause = async () => { await call('POST executor/pause', { body: { paused: !paused } }); await reload() }
   const status = state.setup.problem ? { tone: 'warning', label: t('executorWaitingSetup') } : paused ? { tone: 'warning',
@@ -30,7 +30,7 @@ export function ExecutionStatus({ filter: current, state, reload }: {
       <span className="dt-status-text" data-state={status.tone}>{status.label}</span>
       {!state.setup.problem && <>
         <LabelValue label={t('executingLabel')}
-          value={`${state.load.running} / ${maxWorkers}`} /><LabelValue label={t('queuedLabel')} value={state.load.queued} />
+          value={state.load.running} /><LabelValue label={t('queuedLabel')} value={state.load.queued} />
       </>}
       <ConfirmButton variant="outline" icon={paused ? 'play' : 'pause'} label={t(action)} title={t(action)} message={t(paused
         ? 'resumeProcessingConfirm' : 'pauseProcessingConfirm')}

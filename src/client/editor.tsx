@@ -66,7 +66,7 @@ function Hero({ data }: { data: EditorPageView }) {
   const pid = !editor ? t('editorReading') : editor.pid ? t('editorPid', { pid: editor.pid })
     : editor.holder === 'none' ? t('editorNoProcess') : t('editorUnknownProcess')
   const slots = (executor?.maxWorkers ?? 0) > 0
-    ? t('editorSlots', { running: executor.running, max: executor.maxWorkers })
+    ? t('editorSlots', { running: executor.running })
     : t('editorSlotsUnknown')
   return <section className="dt-editor-hero" aria-labelledby="dt-editor-title" data-holder={editor?.holder ?? 'reading'}>
     <div className="dt-editor-hero-main">

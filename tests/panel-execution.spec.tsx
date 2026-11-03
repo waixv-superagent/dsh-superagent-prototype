@@ -23,7 +23,7 @@ it('lists Tickets under Execution by who they wait on, with the Executor state a
   await click(zh['ticket.ended'])
   expect(text()).toContain('旧工单')
   expect(text()).toContain(zh['outcome.stopped'])
-  expect(all('.dt-status-line .dt-lv').map(item => item.textContent)).toEqual(['执行中 2 / 3', '排队 0'])
+  expect(all('.dt-status-line .dt-lv').map(item => item.textContent)).toEqual(['执行中 2', '排队 0'])
   // The pause is its own action: an Execution settings draft started before it still saves.
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   expect(tab(zh['tab.settings']).getAttribute('aria-selected')).toBe('true')

@@ -115,8 +115,8 @@ describe('p4 delivery instructions', () => {
     // After a person submits, the follow-up syncs the files and continues in a new changelist.
     expect(assignment).toContain('start a new changelist')
     expect(assignment).toContain('Never reuse the submitted changelist')
-    // A ticket whose target is another repository must fail fast at P1 instead of implementing in the p4 workspace.
-    expect(assignment).toContain('report blocked at P1')
+    // The target recorded at accept chose the channel, so a p4 worker is not told to stop at P1 and ask for a move.
+    expect(assignment).not.toContain('report blocked at P1')
   })
   it('leave the git assignment without the p4 flow', () => {
     const execution = ticketExecution(ticket, accept, settingsWith({}), '/state')
@@ -137,7 +137,7 @@ describe('p4 delivery instructions', () => {
     const settings = settingsWith({ backend: 'p4', workspaces: [{ id: 'sun', directory: 'E:/workspace' }] })
     const old = 'the typo' + deliveryInstructions('p4') + sharingInstructions(settings, 'p4')
     expect(old).toContain('You share this workspace')
-    expect(old).toContain('report blocked at P1')
+    expect(old).toContain('p4 shelve')
     expect(baseAssignment(old)).toBe('the typo')
     // A git assignment already has neither block, so it comes back unchanged.
     const git = ticketExecution(ticket, accept, settingsWith({}), '/state').assignment

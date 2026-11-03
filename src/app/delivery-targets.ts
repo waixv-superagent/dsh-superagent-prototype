@@ -1,6 +1,6 @@
 /** Resolves where a ticket's work belongs — this deployment's git source repository or its Perforce depot — from the
  * installation's configured delivery targets, so acceptance never has to ask a person to choose a channel. */
-import type { Backend } from '../core/index.ts'
+import type { Backend, Ticket } from '../core/index.ts'
 import type { Settings } from '../policy.ts'
 
 /**
@@ -80,4 +80,16 @@ export function resolveDelivery(input: { settings: Settings; repository: string;
   const depot = settings.executor.p4.depot.trim()
   if (source === 'tapd' && depot) return { backend: 'p4', target: depot }
   return { backend: settings.executor.backend }
+}
+
+/**
+ * The delivery environment a ticket's work belongs to, for the worker-slot limit: the target recorded at accept, or
+ * the target its backend falls back to when the ticket recorded none (one accepted before targets existed), so both
+ * spellings of one environment share a single limit.
+ */
+export function deliveryKey(settings: Settings, repository: string, ticket: Pick<Ticket, 'execution'> | undefined): string {
+  const target = ticket?.execution?.target?.trim()
+  if (target) return target
+  const backend = ticket?.execution?.backend ?? settings.executor.backend
+  return (backend === 'p4' ? settings.executor.p4.depot.trim() : repository.trim()) || backend
 }

@@ -104,7 +104,7 @@ When a Feishu Ticket is accepted, the bot posts a root message named `「<Ticket
 | Field | Meaning |
 | --- | --- |
 | **Executor model** (执行器模型) | The model of new Executor Sessions; empty inherits the DSH default. Existing Sessions keep their choice |
-| **Concurrent Tickets** (并行工单数) | How many Tickets may run at once; the rest queue |
+| **Concurrent Tickets** (并行工单数) | How many Tickets one repository or workspace may run at once; another one keeps its own slots, and the rest queue |
 | **Ticket directory root** (执行目录的根目录) | Where each Ticket gets a directory named after the Ticket; the Executor Session works there. The default is `<stateDir>/work` |
 | **Prepare command** (准备命令) | Runs once with `sh` in the root before a new Ticket's directory exists, with the execution environment's variables; for example to check a repository out with `git worktree`. Empty makes an empty directory |
 | **Blocked commands** (禁止调用的命令) | Command names that fail when an Executor Session calls them, such as a CLI signed in to your own account. `gh`, `git`, `lark-cli` and `p4` cannot be blocked; the p4 wrapper refuses `submit` |

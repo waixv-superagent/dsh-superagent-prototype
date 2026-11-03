@@ -491,8 +491,10 @@ export class Tickets extends EnginePart {
     const current = latestAssignment(ticket)
     if (current && (current.state === 'running' || current.state === 'pending')) this.endAssignment(ticket, current, 'redispatched')
     // The p4 pipeline gates code changes behind the P1 plan; a git dispatch drops that gate and keeps any later phase.
+    // Moving the channel never decides a plan that waits for a person: that gate stays until the card is answered.
+    const pendingPlan = ticket.plan?.waiting && !ticket.plan.approved
     if (backend === 'p4') ticket.phase = 'plan'
-    else if (ticket.phase === undefined || ticket.phase === 'plan') ticket.phase = 'implement'
+    else if (ticket.phase === undefined || (ticket.phase === 'plan' && !pendingPlan)) ticket.phase = 'implement'
     // The previous environment's delivery instructions are dropped, so the next launch reads only the new channel's.
     ticket.execution = this.options.reprepareTicket?.(ticket, backend)
       ?? { ...(ticket.execution ?? { name: '', directory: '', assignment: '' }), backend }
@@ -500,7 +502,8 @@ export class Tickets extends EnginePart {
     const assignment = this.newAssignment(ticket)
     const input: TicketInput = { id: key('input', ticket.id, 'redispatch', at), kind: 'text', at,
       text: `人确认把这张单改派到 ${backend === 'git' ? 'git 通道（本部署的源码仓库）' : 'p4 通道（depot 工作区）'}：`
-        + '按该通道的准备和交付方式继续这张单的工作，交付时按对应要求报告。' }
+        + '按该通道的准备和交付方式继续这张单的工作，交付时按对应要求报告。'
+        + (pendingPlan ? '这张单的方案还在等人确认，改派不改变这一步：按方案卡回答后再动代码。' : '') }
     ticket.inputs.push(input); ticket.undelivered.push(input.id)
     this.repo.tickets.save(ticket)
     if (current) this.options.executor.stop(ticket, current, 'redispatched')
