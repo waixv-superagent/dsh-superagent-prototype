@@ -6,7 +6,7 @@ import { usePanel, mount, mountHome, remount, all, click, tab } from './fixtures
 import { server, ticketSummary } from './fixtures/panel-server.ts'
 
 usePanel()
-const counts = () => all('.dt-editor-counts span').map(count => count.textContent)
+const counts = () => all('.dt-editor-counts [data-count]').map(count => count.textContent)
 
 it('opens on the editor view, with the board one switch away', async () => {
   await mountHome()
@@ -25,6 +25,44 @@ it('opens on the editor view, with the board one switch away', async () => {
   expect(tab(zh['tab.editor']).getAttribute('aria-selected')).toBe('true')
   await click(tab(zh.homeViewEditor))
   expect(document.querySelector('.dt-editor-hero')).not.toBeNull()
+})
+
+it('opens the board at the Tickets behind a hero count and rings just those cards', async () => {
+  server.working = [
+    ticketSummary({ id: 't5aaaaaaaaaa', title: '补 i18n 文案' }),
+    ticketSummary({ id: 't6', title: '升级依赖' }, { stage: 'working', action: 'queued' }),
+  ]
+  await mount()
+  await click(tab(zh['tab.editor']))
+  const door = (focus: string) => all('.dt-editor-counts button').find(button => button.getAttribute('data-count') === focus)!
+  // Every count with something behind it is a door, and its title says where it goes.
+  expect(all('.dt-editor-counts button').map(button => button.getAttribute('data-count')))
+    .toEqual(['working', 'queued', 'verification', 'person'])
+  expect(door('person').getAttribute('title')).toBe('跳到看板，高亮对应的工单')
+
+  await click(door('person'))
+  expect(document.querySelector('.dt-editor-hero')).toBeNull()
+  expect(tab(zh.homeViewBoard).getAttribute('aria-selected')).toBe('true')
+  expect(all('.dt-deck-card[data-board-focus]')).toHaveLength(2)
+  expect(all('[data-board-focus]')).toHaveLength(2)
+
+  await click(tab(zh.homeViewEditor))
+  await click(door('verification'))
+  expect(all('.dt-verify-card[data-board-focus]')).toHaveLength(2)
+  expect(all('[data-board-focus]')).toHaveLength(2)
+
+  await click(tab(zh.homeViewEditor))
+  await click(door('queued'))
+  expect(all('.dt-run[data-board-focus]').map(row => row.getAttribute('data-state'))).toEqual(['queued'])
+
+  await click(tab(zh.homeViewEditor))
+  await click(door('working'))
+  expect(all('.dt-run[data-board-focus]').map(row => row.getAttribute('data-state'))).toEqual(['working'])
+
+  // The switch's own arrival carries no cue, so the same board reads plain and no card stays ringed.
+  await click(tab(zh.homeViewEditor))
+  await click(tab(zh.homeViewBoard))
+  expect(all('[data-board-focus]')).toHaveLength(0)
 })
 
 it('says who holds the editor, lists working Tickets with their live tool, and the verification and decisions that wait', async () => {

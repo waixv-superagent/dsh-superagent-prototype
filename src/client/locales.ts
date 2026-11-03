@@ -168,6 +168,7 @@ const TEXT = {
   // Editor page: who holds the shared editor, which Tickets are working with their live tool, and what waits on a person.
   editorAgentUsing: ['agent 在用', 'an agent is using it'],
   editorAssignmentCount: ['第 {count} 次', 'Run {count}'],
+  editorCountJump: ['跳到看板，高亮对应的工单', 'Open these Tickets on the board'],
   editorDecideCount: ['{count} 单等你决定', '{count} waiting on you'],
   editorDecideGroup: ['待你决定', 'To decide'],
   editorFree: ['空着', 'free'],

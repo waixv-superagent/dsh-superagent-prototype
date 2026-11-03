@@ -5,7 +5,7 @@ import { Button, Icon, Input, Tag } from './controls.tsx'
 import { ticketMark } from './marks.ts'
 import { useAction, usePanel, usePanelData } from './provider.tsx'
 import { ThreadChip } from './rows.tsx'
-import { setupPage, settingsRoute, type Route } from './route.ts'
+import { setupPage, settingsRoute, type BoardFocus, type Route } from './route.ts'
 import { healthText, localized, reasonLabel, valueLabel, readableMarkers, type T } from './text.ts'
 import { CheckSetupButton, ConfirmButton, LoadState, SetupMessage, VerificationChecks, When, linkTarget } from './widgets.tsx'
 
@@ -94,6 +94,8 @@ function ProblemLine({ problem, onChanged }: { problem: Problem; onChanged: () =
 }
 
 const STUCK_MS = 10 * 60_000
+/** How long the arrival ring holds before the board reads as plain again. */
+const FOCUS_MS = 2_600
 const minutesSince = (at: string) => Math.max(1, Math.round((Date.now() - Date.parse(at)) / 60_000))
 /** Names how long a running Ticket has gone without an update, in the largest unit that still reads precisely. */
 function staleLabel(t: T, at: string): string {
@@ -105,7 +107,7 @@ function staleLabel(t: T, at: string): string {
 }
 const ticketRoute = (id: string): Route => ({ page: 'execution', id })
 
-function DecisionCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () => Promise<void> }) {
+function DecisionCard({ ticket, onChanged, focused }: { ticket: TicketRow; onChanged: () => Promise<void>; focused?: boolean }) {
   const { t, call, navigate } = usePanel()
   const mark = ticketMark(t, ticket)
   const action = ticket.stage === 'person' ? ticket.action : 'review'
@@ -113,7 +115,7 @@ function DecisionCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
   const after = async (request: Promise<unknown>) => { await request; await onChanged() }
   const body = ticket.note?.text ?? ticket.summary
   const thread = ticket.threads[0]
-  return <article className="dt-deck-card dt-board-card" data-kind={action}>
+  return <article className="dt-deck-card dt-board-card" data-kind={action} data-board-focus={focused || undefined}>
     <header className="dt-deck-card-head">
       <span className="dt-deck-card-kind"><Icon name={mark.icon} size={13} />{mark.label}</span>
       <span className="dt-deck-card-when"><When at={ticket.updatedAt} /></span>
@@ -145,14 +147,15 @@ function DecisionCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
   </article>
 }
 
-function RunRow({ ticket }: { ticket: TicketRow }) {
+function RunRow({ ticket, focus }: { ticket: TicketRow; focus?: BoardFocus }) {
   const { t, navigate } = usePanel()
   const queued = ticket.stage === 'working' && ticket.action === 'queued'
   const idle = ticket.stage === 'idle'
   const stuck = ticket.stage === 'working' && !queued && Date.now() - Date.parse(ticket.updatedAt) > STUCK_MS
   const state = idle ? 'idle' : queued ? 'queued' : 'working'
   const label = idle ? t('stage.idle') : queued ? t('stage.queued') : t('stage.working')
-  return <li className="dt-run" data-state={state} data-stuck={stuck || undefined}>
+  const focused = focus === 'queued' ? queued : focus === 'working' && state === 'working'
+  return <li className="dt-run" data-state={state} data-stuck={stuck || undefined} data-board-focus={focused || undefined}>
     <span className="dt-run-dot" aria-hidden="true" />
     <div className="dt-run-main">
       <button type="button" className="dt-run-title" onClick={() => navigate(ticketRoute(ticket.id))}>{ticket.title}</button>
@@ -179,7 +182,7 @@ function waitedFor(t: T, at: string): string {
  * Delivered work waiting for a person's local check. The worker's own verification is evidence, not acceptance: this card
  * keeps the changelist, what the worker ran, and the two ways out — pass, or send it back with a reason — in one place.
  */
-function VerifyCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () => Promise<void> }) {
+function VerifyCard({ ticket, onChanged, focused }: { ticket: TicketRow; onChanged: () => Promise<void>; focused?: boolean }) {
   const { t, call, notify, navigate } = usePanel()
   const [returning, setReturning] = useState(false)
   const [note, setNote] = useState('')
@@ -199,7 +202,7 @@ function VerifyCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () =>
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally { setBusy(false) }
   }
-  return <article className="dt-verify-card">
+  return <article className="dt-verify-card" data-board-focus={focused || undefined}>
     <header className="dt-verify-head">
       <span className="dt-verify-badge"><Icon name="review" size={13} />{t('verifyWorkerBadge')}</span>
       {backlog && <Tag tone="quiet">{t('verifyHistorical')}</Tag>}
@@ -394,10 +397,32 @@ function TicketFinder() {
   </section>
 }
 
-export function OverviewPage() {
+export function OverviewPage({ focus }: { focus?: BoardFocus }) {
   const { t, call, navigate } = usePanel()
   const { setup } = usePanelData()
   const { data, error, reload } = usePoll(() => call('GET overview'), [])
+  // The hero counts are one-shot doors: ring the Tickets they counted, then drop both the ring and the route cue so a
+  // later reload or back step does not replay it. The cue never filters the board.
+  const [mark, setMark] = useState<BoardFocus | undefined>(focus)
+  const scrolled = useRef<BoardFocus | undefined>(undefined)
+  useEffect(() => {
+    setMark(focus)
+    if (!focus) return
+    const timer = window.setTimeout(() => {
+      setMark(undefined)
+      navigate({ page: 'editor', query: { view: 'board' } }, true)
+    }, FOCUS_MS)
+    return () => window.clearTimeout(timer)
+  }, [focus, navigate])
+  useEffect(() => {
+    if (!mark || scrolled.current === mark || !data) return
+    const first = document.querySelector<HTMLElement>('.dt-board [data-board-focus]')
+    if (!first) return
+    scrolled.current = mark
+    // A person who asked the system to reduce motion still gets the ring, just without the travel to it.
+    const smooth = !window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
+    first.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: smooth ? 'smooth' : 'auto' })
+  }, [mark, data])
   if (!data) return <LoadState error={error} loading />
   const person = data.person
   const verification = data.verification ?? []
@@ -465,13 +490,14 @@ export function OverviewPage() {
         empty={t('boardDecisionEmpty')}
         action={person.length ? <button type="button" className="dt-board-more" onClick={() => navigate({ page: 'execution', query: { filter: 'person' } })}>
           {t('boardAllNeeds', { count: person.length })} →</button> : undefined}>
-        <div className="dt-board-stack">{person.map(ticket => <DecisionCard key={ticket.id} ticket={ticket} onChanged={reload} />)}</div>
+        <div className="dt-board-stack">{person.map(ticket => <DecisionCard key={ticket.id} ticket={ticket} onChanged={reload}
+          focused={mark === 'person'} />)}</div>
       </Lane>
 
       <Lane tone="run" title={t('boardRunning')} count={running} sub={t('boardRunningSub')} empty={t('boardRunningEmpty')}
         action={running ? <button type="button" className="dt-board-more" onClick={openTickets}>{t('boardOpen')} →</button> : undefined}>
-        <ul className="dt-runlist">{working.map(ticket => <RunRow key={ticket.id} ticket={ticket} />)}
-          {idle.map(ticket => <RunRow key={ticket.id} ticket={ticket} />)}</ul>
+        <ul className="dt-runlist">{working.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}
+          {idle.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}</ul>
       </Lane>
 
       <Lane tone="verify" title={t('boardVerifyTitle')} count={verification.length} sub={t('boardVerifySub')}
@@ -483,7 +509,8 @@ export function OverviewPage() {
           {endedStats.completed > 0 && <p className="dt-backlog-detail">{t('verifyBacklogDetail', { agent: endedStats.agent,
             none: endedStats.none, cl: endedStats.changelist })}</p>}
         </div>}
-        <div className="dt-board-stack">{verification.map(ticket => <VerifyCard key={ticket.id} ticket={ticket} onChanged={reload} />)}</div>
+        <div className="dt-board-stack">{verification.map(ticket => <VerifyCard key={ticket.id} ticket={ticket} onChanged={reload}
+          focused={mark === 'verification'} />)}</div>
       </Lane>
 
       <Lane tone="pipeline" title={t('boardPipelineTitle')} count={pipeline.length} sub={t('boardPipelineSub')}

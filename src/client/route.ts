@@ -11,7 +11,13 @@ export type SettingsGroup = typeof SETTINGS_GROUPS[number]
 /** The two views the 概览 tab switches between: the editor page and the duty-desk board. */
 export const HOME_VIEWS = ['editor', 'board'] as const
 export type HomeView = typeof HOME_VIEWS[number]
-export type Route = { page: 'editor'; id?: undefined; query?: { view?: HomeView } }
+/**
+ * The editor hero counts that open the board at the Tickets behind them. A one-shot arrival cue, not a board filter:
+ * the board rings the matching cards once and then drops it, so the same board stays usable by hand afterwards.
+ */
+export const BOARD_FOCUS = ['working', 'queued', 'verification', 'person'] as const
+export type BoardFocus = typeof BOARD_FOCUS[number]
+export type Route = { page: 'editor'; id?: undefined; query?: { view?: HomeView; focus?: BoardFocus } }
   | { page: 'source'; id?: undefined; query?: undefined }
   | { page: 'trigger'; id?: undefined; query?: { filter?: ThreadFilter } }
   | { page: 'trigger'; id: string; query?: { trigger?: string } }
@@ -40,7 +46,7 @@ export function parseRoute(value: unknown): Route | undefined {
   switch (page) {
     // The old top-level Agent-status tab is now the board view of 概览; a stored route opens the same board.
     case 'overview': return { page: 'editor', query: { view: 'board' } }
-    case 'editor': return { page, query: compact({ view: pick(HOME_VIEWS, query?.view) }) }
+    case 'editor': return { page, query: compact({ view: pick(HOME_VIEWS, query?.view), focus: pick(BOARD_FOCUS, query?.focus) }) }
     case 'source': return { page }
     case 'trigger': return record ? { page, id: record, query: compact({ trigger: text('trigger') }) }
       : { page, query: compact({ filter: pick(THREAD_FILTERS, query?.filter) }) }
