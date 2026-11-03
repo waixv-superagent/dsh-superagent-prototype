@@ -1,5 +1,5 @@
 /** Overview: the duty desk. One verdict, decision cards for Tickets waiting on a person, a running lane, and recently ended work. */
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { usePoll, type EditorRow, type Problem, type TicketRow, type TicketSearchView } from './api.ts'
 import { Button, Icon, Input, Tag } from './controls.tsx'
 import { ticketMark } from './marks.ts'
@@ -425,6 +425,23 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
     const smooth = !window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
     first.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: smooth ? 'smooth' : 'auto' })
   }, [mark, data])
+  // The board is a horizontal scroller once the page is narrower than five lanes: track which edges still hide a lane
+  // so the CSS mask can show that it scrolls, the same cue the tab bar uses.
+  const boardScroll = useRef<HTMLDivElement>(null)
+  const [boardMore, setBoardMore] = useState<'start' | 'end' | 'both'>()
+  const measureBoard = useCallback(() => {
+    const element = boardScroll.current
+    if (!element) return
+    const start = element.scrollLeft > 1, end = element.scrollLeft + element.clientWidth < element.scrollWidth - 1
+    setBoardMore(start && end ? 'both' : start ? 'start' : end ? 'end' : undefined)
+  }, [])
+  useEffect(() => {
+    measureBoard()
+    if (!boardScroll.current || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measureBoard)
+    observer.observe(boardScroll.current)
+    return () => observer.disconnect()
+  }, [measureBoard, data])
   if (!data) return <LoadState error={error} loading />
   const person = data.person
   const verification = data.verification ?? []
@@ -487,50 +504,52 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
       {data.problems.length > 4 && <p className="dt-problem-more">{t('boardMoreProblems', { count: data.problems.length - 4 })}</p>}
     </details>}
 
-    <section className="dt-board" aria-label={t('boardNeedsTitle')}>
-      <Lane tone="decision" title={t('boardDecisionTitle')} count={person.length} sub={t('boardDecisionSub')}
-        empty={t('boardDecisionEmpty')}
-        action={person.length ? <button type="button" className="dt-board-more" onClick={() => navigate({ page: 'execution', query: { filter: 'person' } })}>
-          {t('boardAllNeeds', { count: person.length })} →</button> : undefined}>
-        <div className="dt-board-stack">{person.map(ticket => <DecisionCard key={ticket.id} ticket={ticket} onChanged={reload}
-          focused={mark === 'person'} />)}</div>
-      </Lane>
+    <div className="dt-board-scroll" ref={boardScroll} data-more={boardMore} onScroll={measureBoard}>
+      <section className="dt-board" aria-label={t('boardNeedsTitle')}>
+        <Lane tone="decision" title={t('boardDecisionTitle')} count={person.length} sub={t('boardDecisionSub')}
+          empty={t('boardDecisionEmpty')}
+          action={person.length ? <button type="button" className="dt-board-more" onClick={() => navigate({ page: 'execution', query: { filter: 'person' } })}>
+            {t('boardAllNeeds', { count: person.length })} →</button> : undefined}>
+          <div className="dt-board-stack">{person.map(ticket => <DecisionCard key={ticket.id} ticket={ticket} onChanged={reload}
+            focused={mark === 'person'} />)}</div>
+        </Lane>
 
-      <Lane tone="run" title={t('boardRunning')} count={running} sub={t('boardRunningSub')} empty={t('boardRunningEmpty')}
-        action={running ? <button type="button" className="dt-board-more" onClick={openTickets}>{t('boardOpen')} →</button> : undefined}>
-        <ul className="dt-runlist">{working.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}
-          {idle.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}</ul>
-      </Lane>
+        <Lane tone="run" title={t('boardRunning')} count={running} sub={t('boardRunningSub')} empty={t('boardRunningEmpty')}
+          action={running ? <button type="button" className="dt-board-more" onClick={openTickets}>{t('boardOpen')} →</button> : undefined}>
+          <ul className="dt-runlist">{working.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}
+            {idle.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}</ul>
+        </Lane>
 
-      <Lane tone="verify" title={t('boardVerifyTitle')} count={verification.length} sub={t('boardVerifySub')}
-        empty={t('boardVerifyEmpty')}
-        action={verification.length ? <button type="button" className="dt-board-more" onClick={() => navigate({ page: 'execution', query: { filter: 'verify' } })}>
-          {t('boardAllNeeds', { count: verification.length })} →</button> : undefined}>
-        {backlog > 0 && <div className="dt-backlog">
-          <p className="dt-backlog-line">{t('verifyBacklogPending', { count: backlog })}</p>
-          {endedStats.completed > 0 && <p className="dt-backlog-detail">{t('verifyBacklogDetail', { agent: endedStats.agent,
-            none: endedStats.none, cl: endedStats.changelist })}</p>}
-        </div>}
-        <div className="dt-board-stack">{verification.map(ticket => <VerifyCard key={ticket.id} ticket={ticket} onChanged={reload}
-          focused={mark === 'verification'} />)}</div>
-      </Lane>
+        <Lane tone="verify" title={t('boardVerifyTitle')} count={verification.length} sub={t('boardVerifySub')}
+          empty={t('boardVerifyEmpty')}
+          action={verification.length ? <button type="button" className="dt-board-more" onClick={() => navigate({ page: 'execution', query: { filter: 'verify' } })}>
+            {t('boardAllNeeds', { count: verification.length })} →</button> : undefined}>
+          {backlog > 0 && <div className="dt-backlog">
+            <p className="dt-backlog-line">{t('verifyBacklogPending', { count: backlog })}</p>
+            {endedStats.completed > 0 && <p className="dt-backlog-detail">{t('verifyBacklogDetail', { agent: endedStats.agent,
+              none: endedStats.none, cl: endedStats.changelist })}</p>}
+          </div>}
+          <div className="dt-board-stack">{verification.map(ticket => <VerifyCard key={ticket.id} ticket={ticket} onChanged={reload}
+            focused={mark === 'verification'} />)}</div>
+        </Lane>
 
-      <Lane tone="pipeline" title={t('boardPipelineTitle')} count={pipeline.length} sub={t('boardPipelineSub')}
-        empty={t('boardPipelineEmpty')}
-        action={pipeline.length ? <button type="button" className="dt-board-more" onClick={() => navigate({ page: 'execution', query: { filter: 'pipeline' } })}>
-          {t('boardAllNeeds', { count: pipeline.length })} →</button> : undefined}>
-        {blockedPipeline > 0 && <div className="dt-pipeline-alert" role="status">
-          <Tag tone="danger">{t('pipelineBlockedCount', { count: blockedPipeline })}</Tag>
-          <span className="dt-pipeline-alert-sub">{t('pipelineBlockedSub')}</span>
-        </div>}
-        <div className="dt-board-stack">{pipeline.map(ticket => <PipelineCard key={ticket.id} ticket={ticket} onChanged={reload} />)}</div>
-      </Lane>
+        <Lane tone="pipeline" title={t('boardPipelineTitle')} count={pipeline.length} sub={t('boardPipelineSub')}
+          empty={t('boardPipelineEmpty')}
+          action={pipeline.length ? <button type="button" className="dt-board-more" onClick={() => navigate({ page: 'execution', query: { filter: 'pipeline' } })}>
+            {t('boardAllNeeds', { count: pipeline.length })} →</button> : undefined}>
+          {blockedPipeline > 0 && <div className="dt-pipeline-alert" role="status">
+            <Tag tone="danger">{t('pipelineBlockedCount', { count: blockedPipeline })}</Tag>
+            <span className="dt-pipeline-alert-sub">{t('pipelineBlockedSub')}</span>
+          </div>}
+          <div className="dt-board-stack">{pipeline.map(ticket => <PipelineCard key={ticket.id} ticket={ticket} onChanged={reload} />)}</div>
+        </Lane>
 
-      <Lane tone="ended" title={t('boardEnded')} count={ended.length} sub={t('boardEndedSub')} empty={t('boardEndedEmpty')}
-        action={<button type="button" className="dt-board-more" onClick={() => navigate({ page: 'execution', query: { filter: 'ended' } })}>
-          {t('boardAll')} →</button>}>
-        <ul className="dt-ended2-list">{ended.map(ticket => <EndedCard key={ticket.id} ticket={ticket} />)}</ul>
-      </Lane>
-    </section>
+        <Lane tone="ended" title={t('boardEnded')} count={ended.length} sub={t('boardEndedSub')} empty={t('boardEndedEmpty')}
+          action={<button type="button" className="dt-board-more" onClick={() => navigate({ page: 'execution', query: { filter: 'ended' } })}>
+            {t('boardAll')} →</button>}>
+          <ul className="dt-ended2-list">{ended.map(ticket => <EndedCard key={ticket.id} ticket={ticket} />)}</ul>
+        </Lane>
+      </section>
+    </div>
   </>
 }
