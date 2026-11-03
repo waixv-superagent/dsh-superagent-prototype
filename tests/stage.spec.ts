@@ -33,6 +33,16 @@ describe('ticketStage', () => {
       { stage: 'person', action: 'answer' }],
     ['a blocked pipeline', ticket({ pipeline: { state: 'blocked', at: '', manual: true }, assignments: [assignment({ state: 'ended' })] }),
       { stage: 'pipeline', action: 'blocked' }],
+    // A change delivered into the pull request the Ticket opened is approved and merged there, not reviewed locally.
+    ['a ready Report of a change delivered as its own pull request', ticket({ follows: [{ thread: 'github:7', own: true }],
+      assignments: [reported('ready')] }), { stage: 'pipeline', action: 'blocked' }],
+    ['a ready Report of a pull request that closed', ticket({ follows: [{ thread: 'github:7', own: true,
+      closed: { at: '', outcome: 'merged' } }], assignments: [reported('ready')] }), { stage: 'person', action: 'review' }],
+    ['a ready Report of a pull request it only follows', ticket({ follows: [{ thread: 'github:7', own: false }],
+      assignments: [reported('ready')] }), { stage: 'person', action: 'review' }],
+    // A merged pipeline is history: a round a person's later message resumed is not pipeline work again.
+    ['a ready Report after a merged pipeline resumed the Ticket', ticket({ pipeline: { state: 'merged', at: '' },
+      follows: [{ thread: 'github:7', own: true }], assignments: [reported('ready')] }), { stage: 'person', action: 'review' }],
     // A merged pipeline ended the ticket once; a person's later message may resume it for a round that is not pipeline work.
     ['a merged pipeline a person\'s message resumed', ticket({ pipeline: { state: 'merged', at: '' } }), { stage: 'working' }],
     ['an ended pipeline', ticket({ pipeline: { state: 'merged', at: '' }, ended }), { stage: 'ended' }],

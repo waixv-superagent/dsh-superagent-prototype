@@ -291,7 +291,7 @@ const TEXT = {
   pipelineGateWaitingTitle: ['只差你确认，不算阻塞', 'Only your check remains'],
   pipelineGateSub: ['本地验证已通过。跟进入库；入库后工单自动完成。', 'Local verification passed. Follow it into the mainline; the Ticket completes when it lands.'],
   pipelineGateBlockedSub: ['agent 不能自行解除这个阻塞；处理后再继续跟进。', 'The agent cannot clear this blocker; resolve it, then resume the follow-up.'],
-  pipelineGateWaitingSub: ['流水线检查都过了，只差你审批或 p4 submit；提交后标记入库。', 'Every pipeline check passed; only your approval or p4 submit remains. Mark it merged after the submit.'],
+  pipelineGateWaitingSub: ['改动已交付，只差你审批；入库后点「标记已入库」完成工单。', 'The change is delivered; only your approval remains. Finish with "Mark merged" once it has landed.'],
   pipelineMarkMerged: ['标记已入库', 'Mark merged'],
   pipelineMarkMergedTitle: ['确认这次改动已经入库', 'Confirm the change is merged'],
   pipelineMarkMergedConfirm: ['确认「{title}」已经入库？工单会直接完成；没有入库不要点。', 'Confirm "{title}" is merged? The Ticket completes immediately; do not click unless it landed.'],
