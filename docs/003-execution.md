@@ -10,9 +10,9 @@ Each open Ticket has one stage, determined by what it is waiting for. Read the t
 | --- | --- | --- |
 | person / delivery | Delivering an Input to the Executor Session failed; it is retried after 2 seconds, then after a delay that doubles up to a minute, and a success, a new Assignment or the Ticket's end clears it | Input undelivered |
 | person / answer | It has an Attention | Awaiting answer |
-| pipeline / running, blocked | Delivered work is followed through its review and pipeline from the moment the worker reports it; blocked covers a failing check the host cannot clear, an approval waiting for the submit, and a green review waiting for a person, and is pinned above running work | Pipeline · Blocked |
+| pipeline / running, blocked | Delivered work is followed through its review and pipeline from the moment the worker reports it, including a change delivered into a pull request the Ticket opened, which a person approves and merges there; blocked covers a failing check the host cannot clear, an approval waiting for the submit, and a green review waiting for a person, and is pinned above running work | Pipeline · Blocked |
 | person / verify | Delivered work, a changelist or a review, still waits for the person's local check, recorded in parallel with the pipeline | Awaiting local verification |
-| person / review | The latest Report is `ready` | Awaiting review |
+| person / review | The latest Report is `ready`, and no pull request the Ticket opened is still open | Awaiting review |
 | person / blocked, failed | The latest Report is `blocked` or `failed`, and no person's message reached the Ticket since | Blocked · Failed |
 | working / queued | No Assignment, or a pending one | Queued |
 | idle | The latest Report is `waiting`, or the Assignment ended | Waiting for a Trigger |
@@ -106,9 +106,11 @@ The Ticket is done when none of the pull requests it opened remain open. If it o
 
 A close does not end the Ticket while resumed, retried or recovered work is unfinished. It also waits if the Executor acknowledged or answered a follow-up it owns but has not since made a non-progress Report or ended a turn after reading that message. A later `ready` Report ends the Ticket once the same pull-request completion rule is satisfied.
 
+A `ready` Report that delivered the Ticket's work into a pull request it opened does not wait for a person's review of the work: it waits at the pipeline gate, which links the request for the approval and merge that remains. The merge completes the Ticket; marking it merged in the panel does too. A pull request the Ticket only follows, such as the one it started from, opens no gate.
+
 Chat Channels receive one final notice about the pull-request outcome. GitHub already displays the outcome on the pull request itself. Removing a Ticket's Subscription to a pull request also stops it following that pull request.
 
-"Awaiting review" therefore means a `ready` Report with a pull request; "awaiting your check" means delivered work that a person has not yet run locally.
+"Awaiting review" therefore means a `ready` Report with no pull request the Ticket opened still open; "awaiting your check" means delivered work that a person has not yet run locally; and the pipeline gate's "needs you" means a delivered pull request awaiting approval and merge.
 
 ### Follow-ups and context Threads
 

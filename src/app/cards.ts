@@ -14,13 +14,14 @@ export function triggerCard(trigger: Trigger, disposition?: TriggerDisposition) 
       delivered_to: disposition.fanout } } : {}) }
 }
 /** The states a ticket card shows: an open ticket's stage (docs/003), and an ended ticket's outcome. */
-export const TICKET_STATES = ['person/delivery', 'person/answer', 'person/review', 'person/verify', 'person/blocked', 'person/failed', 'working', 'working/queued', 'idle',
-  'completed', 'merged', 'closed', 'dropped', 'stopped'] as const
+export const TICKET_STATES = ['person/delivery', 'person/answer', 'person/review', 'person/verify', 'person/blocked', 'person/failed', 'pipeline/running',
+  'pipeline/blocked', 'working', 'working/queued', 'idle', 'completed', 'merged', 'closed', 'dropped', 'stopped'] as const
 export type TicketCardState = typeof TICKET_STATES[number]
 function cardState(ticket: Ticket): TicketCardState {
   if (ticket.ended) return ticket.ended.outcome
   const stage = ticketStage(ticket)
   if (stage.stage === 'person') return `person/${stage.action}`
+  if (stage.stage === 'pipeline') return `pipeline/${stage.action}`
   return stage.stage === 'idle' ? 'idle' : stage.stage === 'working' && stage.action ? 'working/queued' : 'working'
 }
 export function ticketCard(ticket: Ticket) {

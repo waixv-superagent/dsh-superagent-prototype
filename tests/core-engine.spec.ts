@@ -1132,6 +1132,25 @@ describe('worker reports', () => {
     expect(outcome('failed', false)).toMatchObject({ attention: { question: 'Merge it?' } })
     expect(outcome('failed', false)).not.toHaveProperty('ended')
   })
+  it('waits a change delivered as the Ticket\'s own pull request at the pipeline gate until the person merges it', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.engine.bindThread(ticketId, { source: 'gh', id: 'pr-9' }, true)
+    h.engine.report(ticketId, { state: 'ready', summary: 'PR #9 已提交，等你审批合入' })
+    // The delivered pull request, not a person's review of the work, is what remains.
+    const waiting = h.repo.tickets.get(ticketId)!
+    expect(waiting.ended).toBeUndefined()
+    expect(ticketStage(waiting)).toEqual({ stage: 'pipeline', action: 'blocked' })
+    // Approving and merging it there completes the Ticket, as the pull request's outcome says.
+    h.engine.threadClosed({ source: 'gh', id: 'pr-9' }, 'merged', '2026-09-23T00:00:01Z')
+    expect(h.repo.tickets.get(ticketId)!.ended).toMatchObject({ outcome: 'merged' })
+    // A pull request the Ticket only follows, such as the one it started from, still leaves a person's review of the work.
+    const other = harness()
+    const second = accepted(other).ticketId!
+    other.engine.bindThread(second, { source: 'gh', id: 'pr-11' }, false)
+    other.engine.report(second, { state: 'ready', summary: 'answered in the thread' })
+    expect(ticketStage(other.repo.tickets.get(second)!)).toEqual({ stage: 'person', action: 'review' })
+  })
   it('refuses a question with a result or an answer, and questions or answers that name no person\'s message of the ticket', () => {
     const h = harness()
     const ticketId = accepted(h).ticketId!

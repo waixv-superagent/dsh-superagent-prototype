@@ -136,7 +136,7 @@ it('shows a trigger and a ticket as cards with a short preview and references to
   const threads = [{ thread: 'github:42', bound: true as const }]
   const batch = [{ ...trigger, id: 'request-2', text: 'Also the flaky one.' }]
   expect(ticketDetails(ticket, threads, batch)).toEqual({ ticket_id: 'ticket-1', title: 'Inspect failing check',
-    state: 'person/review', phase: 'implement', strength: 'explicit', pr_number: 42, read: 'ticket/ticket-1', trigger_id: 'request-1', decision_id: 'd1',
+    state: 'pipeline/blocked', phase: 'implement', strength: 'explicit', pr_number: 42, read: 'ticket/ticket-1', trigger_id: 'request-1', decision_id: 'd1',
     batch: [{ trigger_id: 'request-2', from: 'alice', at: trigger.at, preview: 'Also the flaky one.', read: 'trigger/request-2' }],
     threads, directory: '/worktrees/ticket-1', scope: mandate.scope, requested_by: 'alice', inputs: { items: [] },
     assignments: { items: [{ id: 'a1', state: 'running', at: '2026-09-09T00:00:00Z', report: { state: 'ready', at: '', preview: expect.stringMatching(/^The focused/),
@@ -158,7 +158,8 @@ it('shows a trigger and a ticket as cards with a short preview and references to
 it('shows a ticket card\'s state from a closed set: the open ticket\'s stage, the ended ticket\'s outcome', () => {
   const report = (state: string) => ({ ...ticket, assignments: [{ ...ticket.assignments[0]!, report: { state, summary: '', at: '' } }] }) as Ticket
   const cases: [Ticket, string][] = [
-    [ticket, 'person/review'], [report('blocked'), 'person/blocked'], [report('failed'), 'person/failed'], [report('waiting'), 'idle'], [report('progress'), 'working'],
+    [ticket, 'pipeline/blocked'], [{ ...ticket, follows: [] }, 'person/review'], [report('blocked'), 'person/blocked'], [report('failed'), 'person/failed'],
+    [report('waiting'), 'idle'], [report('progress'), 'working'],
     [{ ...ticket, attention: { id: 'q', question: 'Desktop too?' } }, 'person/answer'], [{ ...ticket, delivery: { error: 'gone', at: '' } }, 'person/delivery'],
     [{ ...ticket, assignments: [{ ...ticket.assignments[0]!, state: 'pending', report: undefined }] }, 'working/queued'],
     [{ ...ticket, ended: { at: 'e', by: 'human', reason: 'Not needed after all', outcome: 'stopped' } }, 'stopped'],
@@ -166,7 +167,7 @@ it('shows a ticket card\'s state from a closed set: the open ticket\'s stage, th
   ]
   for (const [item, state] of cases) expect(ticketCard(item).state).toBe(state)
   expect(cases.map(([item]) => ticketCard(item).state).every(state => (TICKET_STATES as readonly string[]).includes(state))).toBe(true)
-  expect(ticketCard(cases[8]![0])).toMatchObject({ ended: { at: 'e', by: 'human', reason: 'Not needed after all' } })
+  expect(ticketCard(cases[9]![0])).toMatchObject({ ended: { at: 'e', by: 'human', reason: 'Not needed after all' } })
   expect(ticketCard(ticket)).toMatchObject({ ticket_id: 'ticket-1', pr_number: 42, strength: 'explicit' })
   expect(ticketCard(ticket)).not.toHaveProperty('attention')
   expect(ticketCard({ ...ticket, attention: { id: 'q', question: 'Desktop too?' } })).toMatchObject({ attention: { question: 'Desktop too?' } })

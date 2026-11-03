@@ -194,6 +194,21 @@ it('does not offer a merged pipeline gate again after a person\'s message resume
   store.tickets.save({ ...store.tickets.get('t1')!, ended: { at, by: 'executor', outcome: 'completed' } })
   expect(ticketSummary(store.tickets.get('t1')!)).toMatchObject({ stage: 'ended', pipeline: { state: 'merged' }, provenance: 'person' })
 })
+it('waits a change delivered as its own pull request at the pipeline gate, which opens that request', () => {
+  const host = views()
+  live('t1')
+  const ticket = store.tickets.get('t1')!
+  const report = { state: 'ready' as const, summary: 'PR #26 已提交，等你审批合入', at: '2026-09-22T00:05:00Z' }
+  store.threads.save({ key: 'github:26', ref: { source: 'github', id: '26' }, createdAt: at, subscriptions: ['t1'], correlated: [],
+    pending: [], meta: { isPr: true, url: 'https://github.com/acme/widgets/pull/26' } })
+  store.tickets.save({ ...ticket, follows: [{ thread: 'github:26', own: true }],
+    assignments: [{ id: 'a1', state: 'ended', createdAt: at, startedAt: at, report }] })
+  expect(ticketSummary(store.tickets.get('t1')!)).toMatchObject({ stage: 'pipeline', action: 'blocked',
+    pipeline: { state: 'blocked', manual: true, at: report.at } })
+  // The board row and the Ticket page open the request the gate waits on.
+  expect(ticketRow(snapshot(host), store.tickets.get('t1')!).pipeline).toMatchObject({ url: 'https://github.com/acme/widgets/pull/26' })
+  expect(ticketDetail(host, 't1')!.pipeline).toMatchObject({ url: 'https://github.com/acme/widgets/pull/26', manual: true })
+})
 it('does not show a follow-up that reached a ticket as waiting for an Eval, though an older version queued it', () => {
   const host = views()
   live('t1')

@@ -1,6 +1,6 @@
 /** Shared view projections for triggers, tickets, threads, decisions, and channel links. */
 import { z } from 'zod'
-import { canRetry, followupOwners, latestReport, liveTicket, settled, threadKey, ticketStage, type ActorRef, type ChannelRef, type Decision,
+import { canRetry, followupOwners, latestReport, liveTicket, ownPull, settled, threadKey, ticketStage, type ActorRef, type ChannelRef, type Decision,
   type DecisionKind, type Thread, type ThreadFacts, type Ticket, type TicketStage, type Trigger } from '../../core/index.ts'
 import { allowedSender, listedBot } from '../../policy.ts'
 import type { ChannelLink, Localized } from '../../sources/kind.ts'
@@ -121,6 +121,11 @@ export function ticketSummary(ticket: Ticket) {
   const stage = ticketStage(ticket)
   const note = ticketNote(ticket, stage)
   const state = liveTicket(ticket) ? 'open' as const : 'ended' as const
+  // A change delivered into a pull request the Ticket opened waits at the pipeline gate until a person approves and merges it.
+  // The wait is derived from that open Thread, so a Ticket reported before this gate existed shows it too (docs/003).
+  const ready = latestReport(ticket)
+  const pipeline = ticket.pipeline ?? (liveTicket(ticket) && stage.stage === 'pipeline' && ownPull(ticket) && ready?.state === 'ready'
+    ? { state: 'blocked' as const, manual: true, at: ready.at } : undefined)
   // Where an ended completed ticket's verification came from: the person, the worker's own checks, nothing recorded, or
   // an analysis ticket with nothing to run locally. This is what stops "completed" from reading as "verified".
   const provenance = ticket.ended?.outcome === 'completed'
@@ -132,7 +137,7 @@ export function ticketSummary(ticket: Ticket) {
   return { id: ticket.id, title: ticket.title, state, ...stage, ...note ? { note } : {},
     // A live Ticket whose pipeline merged was resumed by a person's later message: that round is not pipeline work, so the
     // panel must not offer the merge gate again. An ended Ticket keeps the observation for its record.
-    ...ticket.pipeline && !(liveTicket(ticket) && ticket.pipeline.state === 'merged') ? { pipeline: ticket.pipeline } : {},
+    ...pipeline && !(liveTicket(ticket) && pipeline.state === 'merged') ? { pipeline } : {},
     actions: { retry: canRetry(ticket), stop: liveTicket(ticket), confirm: canConfirm(ticket), verify: canVerify(ticket),
       rework: canRework(ticket) }, strength: ticket.mandate.strength,
     // The Source the Ticket was accepted from, so a result row can say where the work came from (Feishu, GitHub, TAPD).
@@ -176,8 +181,14 @@ export function threadFacts(store: Store, thread: Thread) {
   return { key: thread.key, source: thread.ref.source, title: threadTitle(store, thread), ...url ? { url } : {}, facts: (thread.meta.facts ?? {}) as ThreadFacts }
 }
 export type ThreadFactsView = ReturnType<typeof threadFacts>
-export const ticketLine = (view: Snapshot, ticket: Ticket) => ({ ...ticketSummary(ticket),
-  threads: view.threadsOf(ticket.id).map(thread => threadFacts(view.store, thread)) })
+export const ticketLine = (view: Snapshot, ticket: Ticket) => {
+  const line = ticketSummary(ticket)
+  const threads = view.threadsOf(ticket.id).map(thread => threadFacts(view.store, thread))
+  // A gate derived from a pull request opens that request: the Thread the Ticket follows is where the person approves and merges it.
+  const pipeline = line.pipeline
+  const url = pipeline && !ticket.pipeline ? threads.find(thread => thread.key === ownPull(ticket)?.thread)?.url : undefined
+  return { ...line, threads, ...pipeline && url ? { pipeline: { ...pipeline, url } } : {} }
+}
 export function threadTitle(store: Pick<Store, 'read'>, thread: Thread): string {
   const label = attribute(thread.meta.label)
   if (label) return label
