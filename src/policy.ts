@@ -33,8 +33,8 @@ export interface Assessment {
   title: string; scope: string; reason: string; intent_evidence?: string | null; acknowledgement?: string | null; worktree_name?: string
   /** chat 必须带的答复文字。 */
   reply?: string | null
-  /** chat 可选携带的、值得单独建单的事。 */
-  escalation?: Escalation | null
+  /** chat 可选携带的、值得单独建单的事；`target` 允许模型传 null，表示没有具体目标。 */
+  escalation?: (Omit<Escalation, 'target'> & { target?: string | null }) | null
 }
 /**
  * Validate an assessment against enabled rules and convert it into an engine `AssessmentOutcome`.
@@ -67,11 +67,14 @@ export function assessmentOutcome(assessment: Assessment, settings: Pick<Setting
     if (!assessment.intent_evidence) throw new Error('An escalation requires intent_evidence')
     const rules = matches.map(match => match.rule_id)
     const name = assessment.worktree_name ? { name: assessment.worktree_name } : {}
+    // 目标只记安装确实配置的那种写法；null 与缺省同义，不进入 core 的 Escalation。
+    const settled = { title: escalation.title, scope: escalation.scope, category: escalation.category, reason: escalation.reason,
+      ...(escalation.target ? { target: escalation.target } : {}) }
     // observe 下不建单：记下本可建的单，回复照发。
     if (strength === 'inferred' && settings.eval.mode !== 'auto') {
-      return { kind: 'chat', reply, rules, reason: assessment.reason, audit: { ...audit, would_accept: true, proposal: { ...escalation } } }
+      return { kind: 'chat', reply, rules, reason: assessment.reason, audit: { ...audit, would_accept: true, proposal: settled } }
     }
-    return { kind: 'chat', reply, escalation, rules, ...name, reason: assessment.reason, audit }
+    return { kind: 'chat', reply, escalation: settled, rules, ...name, reason: assessment.reason, audit }
   }
   if (assessment.decision !== 'accept') return { kind: assessment.decision, reason: assessment.reason, audit }
   if (!directionAllowed(assessment.direction)) return { kind: 'ignore', audit, reason: { code: 'directionUnsettled' } }

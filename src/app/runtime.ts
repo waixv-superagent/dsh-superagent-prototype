@@ -132,7 +132,8 @@ export class Runtime extends Service implements SourceHost {
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }
       this.settings = new Settings({ store, sources, engine: { policyChanged }, health: board, context: ctx, lifetime: this.lifetime, sessions,
         sourceHost: this, setup, requestPass: () => { this.passes.request() } })
-      this.executor = new DshExecutor({ context: ctx, get engine() { return runtime.engine }, store, effects, health: board.claim('worker'), machine,
+      this.executor = new DshExecutor({ context: ctx, get engine() { return runtime.engine }, store, get repository() { return setup.deployment.repository },
+        effects, health: board.claim('worker'), machine,
         lifetime: this.lifetime, sessions, closing: () => this.closing(), paused: () => this.paused(), environment, sourceLink: link,
         repliedTo: trigger => repliedTo({ store, sources }, trigger) })
       this.activity = new Activity(ctx)
@@ -146,8 +147,10 @@ export class Runtime extends Service implements SourceHost {
       const policy = () => settingsPolicy(store.settings(), sources)
       const engine = this.engine = new Engine({ repo: store, scope: sources, policy, assessor, executor,
         outbox, pipelineSkill: machine.pipelineSkill, swarmUrl: () => store.settings().executor.p4.swarmUrl,
-        pipelineFollowup: () => store.settings().executor.backend === 'p4',
-        prepareTicket: (ticket, outcome) => executor.prepare(ticket, outcome), emit: event => {
+        // Both follow the ticket's own delivery environment, falling back to the deployment's configured backend.
+        pipelineFollowup: ticket => (ticket.execution?.backend ?? store.settings().executor.backend) === 'p4',
+        prepareTicket: (ticket, outcome) => executor.prepare(ticket, outcome),
+        reprepareTicket: (ticket, backend) => executor.rePrepare(ticket, backend), emit: event => {
           // Notify the main Session only about domain events it did not initiate itself.
           const notice = this.quiet ? undefined : eventNotice(event, id => store.tickets.get(id))
           if (notice) sessions.notify(...notice)
@@ -187,6 +190,7 @@ export class Runtime extends Service implements SourceHost {
         get deployment() { return setup.deployment }, configured: () => setup.configured(),
         get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => passes.receive(trigger) }
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
+        get repository() { return setup.deployment.repository },
         pipeline: this.pipeline,
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),

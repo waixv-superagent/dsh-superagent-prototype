@@ -1,10 +1,12 @@
 # 009 — p4 and Swarm delivery
 
-This document covers the `p4` delivery backend: a Ticket's directory becomes a Perforce workspace of a depot, and delivering means shelving a changelist for a Swarm review instead of opening a GitHub pull request. The `git` backend stays the default and is unaffected.
+This document covers the `p4` delivery backend: a Ticket's directory becomes a Perforce workspace of a depot, and delivering means shelving a changelist for a Swarm review instead of opening a GitHub pull request. Which backend a Ticket uses follows its delivery target (section 1); `settings.executor.backend` only decides for a Ticket that has none.
 
 ## 1. Choosing the backend
 
-`settings.executor.backend` is `git` or `p4`; the panel shows it at the top of the Environment block of Execution settings, with the p4 fields below it. Switching affects Tickets accepted afterwards — a running Ticket keeps the flow it started with.
+A Ticket's backend comes from where its work belongs, not from a per-ticket question. The installation configures its delivery targets once: the GitHub repository its GitHub Source watches (`git`), and `executor.p4.depot` with the task center's `executor.workspaces` (`p4`). An accept names `target` — the repository slug or URL, the depot, or one of its workspace ids or directories — and `src/app/delivery-targets.ts` resolves it to the canonical target and its backend (`resolveDelivery`). A Ticket whose accept names no target follows its Source: a GitHub Trigger belongs to the watched repository and a TAPD Trigger to the depot; anything else keeps `settings.executor.backend`. An accept whose target the installation does not configure is refused with the configured ones, so a person never has to choose or confirm a channel; a worker that finds its ticket's target wrong reports blocked rather than asking to be moved.
+
+`settings.executor.backend` remains the fallback for a Ticket with no target: the panel shows it at the top of the Environment block of Execution settings, with the p4 fields below it. Changing it affects Tickets accepted afterwards — a running Ticket keeps the flow it started with. A ticket moved by hand with `tickets/:id/redispatch` takes the new environment's canonical target.
 
 | Setting | Meaning |
 | --- | --- |

@@ -46,6 +46,8 @@ export interface Api {
   /** Live execution activity of the ticket's worker; the panel polls the summary collapsed and the reasoning text expanded. */
   'GET tickets/:id/activity': { response: ActivityView }
   'POST tickets/:id/retry': { response: { retried: true } }
+  /** A person moves a ticket's work to another delivery environment; its stalled assignment ends and a new one starts there. */
+  'POST tickets/:id/redispatch': { body: { backend: 'git' | 'p4' }; response: { redispatched: true } }
   /** A person answers the waiting P1 plan from the ticket page, with no chat round-trip. */
   'POST tickets/:id/plan': { body: { decision: PlanDecision; note?: string }; response: { decided: true } }
   'POST tickets/:id/stop': { response: { stopped: true } }

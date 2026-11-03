@@ -158,6 +158,8 @@ const SourceBlock = z.templateLiteral(['source:', z.string().regex(/^[a-z][a-z0-
 const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), SourceBlock])
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
 const PlanRequest = z.object({ decision: z.enum(['approve', 'revise', 'stop']), note: z.string().trim().max(2000).optional() })
+/** A person moves a ticket's work to another delivery environment, such as when it was accepted under the wrong one. */
+const RedispatchRequest = z.object({ backend: z.enum(['git', 'p4']) }).strict()
 const VerificationRequest = z.object({ note: z.string().trim().max(2000).optional() })
 /** A follow-up observation: `merged` completes, `blocked` needs a person, `running` records a check still in flight. */
 const PipelineRequest = z.object({ state: z.enum(['running', 'blocked', 'merged']),
@@ -225,6 +227,12 @@ function routes(runtime: HttpHost): Routes {
     'GET tickets/:id': ({ params }) => ticketPage(runtime, params.id),
     'GET tickets/:id/activity': ({ params }) => runtime.activity.read(ticket(params.id)),
     'POST tickets/:id/retry': ({ params }) => { const id = ticket(params.id); runtime.engine.retryTicket(id); return { retried: true } },
+    'POST tickets/:id/redispatch': async ({ params, body }) => {
+      const id = ticket(params.id)
+      const request = RedispatchRequest.parse(await body(1_024))
+      runtime.engine.redispatchTicket(id, request.backend)
+      return { redispatched: true }
+    },
     'POST tickets/:id/plan': async ({ params, body }) => {
       const id = ticket(params.id)
       const request = PlanRequest.parse(await body(8_192))

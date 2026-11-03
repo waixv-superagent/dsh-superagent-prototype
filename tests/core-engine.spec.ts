@@ -11,9 +11,10 @@ function trigger(id: string, overrides: Partial<Trigger> = {}): Trigger {
 interface Hooks {
   emit?: (event: { type: string; data: Record<string, unknown> }) => void
   prepareTicket?: EngineOptions['prepareTicket']
+  reprepareTicket?: EngineOptions['reprepareTicket']
   pipelineFollowup?: EngineOptions['pipelineFollowup']
 }
-function harness(policyOverrides: Partial<Policy> = {}, { emit, prepareTicket, pipelineFollowup }: Hooks = {}) {
+function harness(policyOverrides: Partial<Policy> = {}, { emit, prepareTicket, reprepareTicket, pipelineFollowup }: Hooks = {}) {
   const repo = new MemoryRepositories()
   const outbox: OutboundMessage[] = []
   const withdrawn: string[] = []
@@ -42,7 +43,8 @@ function harness(policyOverrides: Partial<Policy> = {}, { emit, prepareTicket, p
     withdraw: id => { withdrawn.push(id) },
   }
   const engine = new Engine({ repo, scope, policy: () => policy, assessor, executor, outbox: queued,
-    ...emit ? { emit } : {}, ...prepareTicket ? { prepareTicket } : {}, ...pipelineFollowup ? { pipelineFollowup } : {},
+    ...emit ? { emit } : {}, ...prepareTicket ? { prepareTicket } : {}, ...reprepareTicket ? { reprepareTicket } : {},
+    ...pipelineFollowup ? { pipelineFollowup } : {},
     now: () => new Date(Date.UTC(2026, 8, 23, 0, 0, clock)).toISOString() })
   /** Simulate the executor starting queued assignments (unless `launch` is false) and delivering pending ticket inputs. */
   function settle({ launch = true } = {}) {
@@ -2026,3 +2028,40 @@ describe('P1 plan gate', () => {
   })
 })
 
+describe('redispatch', () => {
+  it('moves a stalled ticket into another delivery environment and starts a new assignment there', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.engine.report(ticketId, { state: 'waiting', summary: 'waiting for the channel decision' })
+    vi.mocked(h.executor.start).mockClear()
+    const before = h.repo.tickets.get(ticketId)!.assignments.length
+    h.engine.redispatchTicket(ticketId, 'git')
+    const ticket = h.repo.tickets.get(ticketId)!
+    expect(ticket.execution?.backend).toBe('git')
+    expect(ticket.assignments).toHaveLength(before + 1)
+    expect(ticket.assignments.at(-1)!.state).toBe('pending')
+    expect(ticket.assignments.at(-2)).toMatchObject({ state: 'ended', endedReason: 'redispatched' })
+    expect(ticket.phase).toBe('implement')
+    expect(h.executor.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: ticketId }), expect.objectContaining({ state: 'pending' }))
+    expect(ticket.undelivered).toHaveLength(1)
+    expect(ticket.inputs.at(-1)).toMatchObject({ kind: 'text', text: expect.stringContaining('git 通道') })
+  })
+  it('refuses an unknown ticket, an ended one, and gates a p4 dispatch behind the plan phase', () => {
+    const h = harness()
+    expect(() => h.engine.redispatchTicket('nope', 'git')).toThrow(new UserError('unknownTicket'))
+    const ticketId = accepted(h).ticketId!
+    h.engine.stopTicket(ticketId)
+    expect(() => h.engine.redispatchTicket(ticketId, 'git')).toThrow(new UserError('ticketEnded'))
+    const other = accepted(h, '2').ticketId!
+    h.engine.redispatchTicket(other, 'p4')
+    expect(h.repo.tickets.get(other)!.phase).toBe('plan')
+  })
+  it('rebuilds the assignment through the executor hook when one is wired', () => {
+    // The executor owns the environment instructions that the assignment carries, so it rebuilds them for the move.
+    const h = harness({}, { reprepareTicket: (ticket, backend) => ({
+      ...(ticket.execution ?? { name: '', directory: '', assignment: '' }), assignment: 'base', backend }) })
+    const ticketId = accepted(h).ticketId!
+    h.engine.redispatchTicket(ticketId, 'git')
+    expect(h.repo.tickets.get(ticketId)!.execution).toMatchObject({ assignment: 'base', backend: 'git' })
+  })
+})

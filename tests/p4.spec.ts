@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { EXECUTOR_VARIABLES, environmentOf, p4Client, p4Prepare } from '../src/app/execution-environment.ts'
-import { ticketExecution } from '../src/executor/dsh.ts'
+import { baseAssignment, deliveryInstructions, sharingInstructions, ticketExecution } from '../src/executor/dsh.ts'
 import { ExecutorConfigSchema, SettingsSchema } from '../src/policy.ts'
 import type { SourceRegistry } from '../src/sources/registry.ts'
 import { testDeployment } from './fixtures/deployment.ts'
@@ -55,6 +55,13 @@ describe('p4 execution variables', () => {
     expect(valueOf(variables, 'DSH_SUPERAGENT_P4_CL')).toBe('')
     expect(valueOf(variables, 'DSH_SUPERAGENT_SWARM_REVIEW')).toBe('')
   })
+  it('take the backend a ticket records over the deployment default', () => {
+    // A ticket whose work belongs in the deployment's git source is launched with the git backend even when the
+    // installation's configured backend is p4.
+    const variables = environmentOf({ deployment: testDeployment(), sources: noSources, settings: settingsWith({ backend: 'p4' }),
+      ticket: { id: 't1', name: 'fix-thing', directory: '/work/fix-thing', backend: 'git' } })
+    expect(valueOf(variables, 'DSH_SUPERAGENT_BACKEND')).toBe('git')
+  })
   it('omit the ticket variables, including the client, when no ticket is given', () => {
     const variables = environmentOf({ deployment: testDeployment(), sources: noSources, settings: settingsWith({ backend: 'p4' }) })
     expect(variables.map(variable => variable.key)).not.toContain('DSH_SUPERAGENT_P4_CLIENT')
@@ -94,7 +101,10 @@ describe('p4 delivery instructions', () => {
   const accept = { kind: 'accept', title: 'Fix', scope: 'the typo', reason: 'r', name: 'fix-thing', note: 'the typo' } as never
   it('tell a p4 worker to shelve, keep its edits, and after a person submits the changelist start a new one', () => {
     const settings = settingsWith({ backend: 'p4', workspaces: [{ id: 'sun', directory: 'E:/workspace' }] })
-    const assignment = ticketExecution(ticket, accept, settings, '/state').assignment
+    const execution = ticketExecution(ticket, accept, settings, '/state')
+    // The launch message composes the ticket's assignment with the delivery instructions of its environment.
+    const assignment = execution.assignment + deliveryInstructions(execution.backend ?? 'git')
+    expect(execution.backend).toBe('p4')
     expect(assignment).toContain('p4 shelve -c <CL>')
     // The revert that cleaned the shared tree after shelving is gone: the local edits stay for testing and the next round.
     expect(assignment).toContain('do not p4 revert')
@@ -109,10 +119,29 @@ describe('p4 delivery instructions', () => {
     expect(assignment).toContain('report blocked at P1')
   })
   it('leave the git assignment without the p4 flow', () => {
-    const assignment = ticketExecution(ticket, accept, settingsWith({}), '/state').assignment
+    const execution = ticketExecution(ticket, accept, settingsWith({}), '/state')
+    const assignment = execution.assignment + deliveryInstructions(execution.backend ?? 'git')
     expect(assignment).toContain('the typo')
     expect(assignment).not.toContain('p4 shelve')
     expect(assignment).not.toContain('p4 revert')
+    expect(deliveryInstructions('git')).toBe('')
+  })
+  it('record the resolved target and backend, so a git ticket under the p4 default gets no p4 instructions', () => {
+    const execution = ticketExecution(ticket, accept, settingsWith({ backend: 'p4' }), '/state', 'git', 'acme/widgets')
+    expect(execution.backend).toBe('git')
+    expect(execution.target).toBe('acme/widgets')
+    expect(execution.assignment + deliveryInstructions(execution.backend ?? 'git')).not.toContain('p4 shelve')
+  })
+  it('strip the old environment instructions when a ticket is moved, leaving what the accept wrote', () => {
+    // A ticket accepted before the move carries the p4 instructions, and its shared-workspace rules, inside its assignment.
+    const settings = settingsWith({ backend: 'p4', workspaces: [{ id: 'sun', directory: 'E:/workspace' }] })
+    const old = 'the typo' + deliveryInstructions('p4') + sharingInstructions(settings, 'p4')
+    expect(old).toContain('You share this workspace')
+    expect(old).toContain('report blocked at P1')
+    expect(baseAssignment(old)).toBe('the typo')
+    // A git assignment already has neither block, so it comes back unchanged.
+    const git = ticketExecution(ticket, accept, settingsWith({}), '/state').assignment
+    expect(baseAssignment(git)).toBe(git)
   })
 })
 

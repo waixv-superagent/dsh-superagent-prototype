@@ -197,7 +197,9 @@ export type DecisionKind = 'ignore' | 'accept' | 'chat' | 'reopen' | 'stop' | 'u
  * 闲聊里发现的、值得单独做的事：`chat` 决策可以携带它，在回复用户的同一轮里建一张工单。
  * 工单的标题、范围与类别取自这里，`reason` 说明为什么值得提单。
  */
-export interface Escalation { title: string; scope: string; category: 'bug' | 'feature'; reason: string }
+export interface Escalation { title: string; scope: string; category: 'bug' | 'feature'; reason: string
+  /** The configured repository or workspace the work belongs to; the executor resolves its delivery environment. */
+  target?: string }
 /** Outcome of one eval, recorded on the thread. */
 export interface Decision {
   id: string
@@ -355,7 +357,14 @@ export interface Follow { thread: string; own: boolean; closed?: { at: string; o
  * facts — `changelist`, `review`, `verification` — are what its latest report said it delivered.
  */
 export interface Execution { name: string; directory: string; assignment: string; workspace?: string; lease?: string[]
+  /** The delivery environment this ticket's work belongs in; absent keeps the deployment's configured backend. */
+  backend?: Backend
+  /** The configured repository or workspace the work belongs to, once an accept or a Source named one. */
+  target?: string
   changelist?: number; review?: string; verification?: string }
+
+/** A delivery environment: this deployment's git source repository, or its Perforce depot. */
+export type Backend = 'git' | 'p4'
 
 /** Where a delivered ticket stands with the person's local check: waiting, passed, or returned for rework. */
 export interface TicketVerification {

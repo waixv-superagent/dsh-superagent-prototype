@@ -341,6 +341,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/role-models.ts` | Resolves the Eval and Executor models, and seeds a new Session with its role's model |
 | `src/app/assessment.ts` | The MasterAssessor, the assessment schema and the window `orchestrator_eval` answers |
 | `src/app/execution-environment.ts` | The execution environment: its variables, a Ticket's values, the directory root and the lines of the prompt section, which `src/app/prompts.ts` fills into its template |
+| `src/app/delivery-targets.ts` | `deliveryTargets`, the repository and depot this installation delivers to, and `resolveDelivery`, which turns a Ticket's target or Source into its backend |
 | `src/app/source-context.ts` | `sourceContextOf`: each Source kind's `SourceContext` |
 | `src/app/links.ts` | `sourceLink`, the page of a Trigger's message, and `candidateCard` |
 | `src/app/cards.ts` | Compact cards of Triggers, Tickets, Threads and Decisions for models, the closed set of ticket card states `TICKET_STATES`, and `textPage` |
@@ -450,6 +451,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/views.spec.ts` | What the management views derive from the Store, such as the Thread a dropped message belongs to |
 | `tests/editor.spec.ts` | Editor occupancy: `deriveEditor` and `parseEditorProcesses` over a process table, and the `Editor` cache's interval, holder and unreadable-probe states |
 | `tests/p4.spec.ts` | The p4 delivery backend: its settings defaults, the workspace it prepares, and the execution variables it adds |
+| `tests/delivery-targets.spec.ts` | Delivery targets: the configured repository and depot, their spellings, the Source's default, and the target a Ticket records |
 | `tests/workspace.spec.ts` | Task-center placement: lease overlap in both directions, slots, empty leases excluding peers, and the conflicts a queued Ticket names |
 | `tests/timeline.spec.ts` | A Thread's pages and a Trigger's neighbours by time and then id, with every received Trigger's time in one form |
 | `tests/migration.spec.ts` | The schema 11 migration: every stored record in its current shape, and the refusal of older schemas |
