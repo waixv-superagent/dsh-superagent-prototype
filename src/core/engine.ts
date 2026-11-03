@@ -1,7 +1,7 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
 import { isoTime, liveTicket } from './model.ts'
-import type { Backend, ChannelRef, Decision, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketPipeline, Trigger } from './model.ts'
+import type { Backend, ChannelRef, Decision, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketPipeline, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
 import type { PlanDecision, PlanOption, PlanVia } from './plan.ts'
@@ -16,6 +16,7 @@ export type { WorkerReport } from './assignments.ts'
 export type { Outcome } from './evals.ts'
 export type { ReceiveResult } from './intake.ts'
 export type { Reply, ReplyRequest } from './replies.ts'
+export type { PipelineObservation, PipelineState, TicketPipeline } from './model.ts'
 
 /**
  * Single transactional entry point for mutating Triggers, Threads, Decisions, Tickets, and Assignments.
@@ -206,8 +207,16 @@ export class Engine {
     return this.repo.atomic(() => this.tickets.recordPipeline(ticketId, update))
   }
   /**
-   * A person asks a blocked pipeline follow-up to run again after clearing the blocker; the same independent subagent job
-   * starts in a new Assignment.
+   * The host's observation that a delivered change's pipeline moved: a failure to fix, a green review waiting for a person,
+   * an approval, a manual blocker, or the submit. A new failure wakes the worker with the failing checks; the same failure
+   * is not handed over twice; `merged` completes the ticket. The host polls Swarm and Jenkins, so no follow-up worker does.
+   * @throws UserError when the ticket is unknown.
+   */
+  observePipeline(ticketId: string, observation: PipelineObservation): Ticket {
+    return this.repo.atomic(() => this.tickets.observePipeline(ticketId, observation))
+  }
+  /**
+   * A person asks a blocked pipeline to be followed again after clearing the blocker; the host's watcher resumes polling it.
    * @throws UserError when the ticket is unknown or has ended.
    */
   resumePipeline(ticketId: string): Ticket { return this.repo.atomic(() => this.tickets.resumePipeline(ticketId)) }
@@ -360,3 +369,5 @@ export type EngineForSettings = Pick<Engine, 'policyChanged'>
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
   | 'assignmentInterrupted' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply' | 'submitPlan' | 'advancePhase'
   | 'recordPipeline'>
+/** What the host's pipeline watcher tells the Engine. */
+export type EngineForPipeline = Pick<Engine, 'observePipeline'>

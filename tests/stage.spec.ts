@@ -20,6 +20,10 @@ describe('ticketStage', () => {
     ['answer before review', ticket({ attention, assignments: [reported('ready')] }), { stage: 'person', action: 'answer' }],
     ['answer before a failure', ticket({ attention, assignments: [reported('failed')] }), { stage: 'person', action: 'answer' }],
     ['a ready Report', ticket({ assignments: [reported('ready')] }), { stage: 'person', action: 'review' }],
+    // The pipeline runs on the host from delivery on, so it comes before the person's parallel local check.
+    ['a running pipeline before the local check', ticket({ pipeline: { state: 'running', at: '' }, verification: { at: '', state: 'pending' } }),
+      { stage: 'pipeline', action: 'running' }],
+    ['a delivered ticket whose pipeline has not started', ticket({ verification: { at: '', state: 'pending' } }), { stage: 'person', action: 'verify' }],
     ['a ready Report of an ended Assignment', ticket({ assignments: [reported('ready', { state: 'ended' })] }), { stage: 'person', action: 'review' }],
     ['a blocked Report', ticket({ assignments: [reported('blocked')] }), { stage: 'person', action: 'blocked' }],
     ['a failed Report', ticket({ assignments: [reported('failed')] }), { stage: 'person', action: 'failed' }],

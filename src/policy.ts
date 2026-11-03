@@ -145,6 +145,12 @@ export const P4ConfigSchema = z.object({
   jenkinsUser: z.string().trim().max(100).default(''),
   /** Jenkins API token for reading consoleText. Stored only in this installation's settings; never printed or committed. */
   jenkinsToken: z.string().trim().max(500).default(''),
+  /** Seconds between host polls of an open change's Swarm review; 0 turns the automatic follow-up off. */
+  followupSeconds: z.number().int().min(0).max(3600).default(60),
+  /** How many times a failing pipeline wakes its worker to fix it before it asks a person. */
+  fixAttempts: z.number().int().min(1).max(10).default(3),
+  /** Minutes without a new review version or check result before the follow-up reports the pipeline stuck. */
+  stuckMinutes: z.number().int().min(5).max(240).default(45),
 }).strict()
 /** Executor settings: worker model, concurrency, ticket directory root (empty defaults to `<stateDir>/work`), `prepare` command, blocked commands, and the delivery backend. */
 export const ExecutorConfigSchema = z.object({

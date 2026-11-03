@@ -69,6 +69,37 @@ it('reads Swarm testruns and comments with the P4 ticket, and reports comments f
   expect(calls[0]?.auth).toBe(`Basic ${Buffer.from('u:t').toString('base64')}`)
 })
 
+it('reads the review state and version, and a changelist submitted away', async () => {
+  const checks = new PipelineChecks({ settings: () => settings(), env: { P4USER: 'u', P4TICKET: 't' },
+    fetchImpl: async url => {
+      if (String(url).endsWith('/reviews/416666')) return response({ data: { reviews: [{ id: 416666, state: 'needsReview',
+        stateLabel: 'Needs Review', testStatus: 'fail', commits: [], versions: [
+          { change: 416000, time: 1793000000 }, { change: 416666, time: 1793000600 }] }] } })
+      return response({}, { ok: false, status: 404 })
+    },
+    run: async (_file, args) => {
+      if (args.includes('416666')) return { code: 0, stdout: 'Change 416666 ... *pending*', stderr: '' }
+      return { code: 1, stdout: '', stderr: '416000 - no such changelist.' }
+    } })
+  expect(await checks.review('https://swarm.example.com/reviews/416666')).toEqual({ id: '416666', state: 'needsReview',
+    stateLabel: 'Needs Review', testStatus: 'fail', version: 2, change: 416666, changedAt: 1793000600, commits: [] })
+  expect(await checks.review('999')).toBeNull()
+  expect(await checks.changeState(416666)).toBe('pending')
+  expect(await checks.changeState(416000)).toBe('missing')
+  await expect(checks.changeState(1)).resolves.toBe('missing')
+})
+
+it('filters the AI verdict to the review version that asked for it', () => {
+  const comments = [
+    { body: '【AI】\n- **结果**: 审核通过✅\n- **建议**: 无任何建议修改或优化', context: { version: 1 } },
+    { body: '【AI】\n- **结果**: 审核不通过❌\n- **建议**: 有 2 处地方建议修改或优化', context: { version: 2 } }
+  ]
+  expect(summarizeComments({ data: { comments } }, 2)).toMatchObject({ approved: false, advice: true })
+  expect(summarizeComments({ data: { comments } }, 1)).toMatchObject({ approved: true, advice: false })
+  // A version Swarm has not reviewed yet has no verdict, never the previous round's approval.
+  expect(summarizeComments({ data: { comments } }, 3)).toBeNull()
+})
+
 it('reads Jenkins consoleText with the configured token and never returns the token', async () => {
   let seen: { url: string; auth?: string } | undefined
   const checks = new PipelineChecks({ settings: () => settings({ jenkinsUrl: 'https://ci.example.com', jenkinsUser: 'ci',

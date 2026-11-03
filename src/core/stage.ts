@@ -10,11 +10,12 @@ export type TicketStage = { stage: 'person'; action: 'delivery' | 'answer' | 're
 export function ticketStage(ticket: Ticket): TicketStage {
   if (ticket.ended) return { stage: 'ended' }
   if (ticket.delivery) return { stage: 'person', action: 'delivery' }
-  if (awaitsVerification(ticket)) return { stage: 'person', action: 'verify' }
   if (ticket.attention) return { stage: 'person', action: 'answer' }
   // A merged pipeline is history: it completed the Ticket once, and a person's later message may resume the Ticket for a
-  // follow-up round, which is not pipeline work again (docs/003).
+  // follow-up round, which is not pipeline work again (docs/003). A delivered change's pipeline runs on the host from the
+  // moment the worker delivers it, so it comes before the local check: the person's verification no longer starts it.
   if (ticket.pipeline && ticket.pipeline.state !== 'merged') return { stage: 'pipeline', action: ticket.pipeline.state === 'blocked' ? 'blocked' : 'running' }
+  if (awaitsVerification(ticket)) return { stage: 'person', action: 'verify' }
   const assignment = latestAssignment(ticket)
   const report = assignment?.report?.state
   if (report === 'ready') return { stage: 'person', action: 'review' }
