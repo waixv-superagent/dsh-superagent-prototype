@@ -9,6 +9,8 @@ const NOW = Date.parse('2026-11-03T16:00:00Z')
 const iso = (ms: number): string => new Date(ms).toISOString()
 const PASSING = 'LlmError: 503: {"message":"额度服务暂不可用","trace_id":"1"}'
 const FAILING = 'AggregateError: session-persistence-jsonl flush failed'
+const CORRUPT = 'RemoteError: resume failed for session "worker-x": SessionQueryError: stored session is corrupt: '
+  + 'SessionFormatError: tool call id requires a nonempty string'
 const MASTER = 'master'
 
 function ticket (assignments: Assignment[], overrides: Partial<Ticket> = {}): Ticket {
@@ -111,6 +113,7 @@ describe('a ticket whose worker stopped on a passing failure', () => {
   it('is left alone for a failure a later try would meet again, a blocked report, a person\'s follow-up, a question, a failed delivery or a paused host', async () => {
     const h = harness([
       ticket([failed(FAILING, NOW - 600_000)], { id: 'failing' }),
+      ticket([failed(CORRUPT, NOW - 600_000)], { id: 'corrupt' }),
       ticket([{ id: 'b', state: 'running', createdAt: iso(NOW - 600_000), report: { state: 'blocked', summary: PASSING, at: iso(NOW - 600_000) } }], { id: 'blocked' }),
       ticket([failed(PASSING, NOW - 600_000)], { id: 'followed',
         inputs: [{ id: 'i', kind: 'trigger', triggerId: 't', at: iso(NOW - 60_000), human: true }] }),
