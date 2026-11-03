@@ -2,7 +2,7 @@
 
 Captured from the live Superagent panel on 2026-11-03, viewport **1344 × 914 CSS px at DPR 1** (both images are the
 same `505,0 – 1344,220` crop), dark theme, query `d45f8eb325f342afd3c1a968c`: the tail of the worker Session id
-`worker-f4bf326d45f8eb325f342afd3c1a968c` that a truncated session label shows.
+`worker-f4bf326d45f8eb325f342afd3c1a968c` that the report pasted.
 
 - `before.png` — the deployed `dsh-superagent` built from `main` (`e2e4de2`, installed 2026-11-03 11:40). Typing the
   Session id reports 没有找到 and lists what search accepts; a Session id is not among them, and
