@@ -164,6 +164,24 @@ describe('the main Session', () => {
     expect(h.ensure).toHaveBeenCalledTimes(1)
   })
 
+  it('reports what it is recovering through status, which the state API carries to the Feishu status card', async () => {
+    vi.useFakeTimers()
+    const h = harness([ticket([failed(PASSING, NOW - 10_000)])])
+    expect(h.watch.status()).toEqual({ recovering: false, tickets: 0, master: false, gaveUp: false, missing: false })
+    h.clock.value = NOW + 50_000
+    await h.watch.poll()
+    expect(h.watch.status()).toMatchObject({ recovering: true, tickets: 1, master: false })
+    h.agents.set(MASTER, { id: MASTER, status: 'idle' })
+    h.watch.masterTurnFailed(Object.assign(new Error('503'), { status: 503 }))
+    expect(h.watch.status()).toMatchObject({ recovering: true, master: true })
+    // A main Session that cannot be created again is a recovery state of its own.
+    h.agents.delete(MASTER)
+    h.ensure.mockRejectedValueOnce(new Error('Session store offline'))
+    await h.watch.ensureMaster()
+    expect(h.watch.status()).toMatchObject({ missing: true })
+    await h.watch.stop()
+  })
+
   it('is told to go on after a passing failure, on the retry backoff', async () => {
     vi.useFakeTimers()
     const h = harness()

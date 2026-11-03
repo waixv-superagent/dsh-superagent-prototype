@@ -267,8 +267,8 @@ export class Runtime extends Service implements SourceHost {
   }
   private httpHost(): HttpHost {
     const runtime = this
-    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, health, machine, masterId, ready, sourceLinks, setup, passes } = this
-    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, health, machine, masterId, ready, sourceLinks,
+    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog } = this
+    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, health, machine, masterId, ready, sourceLinks, watchdog,
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),

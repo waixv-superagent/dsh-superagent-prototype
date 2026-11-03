@@ -45,6 +45,19 @@ export interface WatchdogHost {
 interface Recovery { attempts: number; reportAt: string; nextAt: number }
 /** The main Session's failed turn: the next retry attempt and the failure it repeats. */
 interface MasterFailure { attempts: number; message: string }
+/** What the watchdog is recovering now, which the state API reports and the Feishu status card shows. */
+export interface WatchdogStatus {
+  /** Whether a passing failure is being recovered: a Ticket waits for or runs an automatic retry, or the main Session is retried. */
+  readonly recovering: boolean
+  /** Tickets whose worker stopped on a passing failure and that wait for, or run, an automatic retry. */
+  readonly tickets: number
+  /** Whether the main Session's failed turn is in its retry chain. */
+  readonly master: boolean
+  /** Whether the main Session's chain used its last try and waits for a person. */
+  readonly gaveUp: boolean
+  /** Whether the main Session is missing and could not be created again on the last look. */
+  readonly missing: boolean
+}
 
 /**
  * Watches the main Session and the open Tickets for a passing model or network failure and retries them on its own. `start` begins
@@ -135,6 +148,12 @@ export class Watchdog {
       this.refresh(this.now())
       return false
     }
+  }
+
+  /** Reports what is being recovered now, which `/orchestrator/api/state` carries and the Feishu status card shows. */
+  status(): WatchdogStatus {
+    const tickets = this.recovered.size, master = this.masterFailure !== undefined
+    return { recovering: tickets > 0 || master, tickets, master, gaveUp: this.masterGaveUp, missing: this.masterDown }
   }
 
   /**

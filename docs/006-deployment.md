@@ -160,6 +160,8 @@ The bot can keep one card in a chat that answers "what is the agent doing?" at a
 
 The card must turn red while the service is down, so `scripts/feishu-status.mjs` runs outside it, from a scheduler, like the hourly check. It reads `GET /orchestrator/api/overview` and `GET /orchestrator/api/state` on the panel's loopback address and sends, updates and pins the card through the bot's `lark-cli`. It needs only the permissions the bot already uses to reply (`im:message`).
 
+The state card also carries the watchdog's outage recovery: while a model gateway or network failure is being retried, the header says `模型上游断连 · 自动恢复中` and the note names how many Tickets wait for their automatic retry and whether the main Session is being resumed too; a main Session that is being created again reads `主对话掉线 · 正在重建`, and a recovery chain that used its last try turns the card red with `自动恢复已停止` so a person knows to step in. The state API reports this as `watchdog` (`recovering`, `tickets`, `master`, `gaveUp`, `missing`), so a card from an older script simply keeps its previous shape when the field is absent.
+
 On Windows, run it from Task Scheduler through a hidden wrapper, so no console window flashes every minute:
 
 ```text

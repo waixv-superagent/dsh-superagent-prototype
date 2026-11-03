@@ -20,6 +20,7 @@ import type { Health } from '../sources/host.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import type { Outbox } from './outbox.ts'
 import type { Sessions } from './sessions.ts'
+import type { Watchdog } from './watchdog.ts'
 import type { Store } from './store.ts'
 import type { TextCache } from './cache.ts'
 import type { LinkTarget, ViewHost } from './views/records.ts'
@@ -43,6 +44,8 @@ export interface HttpHost {
   readonly engine: EngineForPeople
   readonly outbox: Pick<Outbox, 'status' | 'retry' | 'withdraw'>
   readonly executor: Pick<DshExecutor, 'activeCount'>
+  /** What the outage recovery is doing, which `/state` carries for the status card and `dsh-superagent status`. */
+  readonly watchdog: Pick<Watchdog, 'status'>
   /** Live worker activity the ticket page reads; only the bounded summary and reasoning text, never the transcript. */
   readonly activity: Pick<Activity, 'read'>
   /** Cached editor occupancy the overview reads; null until the first process probe finishes. */
@@ -115,7 +118,7 @@ export function stateView(runtime: HttpHost) {
   const settings = runtime.store.settings()
   return { setup: setupView(runtime), load: { ...executorLoad(runtime.store, runtime.executor.activeCount()),
     maxWorkers: settings.executor.maxWorkers },
-    masterId: runtime.masterId, paused: settings.paused, health: runtime.health }
+    masterId: runtime.masterId, paused: settings.paused, health: runtime.health, watchdog: runtime.watchdog.status() }
 }
 const views = (runtime: HttpHost): ViewHost => ({ store: runtime.store, sources: runtime.sources, links: runtime.links() })
 const setupState = (runtime: HttpHost): SetupState => ({ deployment: runtime.configured() ? runtime.deployment : undefined,
