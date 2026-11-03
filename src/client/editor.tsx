@@ -41,6 +41,7 @@ function holderPhrase(t: T, editor: EditorRow | null): string {
   switch (editor.holder) {
     case 'person': return t('editorYouUsing')
     case 'agent': return t('editorAgentUsing')
+    case 'build': return t('editorBuildUsing')
     case 'none': return editor.activity === 'building' ? t('editorFreeBuilding') : t('editorFree')
     default: return t('editorHolderUnknown')
   }
@@ -58,13 +59,19 @@ function CountItem({ count, focus, tone, label }: { count: number; focus: BoardF
 
 function Hero({ data }: { data: EditorPageView }) {
   const { t } = usePanel()
-  const { editor, counts, executor } = data
+  const { editor, build, counts, executor } = data
   const running = Math.max(0, counts.working - counts.queued)
-  const since = editor && (editor.holder === 'person' || editor.holder === 'agent') ? clock(editor.since) : ''
+  const since = editor && (editor.holder === 'person' || editor.holder === 'agent' || editor.holder === 'build')
+    ? clock(editor.since) : ''
   const facts = [since && t('editorSince', { time: since }),
-    editor?.activity === 'building' && editor.holder !== 'none' ? t('editorBuilding') : ''].filter(Boolean)
+    editor?.activity === 'building' && (editor.holder === 'person' || editor.holder === 'agent')
+      ? (build?.since ? t('editorBuildSince', { time: clock(build.since) }) : t('editorBuilding')) : '',
+    build && !build.since ? t('editorBuildUnknownStart') : '',
+    build?.since && build.included.length > 0 ? t('editorBuildIncludedCount', { count: build.included.length }) : '',
+    build?.since && build.included.length === 0 && counts.verification > 0 ? t('editorBuildIncludedNone') : ''].filter(Boolean)
   const pid = !editor ? t('editorReading') : editor.pid ? t('editorPid', { pid: editor.pid })
     : editor.holder === 'none' ? t('editorNoProcess') : t('editorUnknownProcess')
+  const pidLabel = editor?.holder === 'build' ? t('editorBuildProcess') : t('editorProcess')
   const slots = (executor?.maxWorkers ?? 0) > 0
     ? t('editorSlots', { running: executor.running, max: executor.maxWorkers })
     : t('editorSlotsUnknown')
@@ -90,7 +97,7 @@ function Hero({ data }: { data: EditorPageView }) {
     </div>
     <aside className="dt-editor-hero-side">
       <dl className="dt-editor-side-facts">
-        <div><dt>{t('editorProcess')}</dt><dd>{pid}</dd></div>
+        <div><dt>{pidLabel}</dt><dd>{pid}</dd></div>
         <div><dt>{t('editorSlotsLabel')}</dt><dd>{slots}</dd></div>
         <div><dt>{t('editorProbe')}</dt><dd>{editor ? <When at={editor.at} /> : t('editorReading')}</dd></div>
       </dl>
@@ -274,7 +281,7 @@ function Working({ data }: { data: EditorPageView }) {
   </section>
 }
 
-function WaitingRow({ ticket, verify }: { ticket: TicketRow; verify: boolean }) {
+function WaitingRow({ ticket, verify, included }: { ticket: TicketRow; verify: boolean; included?: boolean }) {
   const { t, navigate } = usePanel()
   const delivery = ticket.delivery
   const fact = verify ? [delivery?.changelist !== undefined ? `CL ${delivery.changelist}` : '', delivery?.review ?? ''].filter(Boolean)
@@ -283,7 +290,11 @@ function WaitingRow({ ticket, verify }: { ticket: TicketRow; verify: boolean }) 
   const note = ticket.note?.text ?? ''
   return <li className="dt-editor-wait" data-kind={verify ? 'verify' : 'decide'}>
     <div className="dt-editor-wait-main">
-      <button type="button" className="dt-editor-run-title" onClick={() => navigate(ticketRoute(ticket.id))}>{ticket.title}</button>
+      <div className="dt-editor-wait-head">
+        <button type="button" className="dt-editor-run-title"
+          onClick={() => navigate(ticketRoute(ticket.id))}>{ticket.title}</button>
+        {included && <Tag tone="info" title={t('editorBuildIncludedHint')}>{t('editorBuildIncludedTag')}</Tag>}
+      </div>
       <p className="dt-editor-run-meta">
         <span className="dt-mono">{shortId(ticket.id)}</span>
         {fact && <span className="dt-editor-wait-fact">{fact}</span>}
@@ -299,6 +310,7 @@ function WaitingRow({ ticket, verify }: { ticket: TicketRow; verify: boolean }) 
 function Waiting({ data }: { data: EditorPageView }) {
   const { t } = usePanel()
   const total = data.verification.length + data.person.length
+  const included = new Set(data.build?.included ?? [])
   return <section className="dt-editor-col dt-editor-rail" aria-labelledby="dt-editor-waiting">
     <header className="dt-editor-col-head">
       <h3 id="dt-editor-waiting" className="dt-editor-col-title">{t('editorWaitingTitle')}
@@ -311,7 +323,8 @@ function Waiting({ data }: { data: EditorPageView }) {
     </div>}
     {data.verification.length > 0 && <div className="dt-editor-group">
       <h4 className="dt-editor-group-title">{t('editorVerifyGroup')}<span className="dt-editor-col-count">{data.verification.length}</span></h4>
-      <ul className="dt-editor-list">{data.verification.map(ticket => <WaitingRow key={ticket.id} ticket={ticket} verify />)}</ul>
+      <ul className="dt-editor-list">{data.verification.map(ticket =>
+        <WaitingRow key={ticket.id} ticket={ticket} verify included={included.has(ticket.id)} />)}</ul>
     </div>}
     {data.person.length > 0 && <div className="dt-editor-group">
       <h4 className="dt-editor-group-title">{t('editorDecideGroup')}<span className="dt-editor-col-count">{data.person.length}</span></h4>

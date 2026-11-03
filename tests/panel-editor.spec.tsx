@@ -119,7 +119,7 @@ it('says who holds the editor, lists working Tickets with their live tool, and t
   const verify = all('.dt-editor-wait[data-kind="verify"]')
   expect(verify.map(row => row.querySelector('.dt-editor-run-title')?.textContent)).toEqual(['修复移动普攻后接 Q 技能无法起飞', 'README 更新'])
   expect(verify[0]!.querySelector('.dt-editor-wait-fact')?.textContent).toBe('CL 123456 · Swarm 654321')
-  expect(verify[0]!.querySelector('button:last-child')?.textContent).toBe('去验收')
+  expect(verify[0]!.querySelector('.dt-btn')?.textContent).toBe('去验收')
   expect(all('.dt-editor-wait[data-kind="decide"] .dt-editor-wait-fact').map(fact => fact.textContent)).toEqual(['待回答', '待处理失败'])
   expect(document.querySelector('.dt-editor-foot')?.textContent).toBe('只读页面：这里不启动、不停止、不关闭编辑器；所有操作在工单页。')
   // The page is read-only: it offers no handoff, and nothing on it posts.
@@ -157,7 +157,7 @@ it('opens a Ticket waiting for verification from its row', async () => {
 })
 
 it('keeps an unreadable editor on the safe side and says when nothing is working or waiting', async () => {
-  server.editor = { holder: 'unknown', activity: 'unknown', since: null, pid: null, at: '2026-09-22T08:10:00.000Z',
+  server.editor = { holder: 'unknown', activity: 'unknown', since: null, pid: null, build: null, at: '2026-09-22T08:10:00.000Z',
     detail: '读取进程表失败，按人在用' }
   server.working = []
   server.person = []
@@ -172,14 +172,15 @@ it('keeps an unreadable editor on the safe side and says when nothing is working
     '编辑器开着时，这里不会出现 agent 的排队提醒。'])
 
   // While a person holds the editor, the empty working list says agent work waits until after.
-  server.editor = { holder: 'person', activity: 'editing', since: '2026-09-22T08:00:00.000Z', pid: 1, at: '2026-09-22T08:10:00.000Z' }
+  server.editor = { holder: 'person', activity: 'editing', since: '2026-09-22T08:00:00.000Z', pid: 1, build: null,
+    at: '2026-09-22T08:10:00.000Z' }
   await remount()
   await click(tab(zh['tab.editor']))
   expect(all('.dt-editor-empty p')[1]?.textContent).toBe('你用编辑器时，agent 的活会排到之后。')
 })
 
 it('reads the editor as loading before the first probe, and as free while an agent builds', async () => {
-  server.editorPage = () => ({ editor: null, working: [], person: [], verification: [],
+  server.editorPage = () => ({ editor: null, build: null, working: [], person: [], verification: [],
     executor: { running: 0, queued: 0, maxWorkers: 3 },
     timeline: { from: new Date(Date.now() - 3_600_000).toISOString(), to: new Date().toISOString(), editor: [],
       workers: [], hidden: 0 },
@@ -188,8 +189,51 @@ it('reads the editor as loading before the first probe, and as free while an age
   await click(tab(zh['tab.editor']))
   expect(document.querySelector('.dt-editor-holder')?.textContent).toBe('读取中')
   server.editorPage = undefined
-  server.editor = { holder: 'none', activity: 'building', since: null, pid: null, at: '2026-09-22T08:10:00.000Z' }
+  // A host that predates the build holder still reports free + building; the page keeps that fallback.
+  server.editor = { holder: 'none', activity: 'building', since: null, pid: null, build: null, at: '2026-09-22T08:10:00.000Z' }
   await remount()
   await click(tab(zh['tab.editor']))
   expect(document.querySelector('.dt-editor-holder')?.textContent).toBe('空着，agent 在编译')
+})
+
+it('shows a running build as the holder and tags the Tickets delivered before it started', async () => {
+  const since = new Date(Date.now() - 20 * 60_000).toISOString()
+  server.editor = { holder: 'build', activity: 'building', since, pid: 42, build: { pid: 42, since },
+    at: '2026-09-22T08:10:00.000Z' }
+  server.build = { pid: 42, since, included: ['t8'] }
+  await mount()
+  await click(tab(zh['tab.editor']))
+  expect(document.querySelector('.dt-editor-hero')?.getAttribute('data-holder')).toBe('build')
+  expect(document.querySelector('.dt-editor-holder')?.textContent).toBe('编译中')
+  expect(document.querySelector('.dt-editor-facts')?.textContent).toContain('编译前已交付 1 张待验单')
+  expect(document.querySelector('.dt-editor-facts')?.textContent).toContain('起')
+  expect(all('.dt-editor-hero-side dt').map(term => term.textContent)).toEqual(['编译进程', '执行器', '进程读取'])
+  expect(document.querySelector('.dt-editor-hero-side dd')?.textContent).toBe('PID 42')
+  const rows = all('.dt-editor-wait[data-kind="verify"]')
+  expect(rows.map(row => row.querySelector('.dt-editor-run-title')?.textContent))
+    .toEqual(['修复移动普攻后接 Q 技能无法起飞', 'README 更新'])
+  expect(rows.map(row => row.querySelector('.dt-tag')?.textContent ?? null)).toEqual(['编译前已交付', null])
+  expect(rows[0]!.querySelector('.dt-tag')?.getAttribute('title')).toBe('按交付时间早于编译开始推断')
+
+  // A build that started before any delivery contains none of the waiting Tickets, and says so.
+  server.build = { pid: 42, since, included: [] }
+  await remount()
+  await click(tab(zh['tab.editor']))
+  expect(document.querySelector('.dt-editor-facts')?.textContent).toContain('编译前没有待验单交付')
+  expect(all('.dt-editor-wait[data-kind="verify"] .dt-tag')).toHaveLength(0)
+})
+
+it('shows the running build time beside a person who is also using the editor', async () => {
+  const editorSince = new Date(Date.now() - 60 * 60_000).toISOString()
+  const buildSince = new Date(Date.now() - 20 * 60_000).toISOString()
+  server.editor = { holder: 'person', activity: 'building', since: editorSince, pid: 7,
+    build: { pid: 42, since: buildSince }, at: '2026-09-22T08:10:00.000Z' }
+  server.build = { pid: 42, since: buildSince, included: ['t8'] }
+  await mount()
+  await click(tab(zh['tab.editor']))
+  const facts = document.querySelector('.dt-editor-facts')?.textContent ?? ''
+  expect(document.querySelector('.dt-editor-hero')?.getAttribute('data-holder')).toBe('person')
+  expect(facts).toMatch(/编译 \d{2}:\d{2} 起/)
+  expect(facts).toContain('编译前已交付 1 张待验单')
+  expect(facts).not.toContain('构建中')
 })

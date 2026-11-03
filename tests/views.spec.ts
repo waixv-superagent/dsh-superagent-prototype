@@ -214,7 +214,8 @@ const load = { running: 0, queued: 0 }
 it('carries the editor occupancy row into the overview', () => {
   const host = views()
   expect(overview(host, {}, 'v1', load).editor).toBeNull()
-  expect(overview(host, {}, 'v1', load, undefined, { holder: 'person', activity: 'editing', since: at, pid: 7, at }).editor)
+  expect(overview(host, {}, 'v1', load, undefined, { holder: 'person', activity: 'editing', since: at, pid: 7, build: null,
+    at }).editor)
     .toMatchObject({ holder: 'person', pid: 7, since: at })
 })
 
@@ -236,7 +237,7 @@ it('lists the working Tickets with their live tool on the editor page, live firs
     return tool ? { live: id === 'build', updatedAt: 1, tool: { ...tool, elapsed: 1000 }, recent: [] }
       : { live: false, updatedAt: 0, tool: null, recent: [] }
   } }
-  const editor = { holder: 'person' as const, activity: 'editing' as const, since: recent, pid: 7, at }
+  const editor = { holder: 'person' as const, activity: 'editing' as const, since: recent, pid: 7, build: null, at }
   const page = editorPage(host, activity, editor, { running: 1, queued: 1, maxWorkers: 3 })
   expect(page.editor).toBe(editor)
   expect(page.executor).toEqual({ running: 1, queued: 1, maxWorkers: 3 })
@@ -255,6 +256,33 @@ it('lists the working Tickets with their live tool on the editor page, live firs
   expect(page.person.map(ticket => ticket.id)).toEqual(['asks'])
   expect(page.verification.map(ticket => ticket.id)).toEqual(['check'])
   expect(editorPage(host, { read: () => { throw new Error('gone') } }, null).editor).toBeNull()
+})
+
+it('infers from timestamps which pending-verification Tickets a running build contains, and draws the build band', () => {
+  const host = views()
+  const now = Date.now()
+  const buildSince = new Date(now - 20 * 60_000).toISOString()
+  const early = new Date(now - 40 * 60_000).toISOString()
+  const late = new Date(now - 5 * 60_000).toISOString()
+  const pending = (id: string, verificationAt: string) => {
+    live(id)
+    store.tickets.save({ ...store.tickets.get(id)!, verification: { at: verificationAt, state: 'pending' } })
+  }
+  pending('early', early)
+  pending('late', late)
+  pending('exact', buildSince)
+  const editor = { holder: 'build' as const, activity: 'building' as const, since: buildSince, pid: 5,
+    build: { pid: 5, since: buildSince }, at }
+  const page = editorPage(host, { read: () => ({ live: false, updatedAt: 0, tool: null, recent: [] }) }, editor)
+  // Only the Tickets delivered before the build started can be part of it; the one delivered during it cannot, and a
+  // delivery at the very start still counts.
+  expect(page.build).toMatchObject({ pid: 5, since: buildSince })
+  expect([...page.build!.included].sort()).toEqual(['early', 'exact'])
+  expect(page.timeline.editor).toEqual([{ id: 'build', tone: 'build', from: buildSince, to: page.timeline.to, title: buildSince }])
+  // Without a readable build start there is no inference: the page shows the build but claims no Ticket.
+  const unknown = { ...editor, since: null, build: { pid: 5, since: null } }
+  expect(editorPage(host, { read: () => ({ live: false, updatedAt: 0, tool: null, recent: [] }) }, unknown).build)
+    .toEqual({ pid: 5, since: null, included: [] })
 })
 
 it('shortens a lane name to its first clause and reads an MCP editor server as using the editor', () => {
