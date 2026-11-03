@@ -39,6 +39,7 @@ interface Harness {
   calls: string[][]
   lark: (args: string[]) => Promise<unknown>
   fetcher: (url: string, init?: unknown) => Promise<{ ok: boolean; json: () => Promise<unknown> }>
+  runtimeState: unknown
   failOverview: boolean
   failPatch: boolean
   patchError: string
@@ -57,6 +58,7 @@ function harness (): Harness {
     failOverview: false,
     failPatch: false,
     patchError: '',
+    runtimeState: runtime,
     lark: async (args) => {
       calls.push(args)
       if (args[0] === 'im' && args[1] === '+messages-send') {
@@ -68,7 +70,7 @@ function harness (): Harness {
     },
     fetcher: async (url) => {
       if (state.failOverview) throw new Error('ECONNREFUSED')
-      return { ok: true, json: async () => url.endsWith('/overview') ? overview : runtime }
+      return { ok: true, json: async () => url.endsWith('/overview') ? overview : state.runtimeState }
     },
   }
   harnesses.push(state)
@@ -157,6 +159,27 @@ describe('composeCard', () => {
     expect(composeCard({ ...snapshot, paused: true }, { now: at }).template).toBe('orange')
     expect(composeCard({ ...snapshot, setupProblem: true }, { now: at }).title).toContain('问题')
   })
+
+  it('says a model-gateway outage is being recovered, and asks for a person when the retries stopped', () => {
+    const recovering = snapshotOf(overview, { ...runtime, watchdog: { recovering: true, tickets: 2, master: true, gaveUp: false, missing: false } })
+    const view = composeCard(recovering, { now: at })
+    expect(view.template).toBe('orange')
+    expect(view.title).toContain('自动恢复中')
+    expect(view.summary).toContain('自动恢复中')
+    const note = ((view.card.body as { elements: { content?: string }[] }).elements.at(-1)!)
+    expect(note.content).toContain('模型上游断连')
+    expect(note.content).toContain('2 张工单待恢复')
+    expect(note.content).toContain('主会话自动续跑')
+    const stopped = snapshotOf(overview, { ...runtime, watchdog: { recovering: false, tickets: 0, master: false, gaveUp: true, missing: false } })
+    const red = composeCard(stopped, { now: at })
+    expect(red.template).toBe('red')
+    expect(red.title).toContain('自动恢复已停止')
+    expect(((red.card.body as { elements: { content?: string }[] }).elements.at(-1)!).content).toContain('人工处理')
+    const missing = snapshotOf(overview, { ...runtime, watchdog: { recovering: false, tickets: 0, master: false, gaveUp: false, missing: true } })
+    expect(composeCard(missing, { now: at }).title).toContain('正在重建')
+    // A state API without the field keeps the card it had before the watchdog reported one.
+    expect(snapshotOf(overview, runtime).watchdog).toBeNull()
+  })
 })
 
 describe('ago', () => {
@@ -238,6 +261,17 @@ describe('runOnce', () => {
     const header = content.header as { template: string; subtitle: { content: string } }
     expect(header.template).toBe('red')
     expect(header.subtitle.content).toContain('最后心跳')
+  })
+
+  it('patches the card to the recovery state while the watchdog retries a model outage', async () => {
+    const h = harness()
+    await run(h, at)
+    h.runtimeState = { ...runtime, watchdog: { recovering: true, tickets: 1, master: true, gaveUp: false, missing: false } }
+    const result = await run(h, new Date(2026, 10, 3, 10, 1, 0))
+    expect(result.action).toBe('patched')
+    const patched = JSON.parse(dataOf(h.calls.at(-1)!).content as string) as { header: { title: { content: string } }; config: { summary: { content: string } } }
+    expect(patched.header.title.content).toContain('自动恢复中')
+    expect(patched.config.summary.content).toContain('自动恢复中')
   })
 
   it('retires an old card and sends a new one once it is 13 days old', async () => {

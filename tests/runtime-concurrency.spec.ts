@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { latestAssignment, waitsForPerson, type Ticket, type Trigger } from '../src/core/index.ts'
 import { Later } from '../src/app/effects.ts'
+import { RECOVERY_DELAYS_MS } from '../src/app/watchdog.ts'
 import { reportRelay } from '../src/app/notices.ts'
 import { WorkerSlots, inputMessage, mandateInstructions, ticketExecution, transient, triggerMessage } from '../src/executor/dsh.ts'
 import { SettingsSchema } from '../src/policy.ts'
@@ -188,6 +189,25 @@ it('records on the ticket that its worker Session could not be created again', a
   expect(h.runtime.store.tickets.get(one.ticket.id)).toMatchObject({ delivery: { error: expect.stringContaining('The Session store is offline') } })
 })
 
+it('fails a ticket instead of delivering into a corrupt stored Session, which a person must repair', async () => {
+  const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
+  const ticket = () => h.runtime.store.tickets.get(one.ticket.id)!
+  h.agents.get(one.sessionId)!.status = 'idle'
+  h.agents.delete(one.sessionId)
+  h.controller.resolveAgent.mockImplementation(async (id: string) => {
+    if (id === one.sessionId) {
+      throw new Error('SessionQueryError: stored session "worker-x" is corrupt: SessionFormatError: tool call id requires a nonempty string')
+    }
+    return h.resolveDefault(id)
+  })
+  h.runtime.receive(feishu('2', '一的补充', { mentions: [], root_id: 'om_1', sender_id: 'ou_guest' })); await h.runtime.idle()
+  await vi.waitFor(() => expect(latestAssignment(ticket())?.report).toMatchObject({ state: 'failed' }))
+  expect(latestAssignment(ticket())!.report!.summary).toContain('does not retry this automatically')
+  // The delivery failure is not recorded as a retryable Input delivery; the Ticket waits for a person instead.
+  expect(ticket().delivery).toBeUndefined()
+  expect(waitsForPerson(ticket())).toBe(true)
+})
+
 it('lets a worker go on after a passing provider failure, three times, before its ticket fails', async () => {
   const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
   const ticket = () => h.runtime.store.tickets.get(one.ticket.id)!
@@ -253,6 +273,48 @@ describe('a worker that goes on after a passing failure', () => {
     } finally { vi.useRealTimers() }
     expect(told(one.sessionId)).toEqual([])
   })
+})
+
+it('recovers a ticket whose worker stopped on a passing gateway failure, once the gateway answers again', async () => {
+  const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
+  const ticket = () => h.runtime.store.tickets.get(one.ticket.id)!
+  const busy = Object.assign(new Error('503: {"message":"额度服务暂不可用"}'), { status: 503, code: 'SERVER' })
+  const fail = () => { h.ctx.emit('agent/error', { agent: h.agents.get(one.sessionId), turn: 1, step: 1, error: busy } as never) }
+  // The worker uses up its three passing retries; the fourth failure stops the ticket.
+  fail(); fail(); fail(); fail()
+  await vi.waitFor(() => expect(latestAssignment(ticket())?.report).toMatchObject({ state: 'failed' }))
+  expect(waitsForPerson(ticket())).toBe(true)
+  // One retry delay later the watchdog recovers it: the stalled Assignment ends as recovered and a new one starts.
+  const reported = Date.parse(latestAssignment(ticket())!.report!.at)
+  vi.useFakeTimers({ toFake: ['Date'], now: reported + RECOVERY_DELAYS_MS[0] + 1_000 })
+  try { await h.runtime.watchdog.poll() } finally { vi.useRealTimers() }
+  expect(ticket().assignments.at(-2)?.endedReason).toBe('recovered')
+  expect(latestAssignment(ticket())!.state).not.toBe('ended')
+  // Its worker reads that the host retried it, not a person, and the ticket no longer waits for one.
+  await vi.waitFor(() => expect(h.deliveries.mock.calls.some(([call]) =>
+    call.text.includes('automatically after a passing model or network failure'))).toBe(true))
+  expect(waitsForPerson(ticket())).toBe(false)
+})
+
+it('never retries a corrupt stored Session, and its failed report tells a person how to repair it', async () => {
+  const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
+  const ticket = () => h.runtime.store.tickets.get(one.ticket.id)!
+  const corrupt = Object.assign(new Error('RemoteError: resume failed for session "worker-x": SessionQueryError: stored session '
+    + 'is corrupt: SessionFormatError: tool call id requires a nonempty string'), { status: 500 })
+  h.ctx.emit('agent/error', { agent: h.agents.get(one.sessionId), turn: 1, step: 1, error: corrupt } as never)
+  await vi.waitFor(() => expect(latestAssignment(ticket())?.report).toMatchObject({ state: 'failed' }))
+  const summary = latestAssignment(ticket())!.report!.summary
+  expect(summary).toContain('stored Session is corrupt')
+  expect(summary).toContain('does not retry this automatically')
+  // No passing retry is scheduled: a later try meets the same corrupt log.
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(h.deliveries.mock.calls.some(([call]) => call.text.includes('Your last turn failed for a passing reason'))).toBe(false)
+  // The watchdog leaves it to a person as well.
+  const reported = Date.parse(latestAssignment(ticket())!.report!.at)
+  vi.useFakeTimers({ toFake: ['Date'], now: reported + RECOVERY_DELAYS_MS[0] + 1_000 })
+  try { await h.runtime.watchdog.poll() } finally { vi.useRealTimers() }
+  expect(ticket().assignments.at(-1)?.endedReason).toBeUndefined()
+  expect(waitsForPerson(ticket())).toBe(true)
 })
 describe('a worker whose work runs in the background', () => {
   /** The worker's last words, as its Session holds them. */
@@ -794,6 +856,13 @@ it('tells a passing failure of the provider or the network from one that a later
     expect(transient(error)).toBe(true)
   }
   for (const error of [Object.assign(new Error('x'), { status: 400 }), Object.assign(new Error('x'), { status: 401 }), new Error('context too long'), 'LlmError: offline']) {
+    expect(transient(error)).toBe(false)
+  }
+  // A corrupt stored Session never heals: a resume/format failure is terminal even when a wrapper carries a 500 status.
+  const corrupt = 'RemoteError: resume failed for session "worker-x": SessionQueryError: stored session is corrupt: '
+    + 'SessionFormatError: tool call id requires a nonempty string'
+  for (const error of [new Error(corrupt), corrupt, Object.assign(new Error(corrupt), { status: 500 }),
+    Object.assign(new Error('x'), { code: 'session/query-failed' })]) {
     expect(transient(error)).toBe(false)
   }
 })

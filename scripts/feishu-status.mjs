@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * superagent 状态卡：在 Feishu 里维护一条随状态变化的卡片（执行中 / 待验证 / 待拍板、空闲拟人、掉线红）。
+ * superagent 状态卡：在 Feishu 里维护一条随状态变化的卡片（执行中 / 待验证 / 待拍板、空闲拟人、掉线红、模型上游断连恢复中）。
  *
  * 这条卡片要能在 DSH 进程挂掉时也变红，所以它是 dsh-superagent 之外的伴生脚本（和 scripts/dsh-superagent 一样）：
  * 由系统的计划任务每分钟跑一次，读本机管理 API，再发送 / 原地更新 / Pin 飞书卡片。脚本本身不写插件配置，也不改工单。
@@ -87,12 +87,21 @@ export function snapshotOf (overview, state) {
   const count = (value) => Array.isArray(value) ? value.length : 0
   const executor = overview?.executor && typeof overview.executor === 'object' ? overview.executor : {}
   const number = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0
+  // 断连恢复状态由 state 里的 watchdog 字段给出；服务端没带这个字段时保持 null，卡片按原来的样子显示。
+  const recovery = state?.watchdog && typeof state.watchdog === 'object' ? state.watchdog : undefined
   return {
     online: true,
     paused: state?.paused === true,
     runtime: typeof state?.health?.runtime?.state === 'string' ? state.health.runtime.state : 'ready',
     setupProblem: Boolean(state?.setup?.problem || state?.setup?.feishuProblem),
     problems: count(overview?.problems),
+    watchdog: recovery ? {
+      recovering: recovery.recovering === true,
+      tickets: number(recovery.tickets),
+      master: recovery.master === true,
+      gaveUp: recovery.gaveUp === true,
+      missing: recovery.missing === true
+    } : null,
     counts: {
       working: count(overview?.working),
       verification: count(overview?.verification),
@@ -116,7 +125,8 @@ export function snapshotOf (overview, state) {
 
 /** 连不上管理 API 时的快照：不猜数字，只保留“掉线”这个事实。 */
 export function offlineSnapshot (error) {
-  return { online: false, error: String(error?.message ?? error), paused: false, runtime: 'unknown', setupProblem: false, problems: 0, counts: null, tickets: null, executor: null }
+  return { online: false, error: String(error?.message ?? error), paused: false, runtime: 'unknown', setupProblem: false, problems: 0, watchdog: null,
+    counts: null, tickets: null, executor: null }
 }
 
 /** 本地时间的 HH:MM；无效时间返回 `—`。 */
@@ -136,10 +146,14 @@ export function idleMood (now) {
   return IDLE_MOODS[hour % IDLE_MOODS.length]
 }
 
-/** 卡片要呈现的状态优先级：掉线 > 暂停/问题 > 等人 > 在跑 > 空闲。 */
+/** 卡片要呈现的状态优先级：掉线 > 暂停 > 模型上游断连的恢复 > 其他问题 > 等人 > 在跑 > 空闲。 */
 function stateOf (snapshot, now) {
   if (!snapshot.online) return { kind: 'offline', title: '🔴 掉线了', template: TEMPLATES.offline }
   if (snapshot.paused) return { kind: 'paused', title: '⏸️ 暂停中', template: TEMPLATES.paused }
+  // 上游断连时面板本身还在，watchdog 正在自动重试：先把这件事说清楚，而不是只报“有问题”。
+  if (snapshot.watchdog?.gaveUp) return { kind: 'watchdog', title: '🔴 模型上游断连 · 自动恢复已停止', template: TEMPLATES.offline }
+  if (snapshot.watchdog?.missing) return { kind: 'watchdog', title: '🟠 主对话掉线 · 正在重建', template: TEMPLATES.problem }
+  if (snapshot.watchdog?.recovering) return { kind: 'watchdog', title: '🟠 模型上游断连 · 自动恢复中', template: TEMPLATES.waiting }
   if (snapshot.problems > 0 || snapshot.setupProblem) return { kind: 'problem', title: `🟠 有 ${Math.max(snapshot.problems, 1)} 个问题`, template: TEMPLATES.problem }
   if (snapshot.counts.person > 0) return { kind: 'person', title: `🟠 有 ${snapshot.counts.person} 件等你拍板`, template: TEMPLATES.waiting }
   if (snapshot.counts.verification > 0) return { kind: 'verify', title: `🟠 有 ${snapshot.counts.verification} 件等你验证`, template: TEMPLATES.waiting }
@@ -147,10 +161,25 @@ function stateOf (snapshot, now) {
   return { kind: 'idle', title: `🐟 ${idleMood(now)}`, template: TEMPLATES.idle }
 }
 
+/** 模型上游断连时的一句话：正在恢复什么，恢复不了时要人做什么。 */
+function watchdogNote (watchdog) {
+  if (watchdog.gaveUp) return '自动重试已用完 · 需要人工处理'
+  if (watchdog.missing) return '主会话不在了 · watchdog 正在重建'
+  const parts = ['模型上游断连 · watchdog 自动重试中']
+  if (watchdog.tickets > 0) parts.push(`${watchdog.tickets} 张工单待恢复`)
+  if (watchdog.master) parts.push('主会话自动续跑')
+  return parts.join(' · ')
+}
+
 /** 列表预览里的一行；Feishu 用它显示会话最后一条消息。 */
 function summaryOf (snapshot, status, now) {
   if (status.kind === 'offline') return '状态｜掉线了'
   if (status.kind === 'paused') return '状态｜暂停中'
+  if (status.kind === 'watchdog') {
+    if (snapshot.watchdog?.gaveUp) return '状态｜模型上游断连，自动恢复已停止'
+    if (snapshot.watchdog?.missing) return '状态｜主对话掉线，正在重建'
+    return '状态｜模型上游断连，自动恢复中'
+  }
   const counts = snapshot.counts
   const line = `在跑 ${counts.working} · 待验证 ${counts.verification} · 待拍板 ${counts.person}`
   if (status.kind === 'idle') return `状态｜${line}｜${idleMood(now)}`
@@ -262,6 +291,7 @@ export function composeCard (snapshot, { now = new Date(), lastOkAt = null, link
   let note
   if (!snapshot.online) note = '主机服务没响应 · 等待重连'
   else if (snapshot.paused) note = '暂停期间不接新活 · 恢复请点面板'
+  else if (snapshot.watchdog && (snapshot.watchdog.recovering || snapshot.watchdog.gaveUp || snapshot.watchdog.missing)) note = watchdogNote(snapshot.watchdog)
   else if (snapshot.problems > 0 || snapshot.setupProblem) note = `面板上有 ${Math.max(snapshot.problems, 1)} 个问题`
   else {
     const executor = snapshot.executor

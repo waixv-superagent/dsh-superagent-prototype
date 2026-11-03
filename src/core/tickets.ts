@@ -573,18 +573,20 @@ export class Tickets extends EnginePart {
   }
   /**
    * Ends the stalled assignment of a retryable open ticket (`failed`, `blocked`, or failed input delivery) and starts a new one.
+   * `by` records who ended it: a person, or the host recovering the ticket after a passing model or network failure.
    * @throws UserError when the ticket is unknown or not retryable.
    */
-  retry(ticketId: string): Ticket {
+  retry(ticketId: string, by: 'person' | 'recovered' = 'person'): Ticket {
     const ticket = this.require(ticketId)
     const latest = latestAssignment(ticket)
     if (!canRetry(ticket) || !latest) throw new UserError('notRetryable')
-    this.endAssignment(ticket, latest, 'retried')
+    const reason = by === 'person' ? 'retried' : 'recovered'
+    this.endAssignment(ticket, latest, reason)
     this.requeueUntaken(ticket, latest)
     const assignment = this.newAssignment(ticket)
     ticket.updatedAt = this.now()
     this.repo.tickets.save(ticket)
-    this.options.executor.stop(ticket, latest, 'retried')
+    this.options.executor.stop(ticket, latest, reason)
     this.options.executor.start(ticket, assignment)
     return ticket
   }

@@ -47,14 +47,45 @@ const fromPerson = (input?: TicketInput): boolean => input?.kind === 'trigger' ?
 class PrepareFailed extends Error {}
 const PASSING = new RegExp(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE', 'UND_ERR', 'socket hang up', 'fetch failed',
   'network error', 'overloaded', 'rate limit', '\\b(?:408|429|50[0-4])\\b'].join('|'), 'i')
+/** A stored Session that cannot be read: a corrupt log, a format error, or a failed resume. Another try meets it again. */
+const SESSION_CORRUPT = /SessionQueryError|SessionFormatError|stored (?:log|session)[^.;]*\bis corrupt|resume failed for session/i
 /**
- * True when an error represents a transient network or model-provider failure: an HTTP 408, 429, or 5xx status, or a
- * connection that was refused, reset, timed out, or could not resolve its host.
+ * True when the failure is a stored Session that cannot be read — a corrupt log, a format error or a failed resume — which a
+ * later try meets again. A person must remove its session log (or give the Ticket a fresh Session); the host never retries it.
+ */
+export function corruptSession(error: unknown): boolean {
+  const code = (error as { code?: unknown } | undefined)?.code
+  if (typeof code === 'string' && /^session\/(?:query|format|corrupt|resume|parse)/i.test(code)) return true
+  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error)
+  return SESSION_CORRUPT.test(text)
+}
+/**
+ * The provider-neutral failure codes DeepSeek Harness retries: a later request may not meet the same failure. Its retry policy
+ * routes on these codes, so the host does too (see `transient`).
+ */
+const PASSING_CODES = new Set(['RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT', 'EMPTY_RESPONSE'])
+/**
+ * DeepSeek Harness codes for failures waiting for recovery would meet again: an exhausted account quota, a credential a person
+ * must fix, a context window that does not grow, and images that must be offloaded first. The host never retries these by itself.
+ */
+const TERMINAL_CODES = new Set(['QUOTA', 'ACCOUNT_QUOTA', 'AUTH', 'MISSING_CREDENTIAL', 'INVALID_CREDENTIAL', 'CONTEXT_WINDOW_EXCEEDED',
+  'IMAGE_OFFLOAD_REQUIRED', 'INVALID_ARGS', 'NO_ADAPTER'])
+/**
+ * True when an error represents a transient network or model-provider failure: DeepSeek Harness's retryable failure codes, an HTTP
+ * 408, 429, or 5xx status, or a connection that was refused, reset, timed out, or could not resolve its host. A terminal code wins
+ * over its message, so a quota or credential failure that quotes a status is not retried.
  */
 export function transient(error: unknown): boolean {
-  const status = (error as { status?: unknown } | undefined)?.status
-  if (typeof status === 'number') return status === 408 || status === 429 || status >= 500
-  const text = error instanceof Error ? `${error.name} ${error.message} ${String((error as { code?: unknown }).code ?? '')}` : String(error)
+  // A corrupt stored Session is not a passing failure however a wrapper words it, such as a RemoteError with a 500 status.
+  if (corruptSession(error)) return false
+  const value = error as { code?: unknown; status?: unknown } | undefined
+  const code = typeof value?.code === 'string' ? value.code : undefined
+  if (code !== undefined) {
+    if (PASSING_CODES.has(code)) return true
+    if (TERMINAL_CODES.has(code)) return false
+  }
+  if (typeof value?.status === 'number') return value.status === 408 || value.status === 429 || value.status >= 500
+  const text = error instanceof Error ? `${error.name} ${error.message} ${String(code ?? '')}` : String(error)
   return PASSING.test(text)
 }
 /** Appends a stable 12-character ticket ID suffix to a validated English worktree name. */
@@ -200,6 +231,9 @@ const RESUMED = 'This ticket ended earlier and the message that follows, on its 
   + 'for another ticket, hand it back with orchestrator_trigger_handback and report dropped; if it needs nothing, such as thanks, '
   + 'report dropped without a message. Report ready when the follow-up is done. Do not repeat completed work.'
 const RETRIED = 'A person retried this ticket. Continue the assignment from the current worktree, git history and PR state.'
+/** What a worker reads when the host retried its ticket after a passing model or network failure, not a person. */
+const RECOVERED = 'The host retried this ticket automatically after a passing model or network failure. Continue the assignment from '
+  + 'the current worktree, git history and PR state; do not repeat completed work.'
 /** What a worker reads when a person wrote in its Session and that resumed the ticket it works on. */
 const RESUMED_IN_SESSION = 'This ticket ended earlier and this person, writing in its Session, resumed it under the same mandate: '
   + 'its tools and reports work again. Continue with what they asked and report ready when it is done; if they ask for work '
@@ -440,6 +474,9 @@ export class DshExecutor implements Executor {
           if (this.host.closing() || error instanceof Later) throw error
           const current = this.host.store.tickets.get(ticketId)
           if (!current || !liveTicket(current) || runningAssignment(current)?.id !== assignment.id) return
+          // A corrupt stored Session never accepts the Input: stop delivering to it and leave the Ticket, with the repair
+          // hint, to a person instead of retrying the delivery forever.
+          if (corruptSession(error)) { this.failed(ticketId, String(error)); return }
           this.host.engine.deliveryFailed(ticketId, assignment.id, String(error))
           throw error
         }
@@ -536,9 +573,15 @@ export class DshExecutor implements Executor {
   }
   /** Records a `failed` report on the ticket and relays the failure to the main Session in one transaction. */
   private failed(ticketId: string, summary: string): void {
+    // A corrupt stored Session never heals on its own: its report names the fix, and neither the host nor the main Session
+    // should retry it (the Watchdog's `transient` already refuses to).
+    const text = corruptSession(summary) && !summary.includes('does not retry this automatically')
+      ? `${summary} The stored Session is corrupt; a person must remove its session log or use a fresh Session id. `
+        + 'The host does not retry this automatically.'
+      : summary
     this.host.store.atomic(() => {
-      const updated = this.host.engine.report(ticketId, { state: 'failed', summary })
-      this.relay(resultRelay(updated, 'failed', summary))
+      const updated = this.host.engine.report(ticketId, { state: 'failed', summary: text })
+      this.relay(resultRelay(updated, 'failed', text))
     })
   }
   private relay({ id, text }: { id: string; text: string }): void { this.host.sessions.relay(id, text) }
@@ -605,7 +648,8 @@ export class DshExecutor implements Executor {
     const later = ticket.assignments.length > 1
     const told = later && await this.host.sessions.holds(sessionId, first)
     if (!current()) return
-    const retried = ticket.assignments.at(-2)?.endedReason === 'retried' ? { note: RETRIED } : {}
+    const previous = ticket.assignments.at(-2)?.endedReason
+    const retried = previous === 'retried' ? { note: RETRIED } : previous === 'recovered' ? { note: RECOVERED } : {}
     const assignmentText = (ticket.execution?.assignment ?? '') + deliveryInstructions(this.backendOf(ticket))
     const { text: brief, chars, read } = capped(assignmentText, ASSIGNMENT_CHARS, `ticket/${ticket.id}/assignment`)
     const card = told || !source ? undefined : await this.triggerCard(ticket, source.id)

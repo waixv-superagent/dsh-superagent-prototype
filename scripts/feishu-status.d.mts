@@ -24,6 +24,14 @@ export interface SnapshotTickets {
   person: SnapshotTicket[]
   pipeline: SnapshotTicket[]
 }
+/** What the outage recovery is doing, as `/orchestrator/api/state` reports it; null when the state omits it. */
+export interface SnapshotWatchdog {
+  recovering: boolean
+  tickets: number
+  master: boolean
+  gaveUp: boolean
+  missing: boolean
+}
 export interface Snapshot {
   online: boolean
   error?: string
@@ -31,6 +39,7 @@ export interface Snapshot {
   runtime: string
   setupProblem: boolean
   problems: number
+  watchdog: SnapshotWatchdog | null
   counts: SnapshotCounts | null
   tickets: SnapshotTickets | null
   executor: SnapshotExecutor | null
