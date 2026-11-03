@@ -5,7 +5,7 @@
  */
 import { PLAN_CARD_QUESTION, PLAN_REPLY_HINT, planLines, type Plan, type PlanDecision, type PlanOption, type QuestionSection, type Ticket } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
-import { cmdSafe, feishuPostContent } from './feishu-text.ts'
+import { feishuPostContent, jsonForCmd, textSafe } from './feishu-text.ts'
 
 /** What sending a card needs: the deployment's bot CLI. */
 export interface CardHost { readonly commands: Pick<Commands, 'lark'> }
@@ -15,13 +15,96 @@ export interface CardMessage { card: Record<string, unknown>; text: string }
 const shortId = (ticket: Pick<Ticket, 'id'>): string => ticket.id.slice(0, 8)
 /** The plan's lines by label; a card shows the lines the worker wrote and `—` for one it left out (the gate refuses those). */
 const linesOf = (text: string): Map<string, string> => new Map(planLines(text).map(line => [line.label, line.text]))
-/**
- * Feishu's CLI runs through `cmd.exe /c` on Windows, where an unquoted-by-cmd `<` or `>` is a redirection: a card carrying
- * `<font …>` failed with "cannot find the file specified" before the CLI ever saw it. `cmdSafe` is shared with plain replies.
- */
+/** A bare URL's display title: what it is, not the address, while the link still opens the URL. */
+const linkTitle = (url: string): string => {
+  let parsed: URL
+  try { parsed = new URL(url) } catch { return '链接' }
+  const host = parsed.hostname.replace(/^www\./i, '')
+  const path = parsed.pathname.split('/').filter(Boolean)
+  if (/(^|\.)github\.com$/i.test(host)) {
+    const [owner = '', repo = '', kind = '', number = ''] = path
+    if (kind === 'pull' && number) return `PR #${number}`
+    if (kind === 'issues' && number) return `Issue #${number}`
+    if (kind === 'commit' && number) return `Commit ${number.slice(0, 7)}`
+    return owner && repo ? `${owner}/${repo}` : 'GitHub'
+  }
+  if (/(^|\.)feishu\.cn$/i.test(host) || /(^|\.)larksuite\.com$/i.test(host)) {
+    const kind = path[0]
+    return kind === 'docx' ? '飞书文档' : kind === 'wiki' ? '飞书知识库' : kind === 'sheets' ? '飞书表格'
+      : kind === 'slides' ? '飞书幻灯片' : kind === 'base' ? '飞书多维表格' : '飞书链接'
+  }
+  if (/^jenkins[.-]/i.test(host)) return 'Jenkins 构建'
+  return host
+}
+/** A URL a worker wrote as a title is kept; a bare URL becomes `[title](url)`, so the card never shows the address. */
+const linkify = (text: string): string => text.replace(
+  /(\[[^\]]*\]\([^)]*\))|(https?:\/\/[^\s<>"'()（）[\]【】。，；：！？、]+)/gu,
+  (markdown: string, titled?: string, bare?: string) => titled ?? `[${linkTitle(bare!)}](${bare})`)
+/** Cards show angle brackets full-width so no message text is read as card markup; the JSON argument escapes the rest. */
 const markdown = (content: string, extra: Record<string, unknown> = {}): Record<string, unknown> =>
-  ({ tag: 'markdown', content: cmdSafe(content), ...extra })
-const plain = (content: string): Record<string, unknown> => ({ tag: 'plain_text', content: cmdSafe(content) })
+  ({ tag: 'markdown', content: textSafe(linkify(content)), ...extra })
+const plain = (content: string): Record<string, unknown> => ({ tag: 'plain_text', content: textSafe(content) })
+/** How short a sentence may be before it joins the point before it, so a card gets no one-word bullets like "推荐。". */
+const POINT_MIN = 12
+/** How long a point may get before it splits at its own semicolons; a point reads like a sentence, not a wall of text. */
+const POINT_MAX = 180
+/**
+ * Two points on one line when a short fragment joins the sentence before it: a full stop already ends the line, so only a
+ * fragment that was cut mid-sentence (no closing punctuation) gets a space.
+ */
+const joinPoint = (last: string, piece: string): string => `${last}${/[。！？；;]$/u.test(last) ? '' : ' '}${piece}`
+/**
+ * The points a card block shows: the worker's own line breaks first, then one point per sentence and a very long sentence
+ * at its semicolons. A fragment too short to stand alone joins the point before it, except the closing sentence of the
+ * block, which keeps its own last line so a conclusion like "推荐 B。" is not read as part of the point above it. No
+ * character is dropped, so the card and its text fallback carry the whole plan and only its layout changes.
+ */
+const planPoints = (text: string): string[] => {
+  const pieces: string[] = []
+  for (const line of text.replace(/\r\n?/g, '\n').split('\n')) {
+    const clauses = line.trim().replace(/^[-*•·]\s+/u, '').split(/(?<=[。！？])\s*/u)
+      .map(piece => piece.trim()).filter(Boolean)
+    for (const clause of clauses) {
+      pieces.push(...(Array.from(clause).length <= POINT_MAX ? [clause]
+        : clause.split(/(?<=[；;])/u).map(piece => piece.trim()).filter(Boolean)))
+    }
+  }
+  const points: string[] = []
+  pieces.forEach((piece, index) => {
+    const last = points.length ? points[points.length - 1] : undefined
+    if (last !== undefined && index < pieces.length - 1 && Array.from(piece).length < POINT_MIN) {
+      points[points.length - 1] = joinPoint(last, piece)
+    } else {
+      points.push(piece)
+    }
+  })
+  return points
+}
+/** A point that already carries its own number keeps it, in Chinese numbering so no list markdown nests. */
+const NUMBERED = /^\d{1,2}(?:[)、]|\.(?!\d))\s*/u
+/** One point as its own line: a dot, not a markdown list, so the text keeps the card's left edge on a phone. */
+const pointLine = (point: string): string => NUMBERED.test(point)
+  ? point.replace(NUMBERED, (marker: string) => `${marker.trim().replace(/[).、]$/u, '')}、`)
+  : `• ${point}`
+/** The lines of a multi-point block: the closing sentence keeps its own line (no dot) so a conclusion does not hide. */
+const pointLines = (points: string[]): string[] => {
+  const last = points[points.length - 1] ?? ''
+  const closing = points.length > 1 && !NUMBERED.test(last) && Array.from(last).length < POINT_MIN
+  return points.map((point, index) => closing && index === points.length - 1 ? point : pointLine(point))
+}
+/** One plan block as the card shows it: its bold label, then a line per point when it has more than one. */
+const block = (label: string, text: string, extra: Record<string, unknown> = {}): Record<string, unknown> => {
+  const points = planPoints(text)
+  const body = points.length > 1 ? pointLines(points).join('\n') : points[0] ?? '—'
+  return markdown(`**${label}**\n${body}`, extra)
+}
+/** The same block as multi-line text for the fallback a person reads when Feishu refuses the card. */
+const blockText = (label: string, text: string): string => {
+  const points = planPoints(text)
+  return points.length > 1
+    ? `${label}：\n${pointLines(points).map(point => linkify(point)).join('\n')}`
+    : `${label}：${linkify(points[0] ?? '—')}`
+}
 /** A card button that calls this plugin back with one decision and, when the plan offers choices, their index; stop asks
  * once more because it withdraws the Mandate. The label and its note stay in the plan, not the callback value, so no worker
  * text has to survive the command line inside the card's JSON. */
@@ -44,6 +127,11 @@ const clip = (text: string, max: number): string => {
   const chars = Array.from(text.replace(/\s+/g, ' ').trim())
   return chars.length <= max ? chars.join('') : `${chars.slice(0, max - 1).join('').replace(/[\s，,、；;：:（(「]+$/, '')}…`
 }
+/** A section's points without its bold label; a fold header that already names a lone section does not repeat it. */
+const bodyMarkdown = (text: string): Record<string, unknown> => {
+  const points = planPoints(text)
+  return markdown(points.length > 1 ? pointLines(points).join('\n') : points[0] ?? '—')
+}
 /** The context sections a person can expand: a worker's own `fold` blocks, or the plan's four evidence lines. */
 const foldPanel = (sections: readonly QuestionSection[], title: string): Record<string, unknown> => ({
   tag: 'collapsible_panel', expanded: false,
@@ -54,7 +142,7 @@ const foldPanel = (sections: readonly QuestionSection[], title: string): Record<
   },
   border: { color: 'grey', corner_radius: '5px' },
   vertical_spacing: '8px', padding: '8px 8px 8px 8px',
-  elements: sections.map(section => markdown(`**${section.label}**\n${section.text}`)),
+  elements: sections.length === 1 ? [bodyMarkdown(sections[0]?.text ?? '')] : sections.map(section => block(section.label, section.text)),
 })
 /** The four evidence lines the standard plan card folds away; a worker's custom sections replace them. */
 const EVIDENCE = ['代码线', '资产线', '配置线', '验证方案'] as const
@@ -89,12 +177,12 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
       direction: 'vertical', padding: '16px 16px 20px 16px', vertical_spacing: '12px',
       elements: [
         markdown(`**${question}**`),
-        ...body.length ? body.map(section => markdown(`**${section.label}**\n${section.text}`))
+        ...body.length ? body.map(section => block(section.label, section.text))
           : custom ? [] : [
-            markdown(`**现象**\n${get('现象') || '—'}`),
-            markdown(`**修复锚点**\n${get('修复锚点') || '—'}`),
-            markdown(`**影响面**\n${get('影响面') || '—'}`, { text_size: 'notation' }),
-            markdown(`**预算**\n${get('预算') || '—'}`, { text_size: 'notation' }),
+            block('现象', get('现象')),
+            block('修复锚点', get('修复锚点')),
+            block('影响面', get('影响面'), { text_size: 'notation' }),
+            block('预算', get('预算'), { text_size: 'notation' }),
           ],
         ...folded.length ? [foldPanel(folded, '补充')] : custom ? [] : [evidencePanel(get)],
         { tag: 'hr', margin: '4px 0px 0px 0px' },
@@ -114,9 +202,9 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
     { label: '现象', text: get('现象') || '—' }, { label: '修复锚点', text: get('修复锚点') || '—' },
     { label: '影响面', text: get('影响面') || '—' }, { label: '预算', text: get('预算') || '—' },
   ]
-  const text = cmdSafe([`待确认 · 方案已出：${ticket.title}（工单 ${shortId(ticket)}）`,
+  const text = textSafe([`待确认 · 方案已出：${ticket.title}（工单 ${shortId(ticket)}）`,
     `要你定：${question}`,
-    ...context.map(section => `${section.label}：${section.text}`),
+    ...context.map(section => blockText(section.label, section.text)),
     '通过后：开始实现，按验证方案验证，再交给你确认交付；不会直接 submit。',
     `选项：${choices.map(choice => choice.label).join(' ｜ ')}`,
     custom ? '卡片按这次对话的语境用了自定义分块。' : '证据（代码线/资产线/配置线/验证方案）在卡片折叠与工单面板里。', PLAN_REPLY_HINT].join('\n'))
@@ -146,7 +234,7 @@ export function reviseCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan
           },
           border: { color: 'grey', corner_radius: '5px' },
           vertical_spacing: '8px', padding: '8px 8px 8px 8px',
-          elements: [markdown(plan.text)],
+          elements: planLines(plan.text).map(line => block(line.label, line.text)),
         },
         markdown('**要改什么？** 写一句方向就行；提交后回到方案阶段，worker 按它重新给方案。'),
         {
@@ -167,7 +255,7 @@ export function reviseCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan
       ],
     },
   }
-  return { card, text: cmdSafe(`改一下 · ${ticket.title}：回复 2 并附一句新方向；原方案见上一条方案卡。`) }
+  return { card, text: textSafe(`改一下 · ${ticket.title}：回复 2 并附一句新方向；原方案见上一条方案卡。`) }
 }
 /** The card that replaces the question once a person answered, so the chat record says what was decided. */
 export function resolvedCard(ticket: Pick<Ticket, 'id' | 'title'>, decision: PlanDecision, note = '', option = ''): CardMessage {
@@ -184,7 +272,7 @@ export function resolvedCard(ticket: Pick<Ticket, 'id' | 'title'>, decision: Pla
       elements: [markdown(outcome.body), markdown('决定已记录，可在工单面板查看完整方案与执行过程。',
         { text_size: 'notation' })] },
   }
-  return { card, text: cmdSafe(`${outcome.title}：${ticket.title}。${outcome.body}`) }
+  return { card, text: textSafe(`${outcome.title}：${ticket.title}。${outcome.body}`) }
 }
 /**
  * A worker's question card: the question in full, then one button per choice the worker wrote (2–4), and the note that a
@@ -206,7 +294,7 @@ export function attentionCard(question: string, attentionId: string, options: re
       direction: 'vertical', padding: '16px 16px 20px 16px', vertical_spacing: '12px',
       elements: [
         markdown(`**${question}**`),
-        ...body.map(section => markdown(`**${section.label}**\n${section.text}`)),
+        ...body.map(section => block(section.label, section.text)),
         ...folded.length ? [foldPanel(folded, '补充')] : [],
         {
           tag: 'column_set', flex_mode: flexOf(options.length), horizontal_spacing: '8px',
@@ -219,7 +307,7 @@ export function attentionCard(question: string, attentionId: string, options: re
       ],
     },
   }
-  const text = cmdSafe([`要你选：${question}`, ...sections?.map(section => `${section.label}：${section.text}`) ?? [],
+  const text = textSafe([`要你选：${question}`, ...sections?.map(section => blockText(section.label, section.text)) ?? [],
     `可选项：${options.map((option, index) => `${index + 1}. ${option}`).join(' ｜ ')}`,
     '点卡片或直接回复都可以。'].join('\n'))
   return { card, text }
@@ -234,7 +322,7 @@ export function attentionResolvedCard(question: string, option: string, ticketId
       elements: [markdown(`你选了：**${option}**`), markdown(question, { text_size: 'notation' }),
         markdown('worker 会按这个继续。', { text_size: 'notation' })] },
   }
-  return { card, text: cmdSafe(`已回复：${option}（${question}）`) }
+  return { card, text: textSafe(`已回复：${option}（${question}）`) }
 }
 /** The card for a click on a question that no longer waits: idempotent, and it never changes the ticket. */
 export function attentionStaleCard(ticketId?: string): CardMessage {
@@ -256,12 +344,12 @@ export function staleCard(ticket: Pick<Ticket, 'id' | 'title'>): CardMessage {
     body: { direction: 'vertical', padding: '12px 12px 20px 12px',
       elements: [markdown('这版方案已经有人答过，或者已经换了一版；在工单面板里能看到最新状态。')] },
   }
-  return { card, text: cmdSafe(`已处理：${ticket.title}（这版方案不再等人）`) }
+  return { card, text: textSafe(`已处理：${ticket.title}（这版方案不再等人）`) }
 }
 /** Replaces a card in place with the delayed-update token its button callback carries (valid 30 minutes, two uses). */
 export async function updateCard(host: CardHost, token: string, message: CardMessage): Promise<void> {
   await host.commands.lark(['api', 'POST', '/open-apis/interactive/v1/card/update', '--data',
-    JSON.stringify({ token, card: message.card })])
+    jsonForCmd({ token, card: message.card })])
 }
 /** The `message_id` of a `+messages-send` result, for a later in-place card update; undefined when the output carries none. */
 export function messageIdOf(output: unknown): string | undefined {
@@ -300,7 +388,7 @@ export async function sendCard(host: CardHost, chat: string, message: CardMessag
         '--reply-in-thread', '--idempotency-key', idempotencyKey])
       : host.commands.lark(['im', '+messages-send', '--chat-id', chat, ...type ? ['--msg-type', type] : [], flag, content, '--idempotency-key', idempotencyKey])
   try {
-    return messageIdOf(await send('--content', JSON.stringify(message.card), 'interactive'))
+    return messageIdOf(await send('--content', jsonForCmd(message.card), 'interactive'))
   } catch {
     // A card Feishu refuses (such as a schema change) still reaches the person as text; anything else would fail there too.
     return messageIdOf(await send('--content', feishuPostContent(message.text), 'post'))

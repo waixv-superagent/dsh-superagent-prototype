@@ -1,7 +1,7 @@
 /** Opens a Feishu topic for an accepted ticket and moves the ticket's replies there. */
 import type { Ticket, ThreadRef } from '../core/index.ts'
 import type { SourceContext } from './host.ts'
-import { cmdSafe, feishuPostContent } from './feishu-channel.ts'
+import { feishuPostContent } from './feishu-channel.ts'
 import { SOURCE, feishuChannel } from './feishu-trigger.ts'
 import type { FeishuConfig } from './feishu.ts'
 
@@ -31,7 +31,7 @@ export async function openFeishuTopic(ctx: SourceContext, ticket: Ticket): Promi
   const key = `topic-${ticket.id}`.slice(0, 50)
   const sent = await ctx.commands.lark<{ message_id?: string; thread_id?: string; data?: { message_id?: string; thread_id?: string } }>(
     ['im', '+messages-send', '--chat-id', topicChat, '--msg-type', 'post', '--content',
-      feishuPostContent(cmdSafe(topicText(ticket, trigger.url))), '--idempotency-key', key])
+      feishuPostContent(topicText(ticket, trigger.url)), '--idempotency-key', key])
   const messageId = sent?.message_id ?? sent?.data?.message_id
   if (!messageId) throw new Error(`Feishu did not return the topic message id for ticket ${ticket.id}`)
   const thread: ThreadRef = { source: SOURCE, id: `${topicChat}:${messageId}` }

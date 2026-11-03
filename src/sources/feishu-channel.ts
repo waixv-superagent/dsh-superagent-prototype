@@ -5,11 +5,11 @@ import { CliError } from '../infra/commands.ts'
 import { checkedImText } from '../infra/text.ts'
 import { attentionCard, messageIdOf, messageLink } from './feishu-card.ts'
 import { releaseReceipt } from './feishu-receipt.ts'
-import { cmdSafe, feishuPostContent } from './feishu-text.ts'
+import { jsonForCmd, feishuPostContent } from './feishu-text.ts'
 import { feishuTriggerId } from './feishu-trigger.ts'
 import type { ChannelHost, ChannelLink, ChannelLinks } from './kind.ts'
 
-export { cmdSafe, feishuPostContent } from './feishu-text.ts'
+export { feishuPostContent } from './feishu-text.ts'
 /** How long an attention card's message id is remembered for its button callback. */
 const CARD_KEEP_MS = 48 * 3600_000
 
@@ -43,13 +43,13 @@ const gone = (error: unknown): boolean => error instanceof CliError && (error.co
 export async function sendFeishu(host: ChannelHost, message: OutboundMessage): Promise<'sent' | 'gone'> {
   const messageId = message.channel.address.messageId
   if (!messageId) throw new Error('Missing Feishu reply target')
-  const text = cmdSafe(checkedImText(message.text))
+  const text = checkedImText(message.text)
   // A question with choices is a card: the click answers it without a chat round-trip. A card Feishu rejects falls back to
   // the plain text reply, so the question still reaches the person.
   if (message.attention) {
     try {
       const sent = await host.commands.lark<unknown>(['im', '+messages-reply', '--message-id', messageId, '--msg-type', 'interactive',
-        '--content', JSON.stringify(attentionCard(message.text, message.attention.attentionId, message.attention.options, message.attention.ticketId, message.attention.sections).card),
+        '--content', jsonForCmd(attentionCard(message.text, message.attention.attentionId, message.attention.options, message.attention.ticketId, message.attention.sections).card),
         '--reply-in-thread', '--idempotency-key', message.id])
       const id = messageIdOf(sent)
       if (id) {

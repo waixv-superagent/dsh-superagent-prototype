@@ -1,4 +1,4 @@
-﻿import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Ticket } from '../src/core/index.ts'
 import { attentionCard, attentionResolvedCard, attentionStaleCard, messageIdOf, messageUrlOf, planCard, resolvedCard, reviseCard, sendCard,
   staleCard } from '../src/sources/feishu-card.ts'
@@ -69,6 +69,77 @@ describe('P1 plan card', () => {
     expect(front).toContain('**修复锚点**\\nSource/UI/AvatarList.cpp，1 个文件')
     expect(front).toContain('**预算**\\n编译 1 次，约 20 分钟')
   })
+  it('turns one run-on paragraph into points, and keeps a short closing sentence on its own line', () => {
+    const link = 'https://example.feishu.cn/docx/AbCd?from=card&user_code=AB%2FCD'
+    const long = `第一句说明了现状，链接是 ${link} 。第二句给出取舍，说清复用还是新建。推荐。`
+    const { card } = planCard(ticket, { text: PLAN.replace('现象：翻页时头像闪一下', `现象：${long}`) })
+    const elements = (card.body as { elements: Element[] }).elements
+    const block = elements.find(item => item.tag === 'markdown' && String(item.content).includes('**现象**')) as unknown as { content: string }
+    expect(block.content).toContain('**现象**\n• 第一句说明了现状')
+    expect(block.content).toContain('\n• 第二句给出取舍，说清复用还是新建。')
+    // The conclusion stays its own last line, and no dot makes it look like part of the point above.
+    expect(block.content).toContain('\n推荐。')
+    expect(block.content).not.toContain('• 推荐。')
+    // The link is card content, not a marker: & and % stay as written so Feishu's parser can link it.
+    expect(block.content).toContain(link)
+  })
+  it('joins a mid-block short fragment without a space after the full stop', () => {
+    const long = '第一句足够长。短尾。第二句同样足够长而且完整。'
+    const { card } = planCard(ticket, { text: PLAN.replace('现象：翻页时头像闪一下', `现象：${long}`) })
+    const elements = (card.body as { elements: Element[] }).elements
+    const block = elements.find(item => item.tag === 'markdown' && String(item.content).includes('**现象**')) as unknown as { content: string }
+    expect(block.content).toContain('**现象**\n• 第一句足够长。短尾。')
+    expect(block.content).not.toContain('第一句足够长。 短尾。')
+    expect(block.content).toContain('\n• 第二句同样足够长而且完整。')
+  })
+  it('does not read a decimal number as a list number', () => {
+    const text = '第一句足够长。1.5 倍的量级说明问题，后文还有足够的长度。'
+    const { card } = planCard(ticket, { text: PLAN.replace('现象：翻页时头像闪一下', `现象：${text}`) })
+    const elements = (card.body as { elements: Element[] }).elements
+    const block = elements.find(item => item.tag === 'markdown' && String(item.content).includes('**现象**')) as unknown as { content: string }
+    expect(block.content).toContain('\n• 1.5 倍的量级说明问题')
+    expect(block.content).not.toContain('1、5')
+  })
+  it('splits a point longer than a screen at its own semicolons', () => {
+    const long = `${'甲'.repeat(100)}；${'乙'.repeat(100)}；${'丙'.repeat(100)}。`
+    const { card } = planCard(ticket, { text: PLAN.replace('现象：翻页时头像闪一下', `现象：${long}`) })
+    const elements = (card.body as { elements: Element[] }).elements
+    const block = elements.find(item => item.tag === 'markdown' && String(item.content).includes('**现象**')) as unknown as { content: string }
+    expect(block.content).toContain(`\n• ${'乙'.repeat(100)}；`)
+    expect(block.content).toContain(`\n• ${'丙'.repeat(100)}。`)
+    expect(block.content.match(/\n• /g)).toHaveLength(3)
+  })
+  it('keeps a worker\'s numbered points as plain numbered lines, without a list nest', () => {
+    const numbered = '1) 第一处要看 A 这段足够长。2) 第二处要看 B 这段也足够长。3) 第三处要看 C 这段同样足够长。'
+    const { card } = planCard(ticket, { text: PLAN.replace('现象：翻页时头像闪一下', `现象：${numbered}`) })
+    const elements = (card.body as { elements: Element[] }).elements
+    const block = elements.find(item => item.tag === 'markdown' && String(item.content).includes('**现象**')) as unknown as { content: string }
+    expect(block.content).toContain('**现象**\n1、第一处要看 A 这段足够长。\n2、第二处要看 B 这段也足够长。')
+    expect(block.content).not.toContain('• 1')
+  })
+  it('shows a link as its title, and leaves a title the worker wrote alone', () => {
+    const doc = 'https://kurogame.feishu.cn/docx/AbCd?from=card&user_code=AB%2FCD'
+    const pr = 'https://github.com/o/r/pull/14'
+    const draft = 'https://example.com/design/card'
+    const text = `对照见 ${doc} ，PR 见 ${pr} ，设计稿见 [设计稿](${draft}) 。`
+    const { card, text: fallback } = planCard(ticket, { text: PLAN.replace('现象：翻页时头像闪一下', `现象：${text}`) })
+    const elements = (card.body as { elements: Element[] }).elements
+    const block = elements.find(item => item.tag === 'markdown' && String(item.content).includes('**现象**')) as unknown as { content: string }
+    expect(block.content).toContain(`[飞书文档](${doc})`)
+    expect(block.content).toContain(`[PR #14](${pr})`)
+    expect(block.content).toContain(`[设计稿](${draft})`)
+    expect(block.content).not.toContain(`[${doc}]`)
+    expect(block.content).not.toContain(`[${pr}]`)
+    expect(fallback).toContain(`[飞书文档](${doc})`)
+  })
+  it('renders a custom section with several points as bullets, in the card and its text fallback', () => {
+    const sections = [{ label: '方案矩阵', text: 'A 自建：改动链长，推荐。B 外围：零改动，但适配少。' }]
+    const { card, text } = planCard(ticket, { text: PLAN, sections })
+    const front = JSON.stringify((card.body as { elements: Element[] }).elements)
+    expect(front).toContain('**方案矩阵**\\n• A 自建：改动链长，推荐。')
+    expect(front).toContain('\\n• B 外围：零改动，但适配少。')
+    expect(text).toContain('方案矩阵：\n• A 自建：改动链长，推荐。')
+  })
   it('renders the worker\'s own context sections when the conversation calls for another shape, still in the same card style', () => {
     const sections = [
       { label: '目标', text: '翻页时头像不再闪' },
@@ -82,6 +153,8 @@ describe('P1 plan card', () => {
     const panel = elements.find(item => item.tag === 'collapsible_panel')!
     expect(JSON.stringify(panel)).toContain('补充 · 取舍')
     expect(JSON.stringify(panel)).toContain('复用现成控件，不加缓存层')
+    // The fold header already names its only section, so the section does not repeat its bold label inside.
+    expect(JSON.stringify(panel)).not.toContain('**取舍**')
     expect(message.text).toContain('目标：翻页时头像不再闪')
     expect(message.text).toContain('取舍：复用现成控件，不加缓存层')
     expect(message.text).not.toContain('代码线：')
@@ -159,7 +232,9 @@ describe('question card', () => {
     expect(front).toContain('**现状**\\n两个方案都能过测试')
     expect(front).not.toContain('**代价**')
     const panel = elements.find(item => item.tag === 'collapsible_panel')!
-    expect(JSON.stringify(panel)).toContain('**代价**')
+    expect(JSON.stringify(panel)).toContain('复用控件少一个缓存层')
+    // The fold header names its only section; the section does not repeat the bold label inside.
+    expect(JSON.stringify(panel)).not.toContain('**代价**')
     const row = elements.filter(item => item.tag === 'column_set').at(-1)!
     expect(row.columns).toHaveLength(2)
     expect(text).toContain('现状：两个方案都能过测试')
