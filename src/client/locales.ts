@@ -53,6 +53,7 @@ const TEXT = {
   none: ['暂无。', 'None.'],
   openSession: ['打开 Session', 'Open Session'],
   copySession: ['复制 Session ID', 'Copy Session ID'],
+  copySessionFailed: ['复制失败', 'Copy failed'],
   stop: ['停止', 'Stop'],
   policyVersion: ['策略版本', 'Policy version'],
   mediaMarker: ['[媒体]', '[Media]'],
