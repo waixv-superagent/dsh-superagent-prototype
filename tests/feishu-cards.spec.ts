@@ -122,7 +122,7 @@ describe('handling a question card action', () => {
     expect(answerAttention).toHaveBeenCalledWith('t1', 'att-1', '先上 A')
     expect(asked.om_2).toBeUndefined()
     const data = JSON.parse((lark.mock.calls[0]![0] as string[])[(lark.mock.calls[0]![0] as string[]).indexOf('--data') + 1]!)
-    expect(JSON.stringify(data.card)).toContain('已回复')
+    expect(JSON.stringify(data.card)).toContain('已收到你的答复')
     expect(JSON.stringify(data.card)).toContain('先上 A')
   })
   it('answers a question that was already handled with the stale card, and forgets the card', async () => {

@@ -317,12 +317,12 @@ export function attentionResolvedCard(question: string, option: string, ticketId
   const card = {
     schema: '2.0',
     config: { update_multi: true },
-    header: { title: plain('已回复 · 等人继续'), subtitle: plain(ticketId ? `工单 ${ticketId.slice(0, 8)}` : '问题已记下'), template: 'green' },
+    header: { title: plain('已收到你的答复 · worker 继续处理'), subtitle: plain(ticketId ? `工单 ${ticketId.slice(0, 8)}` : '问题已记下'), template: 'green' },
     body: { direction: 'vertical', padding: '12px 12px 20px 12px',
       elements: [markdown(`你选了：**${option}**`), markdown(question, { text_size: 'notation' }),
         markdown('worker 会按这个继续。', { text_size: 'notation' })] },
   }
-  return { card, text: textSafe(`已回复：${option}（${question}）`) }
+  return { card, text: textSafe(`已收到你的答复：${option}（${question}）`) }
 }
 /** The card for a click on a question that no longer waits: idempotent, and it never changes the ticket. */
 export function attentionStaleCard(ticketId?: string): CardMessage {
