@@ -154,6 +154,34 @@ Check dsh-superagent: run `scripts/dsh-superagent --profile superagent status` i
 
 `--respect-stop` preserves an intentional stop. Only `stop` writes the marker; `start` clears it. `restart` writes no marker, so the check can recover a restart whose shutdown timed out.
 
+### Feishu status card (optional)
+
+The bot can keep one card in a chat that answers "what is the agent doing?" at a glance: how many Tickets are running, how many wait to be verified, how many wait for your decision, a playful line when it is idle, and a red header when the service stops answering. It updates the card in place every minute, so it does not post a message each time. The glance layer is counts and fixed phrases; an expandable **工单明细** fold lists each running or waiting Ticket's title, its short state (阻塞, 待提交) and how long it has been idle, so send the card to a private chat. Tapping the card opens the panel's duty-desk board.
+
+The card must turn red while the service is down, so `scripts/feishu-status.mjs` runs outside it, from a scheduler, like the hourly check. It reads `GET /orchestrator/api/overview` and `GET /orchestrator/api/state` on the panel's loopback address and sends, updates and pins the card through the bot's `lark-cli`. It needs only the permissions the bot already uses to reply (`im:message`).
+
+On Windows, run it from Task Scheduler through a hidden wrapper, so no console window flashes every minute:
+
+```text
+' <bin>\feishu-status.vbs
+Set shell = CreateObject("WScript.Shell")
+shell.Run "node ""<checkout>\scripts\feishu-status.mjs"" --chat oc_… --panel-url http://127.0.0.1:3082 --lark-cli ""<bin>\lark-bot.cmd"" --link-url ""https://<host>/?view=board""", 0, False
+```
+
+```powershell
+schtasks /create /tn dsh-feishu-status /sc minute /mo 1 /f /tr "wscript.exe //B //Nologo ""<bin>\feishu-status.vbs"""
+```
+
+On POSIX, one crontab line runs the same script: `* * * * * node <checkout>/scripts/feishu-status.mjs --chat oc_… --lark-cli <bin>/lark-bot --link-url https://<host>/?view=board`.
+
+`--print-card` prints the card JSON without sending it. `--state-file` changes where the message id, the last successful read and the rotating log live; the default is `<stateDir>/feishu-status.json`. `--link-url` is the page a tap on the card opens: use the panel address the reader can reach, such as `https://<host>/?view=board` through Caddy or `http://127.0.0.1:3082/?view=board` on the machine. The panel opens that duty-desk board before the route it remembered; `?page=overview` is the legacy alias. A remote address asks for the panel's login once per browser, so never put a password or token in the URL or the card. Without `--link-url` the card is not tappable.
+
+Limits:
+
+- Feishu updates a card only for 14 days after it is sent. The script therefore sends a fresh card every 13 days and marks the old one expired. The old card and its pin stay in the chat: recalling a message and removing a pin are both high-risk operations that need a person's confirmation, so the script never does either.
+- The expandable detail carries Ticket titles, so keep the card in a private chat. The card's JSON also cannot carry literal `<` or `>` (the CLI runs through `cmd.exe`); the script escapes titles and uses no inline HTML.
+- If the machine or its network is down, the script is down too, and the card keeps its last state. A red card means "the service stopped answering while the scheduler still runs"; a machine-level signal needs an observer outside the machine.
+
 ## Settings
 
 Setup must succeed before polling or work starts. Overview lists missing requirements and links to their settings. A settings change runs setup again. If you fix something outside the application, such as CLI authentication, choose **Check again**.

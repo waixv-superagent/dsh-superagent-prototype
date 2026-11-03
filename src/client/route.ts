@@ -63,7 +63,16 @@ const ROUTE_KEY = 'dsh-superagent/route'
 export interface Location { route: Route; stack: Route[]; group?: SettingsGroup | undefined }
 export const lastSettingsGroup = ({ route, group }: Location): SettingsGroup => route.page === 'settings' ? route.query.group
   : group ?? 'source'
+/** `?view=board` (or the legacy `?page=overview`) opens the duty-desk board directly, as the Feishu status card links to it. */
+function linkedRoute(): Route | undefined {
+  if (typeof window === 'undefined') return undefined
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('view') === 'board' || params.get('page') === 'overview') return { page: 'editor', query: { view: 'board' } }
+  return undefined
+}
 export function initialLocation(): Location {
+  const linked = linkedRoute()
+  if (linked) return { route: linked, stack: [] }
   try {
     const stored = JSON.parse(sessionStorage.getItem(ROUTE_KEY) ?? 'null') as { route?: unknown; stack?: unknown; group?: unknown } | null
     const route = parseRoute(stored?.route)

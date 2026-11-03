@@ -14,6 +14,8 @@ Opening the panel answers three questions, in this order:
 
 The tabs follow the workflow: **Overview**, **Agent status**, **Source**, **Trigger**, **Eval**, **Execution**, and **Settings**. Overview is the editor board; Agent status is the duty desk. Until repository and account setup succeeds, Overview shows what is missing and links to the relevant setting.
 
+A `?view=board` query on the panel URL opens the duty-desk board directly, before the page this tab remembered; `?page=overview` is the legacy alias for the same board. The Feishu status card uses it as its tap target.
+
 | Tab | Shows |
 | --- | --- |
 | Overview | The machine's editor board: who holds the Unreal Editor now (you, an agent, free, or unknown, treated as you), the last-hour timeline, every running or queued Ticket with its live tool, digest, elapsed time and latest progress, and what waits on a person. Read-only: it never starts, stops or hands over the editor |

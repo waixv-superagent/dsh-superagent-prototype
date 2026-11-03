@@ -73,3 +73,12 @@ it('opens the settings that fix each setup problem: the Deployment group, or the
   expect(setupPage('deployment')).toEqual({ page: 'settings', query: { group: 'deployment' } })
   for (const place of ['github', 'feishu'] as const) expect(setupPage(place)).toEqual({ page: 'settings', query: { group: 'source', source: place } })
 })
+it('opens the duty-desk board from the status card deep link, ahead of the remembered route', () => {
+  remember({ route: { page: 'eval' }, stack: [] })
+  window.history.replaceState({}, '', '/?view=board')
+  expect(initialLocation()).toEqual({ route: { page: 'editor', query: { view: 'board' } }, stack: [] })
+  // The removed Agent-status page is kept as a legacy alias for the same board.
+  window.history.replaceState({}, '', '/?page=overview')
+  expect(initialLocation().route).toEqual({ page: 'editor', query: { view: 'board' } })
+  window.history.replaceState({}, '', '/')
+})
