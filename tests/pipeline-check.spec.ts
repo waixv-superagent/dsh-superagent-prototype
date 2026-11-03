@@ -69,6 +69,29 @@ it('reads Swarm testruns and comments with the P4 ticket, and reports comments f
   expect(calls[0]?.auth).toBe(`Basic ${Buffer.from('u:t').toString('base64')}`)
 })
 
+it('asks Swarm to rerun failing checks without a new version', async () => {
+  const posts: string[] = []
+  const checks = new PipelineChecks({ settings: () => settings(), env: { P4USER: 'u', P4TICKET: 't' },
+    fetchImpl: async (url, init) => {
+      if (init?.method === 'POST') {
+        posts.push(String(url))
+        return response({ data: { testruns: [{ id: 2, status: 'running' }] } })
+      }
+      return response({ data: { testruns: [
+        { id: 1, title: 'Build', status: 'pass' },
+        { id: 2, title: 'ClangTidy', status: 'fail' },
+        { id: 3, title: 'Tests', status: 'running' }
+      ] } })
+    } })
+  const rerun = await checks.rerun('/reviews/416666')
+  expect(rerun.triggered).toMatchObject([{ id: 2, title: 'ClangTidy' }])
+  expect(rerun.skipped.map(item => item.id)).toEqual([1, 3])
+  expect(posts).toEqual(['https://swarm.example.com/api/v10/reviews/416666/testruns/2/run'])
+  const named = await checks.rerun('416666', ['Tests'])
+  expect(named.triggered).toMatchObject([{ id: 3, title: 'Tests' }])
+  await expect(checks.rerun('416666', ['Missing'])).rejects.toThrow(/no testrun matching/)
+})
+
 it('reads the review state and version, and a changelist submitted away', async () => {
   const checks = new PipelineChecks({ settings: () => settings(), env: { P4USER: 'u', P4TICKET: 't' },
     fetchImpl: async url => {

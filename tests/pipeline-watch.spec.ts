@@ -52,6 +52,20 @@ describe('PipelineWatch', () => {
     expect(h.observations.map(([id]) => id)).toEqual(['t1'])
     expect(h.observations[0]![1]).toMatchObject({ kind: 'review', check: expect.stringContaining('待人工审核') })
   })
+  it('treats a failure within the rerun window as waiting, and wakes the worker once the rerun still fails', async () => {
+    const rerunAt = new Date(NOW - 60_000).toISOString()
+    const waiting: Ticket = { ...ticket(), pipeline: { state: 'running', at: rerunAt, rerunAt } }
+    const h = harness([waiting], { review: vi.fn(async () => review({ testStatus: 'fail' })) })
+    await h.watch.poll()
+    expect(h.observations[0]![1]).toMatchObject({ kind: 'running', check: '已请求重跑检查，等待新结果' })
+    // Past the window the old result is a real failure again, and the observed signature was cleared by the rerun request.
+    const aging = { ...waiting.pipeline! }
+    delete aging.rerunAt
+    delete aging.observed
+    waiting.pipeline = aging
+    await h.watch.poll()
+    expect(h.observations.at(-1)![1]).toMatchObject({ kind: 'failure', signature: '3:fail' })
+  })
   it('turns a new failure into one worker Input with its checks and Jenkins errors, never twice', async () => {
     const failing: Ticket = { ...ticket(), pipeline: { state: 'running', at: '2026-11-02T22:00:00Z' } }
     const h = harness([failing], { review: vi.fn(async () => review({ testStatus: 'fail' })),

@@ -95,17 +95,23 @@ The states it derives, in order:
 | --- | --- | --- |
 | A check `fail`, or an AI verdict that is not 通过 | `failure` | A new signature wakes the worker with the failing check titles, their Jenkins error lines and the AI verdict. The same signature is not handed over twice. |
 | `testStatus = pass` and the AI verdict is 通过 (or absent) | `review` | The pipeline goes blocked+manual with `Swarm 已通过，待人工审核`, and one message asks the person to review. The AI's remaining suggestions are mentioned, not treated as a failure. |
-| `state = approved`, no commits yet | `approved` | `已审核通过，等待提交流水线`, one message; polling continues. |
-| `state = committed`/`archived`, or `approved` with commits | `merged` | The ticket completes as `verification.by: pipeline`, one final message, and no check reopens it. |
+| `state = approved`, no commits yet | `approved` | `Swarm 已审核通过，等待提交`, one message; polling continues. |
+| `state = committed`/`archived`, or `approved` with commits | `merged` | The ticket completes as `verification.by: pipeline`, and no check reopens it. The GitHub Source already posts its own concise "PR 已合并" message for a pull request, so the pipeline posts nothing extra. |
 | Review `404` and the changelist is gone (`p4 describe -S` says no such changelist) | `merged` | Submitting deletes the pending changelist, so a missing one after a known review is the submit's trail. |
 | Review `404` but the changelist is still pending | `blocked` | The review disappeared without a submit; a person must check it. A grace period covers the first five minutes after delivery, when Swarm may not serve the new review yet. |
-| A failure unchanged after the worker's last action for `p4.stuckMinutes` | `blocked` | A reshelve with no content change opens no review version and triggers no rerun, so the person is told to rerun it or accept it instead of the worker looping. |
+| A failure unchanged after the worker's last action for `p4.stuckMinutes` | `blocked` | A reshelve with no content change opens no review version, so the person decides instead of the worker looping; the worker can also ask Swarm to rerun the same version. |
 | `p4.fixAttempts` failures already handed to the worker | `blocked` | The loop stops and a person decides. |
 | No result at all for a version older than `p4.stuckMinutes` | `blocked` | Swarm never produced checks for that version; a person reruns or investigates. |
 
 A failure is internal work, so it sends no chat message: the worker gets a text Input with the failing checks and Jenkins
 errors and fixes them in its workspace. Messages are queued only for facts a person acts on (a green review, an approval, a
 blocker, the submit), once per event, with a deterministic id so a repeated poll never repeats the message.
+
+A worker that finds the code unchanged and the failure flaky can ask Swarm to rerun the current version instead of reshelving
+an unchanged changelist: `orchestrator_pipeline_rerun` calls `POST <reviewApi>/reviews/<id>/testruns/<testrun>/run` for every
+failing check. Swarm moves those testruns to `running`, no review version is added, and the host treats the old failure as
+stale for five minutes; a rerun that still fails wakes the worker once more with the new result. The tool never calls Jenkins
+directly; Swarm owns the testrun.
 
 The review payload this relies on:
 
@@ -114,14 +120,17 @@ The review payload this relies on:
   `versions[]` (each with `change`, `time`, `testRuns`, so a reshelve with changed content adds one) and `commits[]`.
 - `GET <reviewApi>/reviews/<id>/testruns` returns `data.testruns[]` with `title`, `status`, `url`, `version`; the check tool
   and the watcher read it for detail.
+- `POST <reviewApi>/reviews/<id>/testruns/<testrun>/run` reruns one check; the response's `data.testruns[0].status` is
+  `running`, and no review version is added.
 - `GET <reviewApi>/reviews/<id>/comments` returns `data.comments[]` whose AI entries carry `context.version`; the watcher reads
   the verdict (`**结果**: 审核通过✅` / `审核不通过❌`) and advice (`**建议**:`) of the current version only, so an older
   round's verdict never decides a newer one.
 - `p4 describe -S <CL>` says `*pending*` while the shelf waits, and reports no such changelist once the pending changelist is
   submitted (a submit creates a new number).
 
-`orchestrator_pipeline_check` stays available for a manual look, and `orchestrator_pipeline` lets a worker record an outcome by
-hand. `scripts/swarm-followup.mjs` remains the command-line equivalent for a person or another script. A Swarm Source that turns
+`orchestrator_pipeline_check` stays available for a manual look, `orchestrator_pipeline_rerun` reruns the current version's
+failing checks, and `orchestrator_pipeline` lets a worker record an outcome by hand. `scripts/swarm-followup.mjs` remains the
+command-line equivalent for a person or another script. A Swarm Source that turns
 review comments into Triggers is still not implemented; the watcher covers the state changes a p4 Ticket needs, not a general
 review conversation.
 
@@ -137,14 +146,15 @@ review conversation.
 | Automatic pipeline follow-up | Implemented as `PipelineWatch` (`src/app/pipeline-watch.ts`): polls every open delivered p4 ticket, wakes the worker on a new failure, queues one message for a green review, an approval, a blocker or the submit, and completes the ticket when the changelist is submitted. Tested with fakes and against real reviews |
 | Pipeline follow-up as a command | Implemented as `scripts/swarm-followup.mjs`: polls a review's testruns with the credentials in `P4USER` and `P4TICKET`, prints the failing checks with their Jenkins URLs, and exits `0` pass, `1` fail, `2` still running, `3` configuration or network error. `--self-test` checks the parsing and the authentication header against a synthetic payload |
 | Pipeline check tool | Implemented as `orchestrator_pipeline_check`: testruns, AI verdict, and a failed Jenkins build's error lines and tail; the token stays in the host and is redacted from the result |
+| Rerun tool | Implemented as `orchestrator_pipeline_rerun`: `POST <reviewApi>/reviews/<id>/testruns/<testrun>/run` for the failing checks; no new version, and a still-failing rerun wakes the worker once more |
 | Operating account, depot, Swarm instance | Not verified in this installation; see 006 Deployment |
 
 ## 7. Acceptance
 
 1. Accept a Ticket with `backend = p4` and check that its directory is a workspace: `p4 -c "$DSH_SUPERAGENT_P4_CLIENT" opened` runs, and the synced files are the configured revision.
 2. Make a trivial change and deliver it: a changelist exists, `p4 describe -S <CL>` shows it still `*pending*` with its shelved files, `p4 opened -c <CL>` still lists the files (nothing was reverted), the review exists in Swarm, and `p4 changes -s submitted` shows nothing new. The Ticket's stage is now `pipeline / running` and its local check is pending in parallel.
-3. Let a check fail: the host wakes the worker once with the failing check and its Jenkins error lines; the chat receives no failure message. Fixing the content and reshelving opens the next review version; a reshelve with no content change does not, and after `p4.stuckMinutes` the Ticket asks a person instead.
-4. Green checks: the chat receives one "Swarm 已通过，待人工审核" message and the Ticket waits as `pipeline / blocked`; no repeat message on later polls. A person's approval moves it to "等待提交".
+3. Let a check fail: the host wakes the worker once with the failing check and its Jenkins error lines; the chat receives no failure message. Fixing the content and reshelving opens the next review version; a reshelve with no content change does not, so a flaky failure is rerun with `orchestrator_pipeline_rerun` (no new version), and after `p4.stuckMinutes` the Ticket asks a person instead.
+4. Green checks: the chat receives one "Swarm 已通过，待人工审核" message and the Ticket waits as `pipeline / blocked`; no repeat message on later polls. A person's approval moves it to "Swarm 已审核通过，等待提交", and the submit ends the Ticket silently rather than adding another chat message.
 5. Have a person submit the changelist: `p4 describe -S <CL>` reports no such changelist, the review closes, and the Ticket completes with `verification.by: pipeline` (or keeps a person's earlier local check as `by: person`).
 6. Have a person return the local check on a delivered Ticket: it goes back to `implement` with their note, and a later delivery starts a new pipeline round. Comments on the review still reach no Ticket, so item 3 of section 6 remains unimplemented.
 

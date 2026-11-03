@@ -385,7 +385,23 @@ describe('subscription fan-out', () => {
     expect(merged.ended).toMatchObject({ outcome: 'completed' })
     // The person's local evidence stays attributed to them; only an unverified change is credited to the pipeline.
     expect(merged.verification).toMatchObject({ state: 'passed', by: 'person' })
-    expect(h.outbox.filter(message => message.text.includes('已提交入库'))).toHaveLength(1)
+    expect(h.outbox.filter(message => message.text.includes('已提交入库'))).toHaveLength(0)
+  })
+  it('lets a worker ask for a rerun, and a still-failing result wakes it once more', () => {
+    const h = harness()
+    const id = accepted(h).ticketId!
+    h.repo.tickets.save({ ...h.repo.tickets.get(id)!, execution: { name: 'w', directory: '/w', assignment: '', changelist: 123456, review: 'review/9' } })
+    h.engine.report(id, { state: 'ready', summary: 'delivered', delivery: { changelist: 123456, review: 'review/9' } })
+    h.engine.observePipeline(id, { kind: 'failure', signature: '12:fail', check: 'Swarm 检查失败：ClientBuild', detail: 'boom' })
+    const rerun = h.engine.rerunPipeline(id)
+    expect(rerun.pipeline).toMatchObject({ state: 'running', check: '已请求重跑检查，等待新结果', rerunAt: expect.any(String) })
+    expect(rerun.pipeline?.observed).toBeUndefined()
+    h.engine.observePipeline(id, { kind: 'failure', signature: '12:fail', check: 'Swarm 检查失败：ClientBuild', detail: 'still failing' })
+    expect(h.repo.tickets.get(id)!.pipeline).toMatchObject({ fixes: 2, observed: '12:fail' })
+    expect(h.repo.tickets.get(id)!.pipeline?.rerunAt).toBeUndefined()
+    expect(h.repo.tickets.get(id)!.inputs.at(-1)?.kind).toBe('text')
+    h.engine.observePipeline(id, { kind: 'merged', check: 'CL 已提交入库' })
+    expect(() => h.engine.rerunPipeline(id)).toThrow(/Ticket has ended/)
   })
   it('credits the pipeline when it completes a change no person checked locally', () => {
     const h = harness()

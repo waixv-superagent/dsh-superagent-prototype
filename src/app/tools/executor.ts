@@ -14,12 +14,12 @@ import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
 
 export interface ExecutorToolsHost {
   readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'submitPlan' | 'advancePhase'
-    | 'recordPipeline'>
+    | 'recordPipeline' | 'rerunPipeline'>
   readonly store: Pick<Store, 'tickets' | 'replyStatus' | 'atomic'>
   readonly sessions: Pick<Sessions, 'relay' | 'notify' | 'prompt'>
   readonly resources: ResourceHost
-  /** Read-only Swarm and Jenkins checks; the Jenkins token stays in this host and never reaches the Session. */
-  readonly pipeline: Pick<PipelineChecks, 'review' | 'status' | 'jenkins'>
+  /** Swarm and Jenkins checks, and a write only for asking Swarm to rerun checks; the Jenkins token stays in this host and never reaches the Session. */
+  readonly pipeline: Pick<PipelineChecks, 'review' | 'status' | 'jenkins' | 'rerun'>
   /** GitHub Source context whose pull-request rules govern claiming a reported PR. */
   readonly github: SourceContext
   /** Sends a submitted P1 plan to the person who decides it, and returns the card's message id when it went out. */
@@ -169,6 +169,18 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
         const current = await host.pipeline.review(target)
         if (!current) throw new Error(`Swarm review ${target} no longer exists; a submitted review is closed here`)
         return host.pipeline.status(target, current.version)
+      },
+    }),
+    tool({
+      name: 'orchestrator_pipeline_rerun',
+      description: 'Rerun the failing Swarm checks.',
+      schema: z.object({}).strict(),
+      execute: async () => {
+        const target = ticket.execution?.review
+        if (!target) throw new Error('this ticket has no Swarm review yet')
+        const rerun = await host.pipeline.rerun(target)
+        const updated = host.engine.rerunPipeline(ticketId)
+        return { ...rerun, pipeline: updated.pipeline?.state }
       },
     }),
     tool({
