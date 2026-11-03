@@ -114,7 +114,7 @@ export class PipelineWatch {
       // A submitted review disappears from this Swarm: the submit deletes the pending changelist, so `missing` is its trail.
       if (changelist === undefined) {
         this.report(ticket, { kind: 'blocked', check: 'Swarm review 已不存在',
-          reason: `review ${review} 在 Swarm 上已不存在，且本单没有记录 CL；请确认它是否已提交。`, ...(url ? { url } : {}) })
+          reason: `review 已不存在，且本单没有记录 CL；请确认是否已提交。`, ...(url ? { url } : {}) })
         return
       }
       const state = await this.host.checks.changeState(changelist)
@@ -125,7 +125,7 @@ export class PipelineWatch {
           return
         }
         this.report(ticket, { kind: 'blocked', check: 'Swarm review 已不存在',
-          reason: `review ${review} 已不存在，但 CL ${changelist} 仍在 pending；请确认 review 是否被删除或关闭。`, ...(url ? { url } : {}) })
+          reason: `review 已不存在，但 CL ${changelist} 仍 pending；请确认 review 状态。`, ...(url ? { url } : {}) })
         return
       }
       this.report(ticket, { kind: 'merged', check: 'CL 已提交入库', ...(url ? { url } : {}) })
@@ -184,8 +184,7 @@ export class PipelineWatch {
     const since = info.changedAt ? info.changedAt * 1000 : (Date.parse(ticket.pipeline?.at ?? '') || now)
     if (now - since > settings.executor.p4.stuckMinutes * 60_000) {
       this.report(ticket, { kind: 'blocked', check: '流水线没有结果',
-        reason: `review ${review} 第 ${version} 版已有 ${settings.executor.p4.stuckMinutes} 分钟没有流水线结果；请确认 Swarm 是否触发了检查，必要时人工重跑。`,
-        ...(url ? { url } : {}) })
+        reason: `${settings.executor.p4.stuckMinutes} 分钟没有检查结果；请确认 Swarm 是否触发。`, ...(url ? { url } : {}) })
       return
     }
     this.report(ticket, { kind: 'running', check: '等待流水线结果', ...(url ? { url } : {}) })
@@ -199,7 +198,7 @@ export class PipelineWatch {
     const fixes = ticket.pipeline?.fixes ?? 0
     if (fixes >= settings.executor.p4.fixAttempts) {
       this.report(ticket, { kind: 'blocked', check: observation.check,
-        reason: `连续 ${fixes} 次自动修复后流水线仍失败（${observation.check}）；请人工判断是继续修、重跑，还是接受现状。`,
+        reason: `连续 ${fixes} 次自动修复仍失败；请人工处理。`,
         signature: `attempts:${signature}`, ...(observation.url ? { url: observation.url } : {}) })
       return
     }
@@ -223,7 +222,7 @@ export class PipelineWatch {
     const minutes = settings.executor.p4.stuckMinutes
     if (acted && now - acted > minutes * 60_000) {
       this.report(ticket, { kind: 'blocked', check: '失败后没有新的流水线结果',
-        reason: `上次失败后 ${minutes} 分钟没有新的流水线结果：reshelve 内容没有变化时 Swarm 不会重跑。需要人工在 Jenkins/Swarm 重跑，或确认这次失败是否可忽略。`,
+        reason: `${minutes} 分钟没有新结果；请重跑或确认是否可忽略。`,
         signature: `stuck:${ticket.pipeline?.observed ?? 'unknown'}`, ...(url ? { url } : {}) })
       return
     }

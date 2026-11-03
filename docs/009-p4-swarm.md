@@ -94,8 +94,8 @@ The states it derives, in order:
 | Swarm/Jenkins fact | Observation | What happens |
 | --- | --- | --- |
 | A check `fail`, or an AI verdict that is not 通过 | `failure` | A new signature wakes the worker with the failing check titles, their Jenkins error lines and the AI verdict. The same signature is not handed over twice. |
-| `testStatus = pass` and the AI verdict is 通过 (or absent) | `review` | The pipeline goes blocked+manual with `Swarm 已通过，待人工审核`, and one message asks the person to review. The AI's remaining suggestions are mentioned, not treated as a failure. |
-| `state = approved`, no commits yet | `approved` | `Swarm 已审核通过，等待提交`, one message; polling continues. |
+| `testStatus = pass` and the AI verdict is 通过 (or absent) | `review` | The pipeline goes blocked+manual with `Swarm 已通过，待人工审核`, and one message reads `Swarm - <id> 已通过，待人工审核。` with the id linked to the review. The AI's remaining suggestions are mentioned, not treated as a failure. |
+| `state = approved`, no commits yet | `approved` | `Swarm 已审核通过，等待提交`, one message `Swarm - <id> 已审核通过，等待提交。` with the id linked; polling continues. |
 | `state = committed`/`archived`, or `approved` with commits | `merged` | The ticket completes as `verification.by: pipeline`, and no check reopens it. The GitHub Source already posts its own concise "PR 已合并" message for a pull request, so the pipeline posts nothing extra. |
 | Review `404` and the changelist is gone (`p4 describe -S` says no such changelist) | `merged` | Submitting deletes the pending changelist, so a missing one after a known review is the submit's trail. |
 | Review `404` but the changelist is still pending | `blocked` | The review disappeared without a submit; a person must check it. A grace period covers the first five minutes after delivery, when Swarm may not serve the new review yet. |

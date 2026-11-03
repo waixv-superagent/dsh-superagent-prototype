@@ -370,6 +370,7 @@ describe('subscription fan-out', () => {
     expect(ticketStage(green)).toEqual({ stage: 'pipeline', action: 'blocked' })
     const asked = h.outbox.filter(message => message.text.includes('待人工审核'))
     expect(asked).toHaveLength(1)
+    expect(asked[0]?.text).toContain('[Swarm - 9](https://swarm/reviews/9)')
     h.engine.observePipeline(id, { kind: 'review', signature: '12:pass', check: 'Swarm 已通过，待人工审核', url: 'https://swarm/reviews/9' })
     expect(h.outbox.filter(message => message.text.includes('待人工审核'))).toHaveLength(1)
     // A local check recorded during the wait does not end the ticket and does not reopen the pipeline.
@@ -433,7 +434,7 @@ describe('subscription fan-out', () => {
     h.engine.observePipeline(id, { kind: 'blocked', signature: 'stuck', reason: '同一失败连跑两次仍不过；请在 Jenkins 重跑', check: '失败后没有新结果' })
     const blocked = h.repo.tickets.get(id)!
     expect(blocked.pipeline).toMatchObject({ state: 'blocked', manual: true, reason: expect.stringContaining('Jenkins') })
-    expect(h.outbox.some(message => message.text.includes('流水线需要人工处理'))).toBe(true)
+    expect(h.outbox.some(message => message.text.includes('需要人工：'))).toBe(true)
     const inputs = blocked.inputs.length
     h.engine.observePipeline(id, { kind: 'failure', signature: '13:fail', check: '又失败了', detail: 'detail' })
     expect(h.repo.tickets.get(id)!.pipeline).toMatchObject({ state: 'blocked', manual: true })

@@ -294,7 +294,13 @@ export class Tickets extends EnginePart {
     const base = { ...previous, seenAt: at, ...(url ? { url } : {}), ...(signature ? { observed: signature } : {}) }
     // A green review or an approval means the rerun question is settled; a failure keeps `rerunAt` so its grace window works.
     if (observation.kind === 'review' || observation.kind === 'approved') delete base.rerunAt
-    const reviewLink = url ? `[Swarm](${url})` : 'Swarm'
+    const reviewId = (text?: string): string | undefined => {
+      const value = text?.trim() ?? ''
+      return /(?:reviews?\/)(\d+)/.exec(value)?.[1] ?? (/^\d+$/.test(value) ? value : undefined) ?? /\/reviews\/(\d+)/.exec(url ?? '')?.[1]
+    }
+    const id = reviewId(ticket.execution?.review)
+    const reviewName = id ? `Swarm - ${id}` : 'Swarm'
+    const reviewLink = url ? `[${reviewName}](${url})` : reviewName
     if (observation.kind === 'running') {
       // A person's blocked pipeline stays theirs until they resume it; polling must not overwrite their decision.
       if (previous?.state === 'blocked' && previous.manual) return this.savePipelineSeen(ticket, previous, at)
@@ -330,7 +336,7 @@ export class Tickets extends EnginePart {
       // Blocked for a person: a repeated observation keeps the message out of the outbox twice.
       ticket.pipeline = { ...base, state: 'blocked', manual: true, at, check: observation.check, reason: observation.reason }
       this.replies.pipelineNotice(ticket, `blocked:${observation.signature ?? 'blocked'}`,
-        `流水线需要人工处理：${observation.reason}${url ? `（${reviewLink}）` : ''}`)
+        `${reviewLink} 需要人工：${observation.reason}`)
     }
     ticket.updatedAt = at
     this.repo.tickets.save(ticket)
