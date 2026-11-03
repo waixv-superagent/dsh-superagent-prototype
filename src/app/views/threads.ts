@@ -53,7 +53,16 @@ export function threadDetail(host: ViewHost, key: string, before: string | undef
 }
 export type ThreadDetailView = NonNullable<ReturnType<typeof threadDetail>>
 /**
- * Searches triggers, threads, and tickets by text, ID, source-extracted references (e.g., `#N`, URLs), or cached Feishu AppLinks.
+ * Whether a Ticket is the one a worker Session id names: `worker-<ticketId>`, the id alone, or the tail a truncated
+ * session label shows. Only hex text of six or more characters counts, so a word such as `worker` matches nothing.
+ */
+function matchesSession(ticket: Ticket, query: string): boolean {
+  const id = query.replace(/^worker-/, '')
+  return /^[0-9a-f]{6,}$/.test(id) && ticket.id.includes(id) && ticket.assignments.some(assignment => assignment.startedAt)
+}
+/**
+ * Searches triggers, threads, and tickets by text, ID, worker Session id, source-extracted references (e.g., `#N`, URLs), or
+ * cached Feishu AppLinks.
  * @param links - Feishu message AppLinks cached since startup, keyed by chat and message ID.
  */
 export function search(host: ViewHost, query: string, links: Pick<TextCache, 'entries'>) {
@@ -69,10 +78,12 @@ export function search(host: ViewHost, query: string, links: Pick<TextCache, 'en
   const threads = named.threads.flatMap(key => { const thread = store.threads.get(key); return thread ? [threadSummary(view, thread)]
     : [] })
   const lower = value.toLowerCase()
-  // Match tickets by threads they own (e.g., bound PRs) or subscribe to, as well as by title.
+  // Match tickets by threads they own (e.g., bound PRs) or subscribe to, by title, or by the worker Session id a
+  // person copied from a session label, which may be the full `worker-<ticketId>`, the id alone, or its tail.
   const reaches = (ticket: Ticket) => [...(ticket.follows ?? []).map(follow => follow.thread),
     ...view.threadsOf(ticket.id).map(thread => thread.key)]
-  const matches = (ticket: Ticket) => reaches(ticket).some(key => named.threads.includes(key)) || ticket.title.toLowerCase().includes(lower)
+  const matches = (ticket: Ticket) => reaches(ticket).some(key => named.threads.includes(key))
+    || ticket.title.toLowerCase().includes(lower) || matchesSession(ticket, lower)
   const tickets = store.tickets.list().filter(matches).sort(newestFirst).slice(0, 10).map(ticketSummary)
   // Omit automated triggers from threads already included in `threads`.
   const shownThreads = new Set(threads.map(thread => thread.key))

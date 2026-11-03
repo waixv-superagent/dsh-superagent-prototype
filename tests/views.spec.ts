@@ -78,6 +78,25 @@ it('reports the Source a Ticket was accepted from beside its search result', () 
     .toEqual([['search wording check', 'tapd']])
 })
 
+it('finds a Ticket by its worker Session id, including the tail a truncated session label shows', () => {
+  const host = views()
+  const id = 'f4bf326d45f8eb325f342afd3c1a968c'
+  live(id)
+  store.tickets.save({ ...store.tickets.get(id)!, title: '检查状态标签',
+    assignments: [{ id: 'a1', state: 'running' as const, createdAt: at, startedAt: at }] })
+  const found = (query: string) => search(host, query, new TextCache(1000)).tickets.map(hit => hit.id)
+  expect(found(`worker-${id}`)).toEqual([id])
+  expect(found(id)).toEqual([id])
+  expect(found(id.slice(7))).toEqual([id])
+  // Only hex text of six or more characters is a Session id, and a Ticket whose work never started has none: a word
+  // that merely looks like the prefix, or a would-be id, matches nothing.
+  expect(found('worker')).toEqual([])
+  live('abcdef1234567890')
+  store.tickets.save({ ...store.tickets.get('abcdef1234567890')!, title: '还没开工' })
+  expect(found('abcdef1234567890')).toEqual([])
+  expect(found(id.slice(7, 11))).toEqual([])
+})
+
 it('names each sender as the Policy lists it, by its id where the id is readable, and as its kind names one it does not list', () => {
   const view = snapshot(views())
   expect([view.actor({ source: 'feishu', id: 'OU_ALICE' }), view.actor({ source: 'github', id: 'alice' }), view.actor({ source: 'github',
