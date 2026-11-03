@@ -176,6 +176,18 @@ it('links a question to its Channel, folds consecutive automated messages among 
   expect(document.querySelector('[role="tooltip"]')).toBeNull()
 })
 
+it('opens the Feishu question from the Ticket banner through the client scheme, without a browser tab', async () => {
+  const url = 'feishu://applink/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1&thread_position=9'
+  const t1 = server.ticketDetails.t1!
+  server.ticketDetails.t1 = { ...t1, stage: 'person', action: 'answer', attention: { id: 'q1', question: '需要确认按钮颜色' },
+    reply: { source: 'feishu', url, label: { zh: '飞书消息', en: 'Feishu message' } } }
+  await mount()
+  await click(all('.dt-deck-card-title').find(button => button.textContent === '修复回归')!)
+  const link = all('.dt-banner a')[0]!
+  expect(link.getAttribute('href')).toBe(url)
+  expect(link.hasAttribute('target')).toBe(false)
+})
+
 it('offers a Ticket awaiting review its review place and Session in the page head', async () => {
   const t1 = server.ticketDetails.t1!
   server.ticketDetails.t1 = { ...t1, stage: 'person', action: 'review', threads: [threadSummary(),

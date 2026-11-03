@@ -3,6 +3,7 @@ import { completedArchived, latestReport, liveTicket, pendingPlan, planLines, th
   type MandateBasis, type Ticket, type TicketStage } from '../../core/index.ts'
 import { workerSessionId } from '../../executor/dsh.ts'
 import { KV } from '../../kv.ts'
+import { feishuClientLink } from '../../sources/feishu-channel.ts'
 import type { Store } from '../store.ts'
 import { channelLink, decisionView, delivered, newestFirst, page, snapshot, threadSummary, threadTitle, ticketLine, ticketSummary,
   type Snapshot, type ViewHost } from './records.ts'
@@ -116,8 +117,17 @@ export function ticketSearch(host: ViewHost, query: string, limit = 8) {
     ({ ticket: ticketSummary(ticket), match, ...completedArchived(ticket) ? { archived: true as const } : {} })) }
 }
 export type TicketSearchView = ReturnType<typeof ticketSearch>
-/** The message a plan card asked from: its own link, so the panel opens the question rather than the chat's latest message. */
-function questionUrl(view: Snapshot, ticket: Pick<Ticket, 'id'>): string | undefined {
+/**
+ * The message the ticket's open question was asked in: the current attention card's own link when the question is a card,
+ * else the latest plan card's; undefined when neither link is known.
+ */
+function questionUrl(view: Snapshot, ticket: Pick<Ticket, 'id' | 'attention'>): string | undefined {
+  const attention = ticket.attention
+  if (attention) {
+    const asked = view.store.get(KV.feishu.attentionCards) ?? {}
+    const card = Object.values(asked).find(ref => ref.ticketId === ticket.id && ref.attentionId === attention.id && ref.url)
+    if (card?.url) return card.url
+  }
   const cards = view.store.get(KV.feishu.cards) ?? {}
   return Object.values(cards).find(ref => ref.ticketId === ticket.id && ref.url)?.url
 }
@@ -126,9 +136,10 @@ function answerLink(view: Snapshot, ticket: Ticket, stage: TicketStage['stage'])
   if (stage !== 'person') return undefined
   const channel = ticket.channels[0]
   const link = channel ? channelLink(view, channel) : undefined
-  const url = questionUrl(view, ticket)
-  if (url) return link ? { ...link, url } : { source: 'feishu' as const, url, label: { zh: '飞书消息', en: 'Feishu message' } }
-  return link
+  const url = questionUrl(view, ticket) ?? link?.url
+  if (!url) return link
+  // The panel opens the client directly, so answering does not leave Feishu's landing page behind as a browser tab.
+  return { ...(link ?? { source: 'feishu' as const, label: { zh: '飞书消息', en: 'Feishu message' } }), url: feishuClientLink(url) }
 }
 export function ticketRow(view: Snapshot, ticket: Ticket) {
   const line = ticketLine(view, ticket)

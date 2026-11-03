@@ -1,0 +1,84 @@
+﻿{
+ "stage": "banner",
+ "mode": "before",
+ "link": {
+  "href": "https://applink.feishu.cn/client/chat/open?openChatId=oc_REDACTED",
+  "rawHref": "https://applink.feishu.cn/client/chat/open?openChatId=oc_REDACTED",
+  "target": "_blank",
+  "rel": "noopener noreferrer",
+  "linkRect": {
+   "x": 509.5,
+   "y": 397,
+   "width": 102,
+   "height": 30
+  },
+  "bannerRect": {
+   "x": 497.5,
+   "y": 363,
+   "width": 960,
+   "height": 72
+  },
+  "bannerText": "待人工决定：\n\n验证用：这条问题卡在等你回答\n\n去飞书回答"
+ }
+}
+saved before-banner.png
+{
+ "stage": "board",
+ "mode": "before",
+ "card": {
+  "rect": {
+   "x": 508.5,
+   "y": 573,
+   "width": 167.84375,
+   "height": 268
+  },
+  "href": "https://applink.feishu.cn/client/chat/open?openChatId=oc_REDACTED",
+  "target": "_blank"
+ }
+}
+saved before-deck.png
+{
+ "mode": "before",
+ "link": "https://applink.feishu.cn/client/chat/open?openChatId=oc_REDACTED",
+ "target": "_blank",
+ "before": [
+  {
+   "id": "8A3446F90A7CFC799BAF88A775953C77",
+   "url": "about:blank"
+  },
+  {
+   "id": "7FE6506EDDD17AC7ED038E9782FBFA28",
+   "url": "http://127.0.0.1:3099/"
+  }
+ ],
+ "after": [
+  {
+   "id": "8A3446F90A7CFC799BAF88A775953C77",
+   "url": "about:blank"
+  },
+  {
+   "id": "9FC6823AE3812B34059C9514116592E2",
+   "url": "https://applink.feishu.cn/client/chat/open?openChatId=oc_REDACTED"
+  },
+  {
+   "id": "7FE6506EDDD17AC7ED038E9782FBFA28",
+   "url": "http://127.0.0.1:3099/"
+  }
+ ],
+ "created": [
+  {
+   "id": "9FC6823AE3812B34059C9514116592E2",
+   "url": "https://applink.feishu.cn/client/chat/open?openChatId=oc_REDACTED"
+  }
+ ],
+ "landing": {
+  "url": "https://applink.feishu.cn/client/chat/open?openChatId=oc_REDACTED",
+  "title": "AppLink"
+ },
+ "panel": {
+  "href": "https://applink.feishu.cn/client/chat/open?openChatId=oc_REDACTED",
+  "visible": true
+ },
+ "newTabs": 1
+}
+

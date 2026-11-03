@@ -365,18 +365,31 @@ it('shows a follow-up that reached a ticket as delivered, the tickets that hande
   expect(triggerView(snapshot(host), store.triggers.get('f2')!).disposition.handbacks[0]?.title).toBe('Fix')
 })
 
-it('opens the plan card\'s own message from a ticket waiting on a person', () => {
+it('opens the current question card\'s own message through the client scheme, not a browser landing page', () => {
   const host = views()
-  const url = 'https://applink.feishu.cn/client/chat/open?openChatId=oc_1&position=7'
+  const planUrl = 'https://applink.feishu.cn/client/chat/open?openChatId=oc_1&position=7'
+  const askedUrl = 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1&thread_position=9'
   store.tickets.save({ id: 't1', title: 'Fix', decisionId: 'd', channels: [feishuChannel('oc_1', 'om_q')], undelivered: [],
     createdAt: at, updatedAt: at,
     mandate: { strength: 'explicit', policyVersion: 'v', basis: { via: 'listed' }, actor: { source: 'feishu', id: 'ou_alice' }, scope: '' },
     origin: { triggerId: 'e1', triggerIds: ['e1'] }, assignments: [], inputs: [],
-    plan: { text: '现象：x', at, waiting: true }, attention: { id: 'a1', question: 'P1 方案待确认' } })
-  store.set(KV.feishu.cards, { om_card: { ticketId: 't1', planAt: at, url } })
+    plan: { text: '现象：x', at, waiting: true }, attention: { id: 'a1', question: '先上 A 还是先上 B？' } })
+  store.set(KV.feishu.cards, { om_card: { ticketId: 't1', planAt: at, url: planUrl } })
+  store.set(KV.feishu.attentionCards, { om_asked: { ticketId: 't1', attentionId: 'a1', at, url: askedUrl } })
   const view = snapshot(host)
-  expect(ticketRow(view, store.tickets.get('t1')!).reply?.url).toBe(url)
-  expect(ticketDetail(host, 't1')!.reply?.url).toBe(url)
+  const clientUrl = 'feishu://applink/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1&thread_position=9'
+  expect(ticketRow(view, store.tickets.get('t1')!).reply?.url).toBe(clientUrl)
+  expect(ticketDetail(host, 't1')!.reply?.url).toBe(clientUrl)
+})
+
+it('falls back to the chat\'s client scheme link when the question card link is unknown', () => {
+  const host = views()
+  store.tickets.save({ id: 't1', title: 'Fix', decisionId: 'd', channels: [feishuChannel('oc_1', 'om_q')], undelivered: [],
+    createdAt: at, updatedAt: at,
+    mandate: { strength: 'explicit', policyVersion: 'v', basis: { via: 'listed' }, actor: { source: 'feishu', id: 'ou_alice' }, scope: '' },
+    origin: { triggerId: 'e1', triggerIds: ['e1'] }, assignments: [], inputs: [],
+    attention: { id: 'a2', question: '需要你确认这个取舍' } })
+  expect(ticketDetail(host, 't1')!.reply?.url).toBe('feishu://applink/client/chat/open?openChatId=oc_1')
 })
 
 it('names a bot\'s Mandate as a bot once the Policy no longer lists it', () => {

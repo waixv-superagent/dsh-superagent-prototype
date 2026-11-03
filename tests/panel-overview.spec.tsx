@@ -172,6 +172,19 @@ it('answers a question, retries a failure and stops a Ticket from its decision c
   expect(server.requests.some(request => request.path === 'tickets/t4/stop' && request.method === 'POST')).toBe(true)
 })
 
+it('opens the Feishu answer through the client scheme, without a browser tab to close afterwards', async () => {
+  const url = 'feishu://applink/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1&thread_position=9'
+  server.person = [ticketSummary({ attention: { id: 'q1', question: '需要确认按钮颜色' },
+    note: { text: '需要确认按钮颜色', error: false }, reply: { source: 'feishu', url, label: { zh: '飞书消息', en: 'Feishu message' } } },
+  { stage: 'person', action: 'answer' })]
+  await mount()
+  await openOverview()
+  const link = all('.dt-deck-card-foot a')[0]!
+  expect(link.getAttribute('href')).toBe(url)
+  expect(link.hasAttribute('target')).toBe(false)
+  expect(link.hasAttribute('rel')).toBe(false)
+})
+
 it('opens a Ticket from its card title and from the running lane', async () => {
   await mount()
   await openOverview()

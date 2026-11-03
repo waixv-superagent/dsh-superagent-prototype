@@ -1,4 +1,4 @@
-﻿# 012 — 分阶段闸口、红线与飞书介入卡片
+# 012 — 分阶段闸口、红线与飞书介入卡片
 
 本文定义从 TAPD 缺陷到 p4 入库这条链上**人在哪里介入**、**哪些规则机器强制**、**介入卡片长什么样**。
 它建立在 [001 Domain](001-domain.md)、[002 Authorization](002-authorization.md)、[003 Execution](003-execution.md)、
@@ -159,8 +159,10 @@ P1 时工单的工作区还没检出（`ticket.execution.directory` 为空或未
 用 `im +messages-send --msg-type interactive --content <json>`。发送成功后把
 `message_id → { ticketId, planAt, url }` 记进 `KV.feishu.cards`（48 小时后清理）；回调没有工单号时靠它反查。
 `url` 来自紧接着的 `im +messages-mget` 的 `message_app_link`（形如
-`https://applink.feishu.cn/client/chat/open?openChatId=…&position=…`，`position` 让它直接定位到这张卡），
-面板概览和工单页的「去飞书回答」优先用它，找不到时才退回会话链接、打开聊天最新处。
+`https://applink.feishu.cn/client/thread/open?…&thread_position=…`，`position` 让它直接定位到这张卡），
+面板概览和工单页的「去飞书回答」优先用它，找不到时才退回会话链接、打开聊天最新处。链接按飞书的降级协议转成
+`feishu://applink/client/…`（Lark 品牌为 `lark://applink/…`）后再放进面板：它直接拉起已安装的客户端，
+不再先打开 `https://applink…` 的落地页，也就不会在浏览器里留下一个要手动关掉的标签页。
 方案已经被人从别的入口答过、或卡片对应的 `planAt` 已过期时，回调只把卡片替换成「已处理」，不再改工单。
 只有工单的 actor 本人能点；别人的点击直接忽略。
 
@@ -176,8 +178,9 @@ P1 时工单的工作区还没检出（`ticket.execution.directory` 为空或未
 
 worker 用 `orchestrator_report` 的 `human_action` + `options`（2–4 个短标签）提问时，主会话的 attention 回复不再只发
 文本，而是发一张卡片：问题正文 + 每个选项一个回调按钮（`{ v: 1, attention: <attention id>, choice: <选项下标> }`），底下
-写明「也可以直接在对话里回复」。卡片回复的 `message_id → { ticketId, attentionId, at }` 记进
-`KV.feishu.attentionCards`（48 小时清理）；点击走 `engine.answerAttention`，把「人对「问题」选了：选项」作为这个人的
+写明「也可以直接在对话里回复」。卡片回复的 `message_id → { ticketId, attentionId, at, url }` 记进
+`KV.feishu.attentionCards`（48 小时清理）；`url` 是这张卡自己的 `message_app_link`（`im +messages-mget`，查询失败只少这个
+链接、不影响发卡），面板的「去飞书回答」用当前 attention 的这张卡定位问题；点击走 `engine.answerAttention`，把「人对「问题」选了：选项」作为这个人的
 一条 Input 交给 worker（不是 bot note，不会被自动输入压住），并清掉 attention。问题已被回答、替换或卡片过期时，回调只
 把卡片换成「已处理」，不改工单；仍然只有工单 actor 能点。飞书拒绝卡片时退回原来的纯文本回复。
 

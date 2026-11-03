@@ -1,0 +1,72 @@
+﻿{
+ "stage": "banner",
+ "mode": "after",
+ "link": {
+  "href": "feishu://applink/client/thread/open?open_chat_id=oc_REDACTED&open_thread_id=omt_REDACTED&openchatid=oc_REDACTED&openthreadid=omt_REDACTED&thread_position=42",
+  "rawHref": "feishu://applink/client/thread/open?open_chat_id=oc_REDACTED&open_thread_id=omt_REDACTED&openchatid=oc_REDACTED&openthreadid=omt_REDACTED&thread_position=42",
+  "target": null,
+  "rel": null,
+  "linkRect": {
+   "x": 509.5,
+   "y": 397,
+   "width": 102,
+   "height": 30
+  },
+  "bannerRect": {
+   "x": 497.5,
+   "y": 363,
+   "width": 960,
+   "height": 72
+  },
+  "bannerText": "待人工决定：\n\n验证用：这条问题卡在等你回答\n\n去飞书回答"
+ }
+}
+saved after-banner.png
+{
+ "stage": "board",
+ "mode": "after",
+ "card": {
+  "rect": {
+   "x": 508.5,
+   "y": 573,
+   "width": 167.84375,
+   "height": 268
+  },
+  "href": "feishu://applink/client/thread/open?open_chat_id=oc_REDACTED&open_thread_id=omt_REDACTED&openchatid=oc_REDACTED&openthreadid=omt_REDACTED&thread_position=42",
+  "target": null
+ }
+}
+saved after-deck.png
+{
+ "mode": "after",
+ "link": "feishu://applink/client/thread/open?open_chat_id=oc_REDACTED&open_thread_id=omt_REDACTED&openchatid=oc_REDACTED&openthreadid=omt_REDACTED&thread_position=42",
+ "target": null,
+ "before": [
+  {
+   "id": "1F5E3D1433CEFFE12196B737EB3430B7",
+   "url": "about:blank"
+  },
+  {
+   "id": "402B144D1A197504EFC266FCAC6E92E5",
+   "url": "http://127.0.0.1:3099/"
+  }
+ ],
+ "after": [
+  {
+   "id": "1F5E3D1433CEFFE12196B737EB3430B7",
+   "url": "about:blank"
+  },
+  {
+   "id": "402B144D1A197504EFC266FCAC6E92E5",
+   "url": "http://127.0.0.1:3099/"
+  }
+ ],
+ "created": [],
+ "landing": null,
+ "panel": {
+  "href": "feishu://applink/client/thread/open?open_chat_id=oc_REDACTED&open_thread_id=omt_REDACTED&openchatid=oc_REDACTED&openthreadid=omt_REDACTED&thread_position=42",
+  "visible": true
+ },
+ "newTabs": 0
+}
+
