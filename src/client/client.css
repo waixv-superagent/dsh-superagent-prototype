@@ -493,10 +493,17 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
   .dt-finder-row > time { margin-left: 0; }
 }
 /* The board: five lanes, each one a stage that matters to a person; every card says what is being waited on. */
-.dt-page > .dt-column:has(> .dt-board) { max-width: 1440px; }
+.dt-page > .dt-column:has(.dt-board) { max-width: 1440px; }
 /* The editor page uses the board's working width, not the 960px reading column: its live list and waiting rail need room. */
 .dt-page > .dt-column:has(.dt-editor-grid) { max-width: 1440px; }
-.dt-board { display: grid; grid-template-columns: 1.02fr .78fr 1.18fr 1.02fr .9fr; gap: 12px; align-items: stretch; }
+/* Below the readable five-lane width the board scrolls sideways instead of squeezing its lanes into the page. */
+.dt-board-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+/* Fade the edge that still has hidden lanes, so a narrow page shows the board scrolls sideways (same cue as the tab bar). */
+.dt-board-scroll[data-more='end'] { mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent); }
+.dt-board-scroll[data-more='start'] { mask-image: linear-gradient(to right, transparent, #000 48px); }
+.dt-board-scroll[data-more='both'] { mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent); }
+/* The running lane keeps 168px at the 960px minimum so its title, count and "打开工单" header row stay inside the lane. */
+.dt-board { display: grid; grid-template-columns: 1.02fr minmax(168px, .78fr) 1.18fr 1.02fr .9fr; gap: 12px; align-items: stretch; min-width: 960px; }
 .dt-board-col { --dt-col: var(--dsw-alias-label-caption); display: flex; flex-direction: column; min-width: 0; padding: 10px 10px 9px; border: .5px solid var(--dsw-alias-border-l2); border-top: 2px solid color-mix(in srgb, var(--dt-col) 68%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--dt-col) 3%, transparent); }
 .dt-board-col[data-tone='decision'] { --dt-col: var(--dsw-alias-state-business-primary); }
 .dt-board-col[data-tone='verify'] { --dt-col: #d4a300; }
@@ -640,14 +647,6 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 @container (max-width: 1240px) {
   .dt-board { gap: 9px; }
   .dt-board-col { padding: 9px 8px 8px; }
-}
-/* Five lanes stay readable down to a 900px page: a 1344px Mac window keeps ~968px after the 280px sidebar and the
-   48px page padding, and the lanes hold their 960px board width there. Narrower pages read better as two columns. */
-@container (max-width: 900px) {
-  .dt-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@container (max-width: 700px) {
-  .dt-board { grid-template-columns: 1fr; }
 }
 @container (max-width: 820px) {
   .dt-deck-card { min-height: 0; }
