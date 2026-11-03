@@ -81,7 +81,7 @@ it('says who holds the editor, lists working Tickets with their live tool, and t
   expect(document.querySelector('.dt-editor-hero')?.getAttribute('data-holder')).toBe('person')
   expect(document.querySelector('.dt-editor-holder')?.textContent).toBe('你正在用')
   expect(document.querySelector('.dt-editor-hero-side')?.textContent).toContain('PID 1')
-  expect(document.querySelector('.dt-editor-hero-side')?.textContent).toContain('1/3 槽位')
+  expect(document.querySelector('.dt-editor-hero-side')?.textContent).toContain('1 个工单运行中')
   expect(counts()).toEqual(['1 个工单正在工作', '1 个排队', '2 单等你验', '2 单等你决定'])
   // The last-hour timeline: one editor lane and one lane for the running Ticket; the queued Ticket has no span.
   expect(document.querySelector('.dt-editor-timeline-title')?.textContent).toBe('最近 60 分钟')

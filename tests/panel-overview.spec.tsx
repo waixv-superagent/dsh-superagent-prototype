@@ -24,7 +24,7 @@ it('leads with a verdict and a five-lane board: decisions, verification, pipelin
   // The editor row sits under the verdict, before the lanes: it is the one fact an agent must read before it builds.
   expect(document.querySelector('.dt-editor-line')?.getAttribute('data-holder')).toBe('person')
   expect(document.querySelector('.dt-editor-line')?.textContent).toContain('编辑器：你正在用')
-  expect(all('.dt-figure').map(figure => figure.textContent)).toEqual(['今日到达12', '已评估5', '接单1', '执行中2 / 3'])
+  expect(all('.dt-figure').map(figure => figure.textContent)).toEqual(['今日到达12', '已评估5', '接单1', '执行中2'])
   expect(all('.dt-board-col-title').map(title => title.textContent)).toEqual(['待你决定', '正在跑', '待你验证', '流水线', '最近结束'])
   expect(all('.dt-board-col-count').map(count => count.textContent)).toEqual(['2', '2', '2', '0', '1'])
   expect(all('.dt-deck-card-title').map(title => title.textContent)).toEqual(['修复回归', '截图工具'])
@@ -243,7 +243,7 @@ it('links the verdict figures to the records behind them', async () => {
   await mount()
   await openOverview()
   const figures = all('.dt-figure button')
-  expect(figures.map(button => button.textContent)).toEqual(['5', '1', '2 / 3'])
+  expect(figures.map(button => button.textContent)).toEqual(['5', '1', '2'])
   await click(figures[0]!)
   expect(tab(zh['tab.eval']).getAttribute('aria-selected')).toBe('true')
   await openOverview()

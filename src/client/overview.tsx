@@ -470,7 +470,7 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
           onClick={() => navigate({ page: 'eval', query: { window: '24h' } })} />
         <Figure label={t('boardAcceptedStat')} value={data.flow.accepted}
           onClick={() => navigate({ page: 'eval', query: { window: '24h' } })} />
-        <Figure label={t('boardRunningStat')} value={setup?.problem ? '—' : `${data.executor.running} / ${data.executor.maxWorkers}`}
+        <Figure label={t('boardRunningStat')} value={setup?.problem ? '—' : data.executor.running}
           onClick={setup?.problem ? undefined : () => navigate({ page: 'execution' })} />
       </dl>
       {setup?.problem && <p className="dt-verdict-note">{t('executorWaitingSetup')}</p>}

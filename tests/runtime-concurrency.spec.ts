@@ -880,6 +880,23 @@ describe('the Executor\'s parts', () => {
     slots.reserve('t6', 'person')
     expect(slots.used()).toBe(4)
   })
+  it('gives each delivery environment its own limit, so the git repository never waits for the p4 depot', () => {
+    const key: Record<string, string> = { git1: 'repo', git2: 'repo', p4a: '//sun/mainline', git3: 'repo', p4b: '//sun/mainline', p4c: '//sun/mainline' }
+    const running = ['git1', 'git2', 'p4a']
+    const slots = new WorkerSlots(() => running, () => 2, id => key[id] ?? 'repo', () => Object.keys(key))
+    expect(slots.usedIn('repo')).toBe(2)
+    expect(slots.usedIn('//sun/mainline')).toBe(1)
+    // The repository is full, but the depot still has one slot: the launch queue passes the launch of a p4 ticket only.
+    expect(slots.launches()).toBe(1)
+    expect(() => slots.reserve('git3', 'launch')).toThrow(Later)
+    slots.reserve('p4b', 'launch')
+    slots.free('p4b')
+    running.push('p4b')
+    expect(slots.launches()).toBe(0)
+    expect(() => slots.reserve('p4c', 'wake')).toThrow(Later)
+    // A person's message gets its extra slot in its own environment, whatever the other one runs.
+    expect(() => slots.reserve('git3', 'person')).not.toThrow()
+  })
   it('words an assignment, and the limits an inferred mandate sets, from the ticket alone', () => {
     const settings = SettingsSchema.parse({ policy: { rules: [{ id: 'copy', name: 'Copy fixes', enabled: true,
       instruction: 'Fix typos only.' }] } })

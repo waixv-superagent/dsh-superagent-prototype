@@ -1,6 +1,6 @@
 /** Resolving a ticket's delivery target from the installation's configured repository and Perforce workspaces. */
 import { expect, it } from 'vitest'
-import { deliveryTargets, matchDeliveryTarget, resolveDelivery } from '../src/app/delivery-targets.ts'
+import { deliveryKey, deliveryTargets, matchDeliveryTarget, resolveDelivery } from '../src/app/delivery-targets.ts'
 import { SettingsSchema } from '../src/policy.ts'
 import type { Ticket, Trigger } from '../src/core/index.ts'
 import { startRuntime } from './fixtures/host.ts'
@@ -59,6 +59,22 @@ it('resolves a source with no target to its own environment, and an explicit tar
   expect(resolve({ source: 'tapd' }, { p4: { depot: '' } })).toEqual({ backend: 'p4' })
   // The accept path validates the target first; a value no longer configured falls back instead of guessing.
   expect(resolve({ target: 'unknown' })).toEqual({ backend: 'p4' })
+})
+
+it('puts a ticket in its recorded target, or in the target its backend falls back to, so one environment has one limit', () => {
+  const settings = settingsWith()
+  const execution = { name: '', directory: '', assignment: '' }
+  // A ticket accepted since targets existed carries the canonical spelling.
+  expect(deliveryKey(settings, REPOSITORY, { execution: { ...execution, backend: 'git', target: REPOSITORY } } as Ticket)).toBe(REPOSITORY)
+  expect(deliveryKey(settings, REPOSITORY, { execution: { ...execution, backend: 'p4', target: '//sun/mainline' } } as Ticket)).toBe('//sun/mainline')
+  // A ticket accepted before targets existed still counts against the environment its backend runs in.
+  expect(deliveryKey(settings, REPOSITORY, { execution: { ...execution, backend: 'p4' } } as Ticket)).toBe('//sun/mainline')
+  expect(deliveryKey(settings, REPOSITORY, { execution: { ...execution, backend: 'git' } } as Ticket)).toBe(REPOSITORY)
+  // A legacy ticket with no backend takes the configured one, and no execution at all still classifies instead of crashing.
+  expect(deliveryKey(settings, REPOSITORY, { execution } as Ticket)).toBe('//sun/mainline')
+  expect(deliveryKey(settings, REPOSITORY, undefined)).toBe('//sun/mainline')
+  // An installation with no repository keeps a stable key for the configured backend.
+  expect(deliveryKey(SettingsSchema.parse({}), '', { execution: { ...execution, backend: 'git' } } as Ticket)).toBe('git')
 })
 
 /** A stored Source trigger and the ticket an accept would create for it. */

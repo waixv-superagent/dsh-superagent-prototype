@@ -12,7 +12,7 @@ import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
 import type { Settings } from '../policy.ts'
 import type { Store } from '../app/store.ts'
 import { Later, type Effects } from '../app/effects.ts'
-import { resolveDelivery } from '../app/delivery-targets.ts'
+import { deliveryKey, resolveDelivery } from '../app/delivery-targets.ts'
 import { claimsWorkspace, conflicts, normalizePath, place, workspaceClient, type Active, type Peer, type Workspace } from './workspace.ts'
 import { executionRoot, p4Prepare, type Variable } from '../app/execution-environment.ts'
 import type { Sessions } from '../app/sessions.ts'
@@ -123,15 +123,13 @@ export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutco
 }
 /**
  * The delivery instructions a worker gets for its ticket's environment, composed at each launch so a ticket moved to
- * another environment (see `Tickets.redispatch`) reads the channel it now belongs in. Under p4 the worker delivers by
- * shelving a changelist, because the mainline is read-only for it.
+ * another environment (see `Tickets.redispatch`) reads the channel it now belongs in. The target recorded at accept
+ * chose that environment, so a worker never re-checks the channel at P1. Under p4 the worker delivers by shelving a
+ * changelist, because the mainline is read-only for it.
  */
 export function deliveryInstructions(backend: Backend): string {
   return backend === 'p4'
-    ? '\nBefore implementing, confirm the work targets the depot this workspace maps. A ticket whose target is another '
-      + 'repository, such as the superagent source itself, must report blocked at P1 naming that repository and the git channel it '
-      + 'needs, so a person can move it there; never implement it in the p4 workspace. '
-      + 'Deliver as one shelved changelist: p4 change -i, p4 reopen -c <CL> for the edits, p4 shelve -c <CL>, '
+    ? '\nDeliver as one shelved changelist: p4 change -i, p4 reopen -c <CL> for the edits, p4 shelve -c <CL>, '
       + 'then p4 describe -S <CL> and open the Swarm review. After you change something, reshelve the same changelist with -f. '
       + 'A reshelve with no content change opens no new review version and triggers no Swarm rerun, so never reshelve just to rerun: '
       + 'if a failing check is unrelated or flaky, report blocked naming who must rerun it. '
@@ -238,33 +236,48 @@ export function inputMessage(input: TicketInput, trigger?: object): string | und
 /**
  * Tracks active and starting worker sessions against the configured concurrency limit: a ticket holds a slot while its
  * worker's turn runs, while its shell jobs or subagents run after that turn ended, and while a launch or wake starts that worker.
- * DshExecutor reserves slots synchronously before awaiting launch or wake work so two starts cannot take the last slot,
- * and allows one extra slot beyond the limit for human follow-ups (`by === 'person'`) so they never wait behind new launches.
+ * The limit is per delivery environment (see `deliveryKey`): the superagent repository and the SunGame p4 depot run their
+ * own workers without holding each other's slots, and a workspace pool still adds its own slots per physical workspace.
+ * DshExecutor reserves slots synchronously before awaiting launch or wake work so two starts cannot take the last slot of
+ * one environment, and allows one extra slot there for human follow-ups (`by === 'person'`) so they never wait behind new launches.
  */
 export class WorkerSlots {
   /** Tickets currently holding a startup slot, mapped to whether the start is a launch, a wake, or a wake for a person's message. */
   private readonly starting = new Map<string, 'launch' | 'wake' | 'person'>()
   /**
    * @param running - Returns the ticket IDs whose worker holds a slot (see `DshExecutor.running`).
-   * @param max - Returns the configured maximum number of concurrent worker slots.
+   * @param max - Returns the configured maximum number of concurrent worker slots per delivery environment.
+   * @param partition - Returns the delivery environment a ticket belongs to; tickets with the same key share one limit.
+   * @param waiting - Returns the ticket IDs that may launch or wake, so an environment with only queued work still counts.
    */
-  constructor(private readonly running: () => string[], private readonly max: () => number) {}
+  constructor(private readonly running: () => string[], private readonly max: () => number,
+    private readonly partition: (ticketId: string) => string = () => '', private readonly waiting: () => string[] = () => []) {}
   /** Number of slots currently in use across running workers and starting reservations. */
   used(): number { return new Set([...this.running(), ...this.starting.keys()]).size }
-  /** How many launches may run concurrently: the slots not held by a running worker or a wake reservation. */
+  /** Number of slots in use in one delivery environment, including launch reservations. */
+  usedIn(key: string): number { return this.idsIn(key, true).size }
+  private idsIn(key: string, includeLaunch: boolean): Set<string> {
+    const ids = new Set(this.running().filter(ticketId => this.partition(ticketId) === key))
+    for (const [ticketId, by] of this.starting) if ((includeLaunch || by !== 'launch') && this.partition(ticketId) === key) ids.add(ticketId)
+    return ids
+  }
+  /** How many launches may run concurrently: the free slots summed over the environments that have work or workers. */
   launches(): number {
-    const wakes = [...this.starting].flatMap(([ticketId, by]) => by !== 'launch' ? [ticketId] : [])
-    return this.max() - new Set([...this.running(), ...wakes]).size
+    // A launch reservation is the launch queue's own accounting, so counting it again would shrink the queue twice.
+    const keys = new Set([...this.running(), ...this.starting.keys(), ...this.waiting()].map(ticketId => this.partition(ticketId)))
+    let room = 0
+    for (const key of keys) room += Math.max(0, this.max() - this.idsIn(key, false).size)
+    return keys.size ? room : this.max()
   }
   /**
-   * Reserves a startup slot for `ticketId`; idempotent if `ticketId` already holds a starting slot.
-   * A wake for a person's message (`by === 'person'`) may use one extra slot beyond `max()`.
+   * Reserves a startup slot for `ticketId` in its delivery environment; idempotent if it already holds a starting slot.
+   * A wake for a person's message (`by === 'person'`) may use one extra slot beyond `max()` in that environment.
    * Call `free(ticketId)` once the worker turn is running or the launch/wake attempt ends.
    * @throws Later when no slot is free.
    */
   reserve(ticketId: string, by: 'launch' | 'wake' | 'person'): void {
     if (this.starting.has(ticketId)) return
-    if (this.used() >= this.max() + (by === 'person' ? 1 : 0)) throw new Later('No worker slot is free')
+    if (this.usedIn(this.partition(ticketId)) >= this.max() + (by === 'person' ? 1 : 0)) throw new Later('No worker slot is free')
     this.starting.set(ticketId, by)
   }
   /** Releases `ticketId`'s starting slot once its worker session is running or the launch/wake attempt has ended. */
@@ -302,7 +315,10 @@ export class DshExecutor implements Executor {
   /** Registers the `launch` and `delivery` effect handlers; both are held (concurrency limit 0) while processing is paused. */
   constructor(private readonly host: ExecutorHost) {
     this.slots = new WorkerSlots(() => host.store.tickets.open().filter(ticket => this.running(ticket)).map(ticket => ticket.id),
-      () => host.store.settings().executor.maxWorkers)
+      () => host.store.settings().executor.maxWorkers,
+      // Each repository or depot runs its own workers, and an open ticket that is still queued reserves its environment's capacity.
+      ticketId => deliveryKey(host.store.settings(), this.host.repository, host.store.tickets.get(ticketId)),
+      () => host.store.tickets.open().map(ticket => ticket.id))
     // Each launch reserves a worker slot so launches run concurrently while slots are free.
     host.effects.handle('launch', payload => this.launchQueued(payload), { limit: () => host.paused() ? 0 : this.slots.launches(),
       retry: [5000, 300_000] })
