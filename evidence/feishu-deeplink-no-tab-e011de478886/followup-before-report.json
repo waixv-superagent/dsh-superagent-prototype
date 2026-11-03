@@ -1,0 +1,29 @@
+{
+ "mode": "before",
+ "head": {
+  "text": "打开 飞书 原文",
+  "href": "https://applink.feishu.cn/client/chat/open?openChatId=oc_demo",
+  "rawHref": "https://applink.feishu.cn/client/chat/open?openChatId=oc_demo",
+  "target": "_blank",
+  "rel": "noopener noreferrer",
+  "rect": {
+   "x": 1336.921875,
+   "y": 175,
+   "width": 120.578125,
+   "height": 30
+  }
+ },
+ "banner": null,
+ "headClick": {
+  "created": [
+   {
+    "id": "910CD7D35B90E4839FDF6D6DFDFABEA9",
+    "url": "https://applink.feishu.cn/client/chat/open?openChatId=oc_demo"
+   }
+  ],
+  "landing": {
+   "url": "https://applink.feishu.cn/client/chat/open?openChatId=oc_demo"
+  },
+  "newTabs": 1
+ }
+}

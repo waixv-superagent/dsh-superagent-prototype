@@ -4,6 +4,7 @@ import type { Deployment } from '../../deployment.ts'
 import type { Health } from '../../sources/host.ts'
 import type { SourceInstance } from '../../sources/kind.ts'
 import type { SourceRegistry } from '../../sources/registry.ts'
+import { feishuClientLink } from '../../sources/feishu-channel.ts'
 import type { SetupProblem } from '../../setup.ts'
 import { dayAgo, snapshot, type ViewHost } from './records.ts'
 import { preview } from './text.ts'
@@ -46,7 +47,7 @@ export function sourcesStatus(host: ViewHost, health: HealthMap, setup: SetupSta
   const filtered = (source: string) => store.read.triggers({ source, filtered: true }, 0, 5).items.filter(trigger => trigger.at >= since)
     // `url` is the Trigger's own page (a TAPD bug, a GitHub issue), so a filtered row can still be opened where it happened.
     .map(trigger => ({ id: trigger.id, at: trigger.at, actor: view.actor(trigger.actor, trigger.human), preview: preview(trigger.text, 120),
-      ...trigger.url ? { url: trigger.url } : {}, reason: store.triggers.disposition(trigger.id)?.filtered }))
+      ...trigger.url ? { url: feishuClientLink(trigger.url) } : {}, reason: store.triggers.disposition(trigger.id)?.filtered }))
   const dropped = droppedReplies(host)
   return sources.instances().map(instance => {
     const { health: parts, ...named } = sourceHealth(sources, instance, health)

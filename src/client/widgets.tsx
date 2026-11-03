@@ -13,6 +13,13 @@ const external = { target: '_blank', rel: 'noopener noreferrer' } as const
  * `target="_blank"` on such a link leaves an empty tab behind after the app opens.
  */
 export const linkTarget = (href: string) => /^(?:feishu|lark):\/\//i.test(href) ? {} : external
+/**
+ * A Feishu AppLink rendered through the client scheme instead: the `https://applink…` form first renders Feishu's own
+ * landing page in the browser, which is the tab a person has to close. Other links pass through unchanged.
+ */
+export const clientHref = (href: string): string => href
+  .replace(/^https:\/\/applink\.feishu\.cn\//i, 'feishu://applink/')
+  .replace(/^https:\/\/applink\.larksuite\.com\//i, 'lark://applink/')
 
 export function When({ at }: { at: string | undefined }) {
   const { t } = usePanel()
@@ -50,7 +57,8 @@ export function KeyValues({ rows }: { rows: [string, ReactNode][] }) {
 function Inlines({ parts }: { parts: Inline[] }) {
   return <>{parts.map((part, index) => part.kind === 'bold' ? <strong key={index}>{part.text}</strong>
     : part.kind === 'code' ? <code key={index} className="dt-code">{part.text}</code>
-    : part.kind === 'link' ? <a key={index} className="dt-inline-link" href={part.url} title={part.url} {...external}>{part.text}</a>
+    : part.kind === 'link' ? <a key={index} className="dt-inline-link" href={clientHref(part.url)} title={part.url}
+      {...linkTarget(clientHref(part.url))}>{part.text}</a>
     : <Fragment key={index}>{part.text}</Fragment>)}</>
 }
 /** Renders a safe Markdown subset (headings, lists, paragraphs, bold, inline code, links) without interpreting raw HTML. */
@@ -100,10 +108,12 @@ export function SessionButton({ sessionId, label,
     onClick={() => { openSession(sessionId).catch(error => notify(errorText(error))) }}>{label ?? t('openSession')}</Button>
 }
 export function ExternalLink({ href, children, icon = 'external' }: { href: string; children: ReactNode; icon?: IconName }) {
-  return <a className="dt-inline-link dt-icon-link" href={href} {...linkTarget(href)}><Icon name={icon} size={13} />{children}</a>
+  const target = clientHref(href)
+  return <a className="dt-inline-link dt-icon-link" href={target} {...linkTarget(target)}><Icon name={icon} size={13} />{children}</a>
 }
 export function ActionLink({ href, children, icon = 'external' }: { href: string; children: ReactNode; icon?: IconName }) {
-  return <a className="dt-btn dt-btn-outline dt-btn-sm" href={href} {...linkTarget(href)}><span className="dt-btn-icon"><Icon name={icon}
+  const target = clientHref(href)
+  return <a className="dt-btn dt-btn-outline dt-btn-sm" href={target} {...linkTarget(target)}><span className="dt-btn-icon"><Icon name={icon}
     size={14} /></span>{children}</a>
 }
 export function StageMark({ state, icon, label }: { state: DotState; icon: IconName; label: string }) {

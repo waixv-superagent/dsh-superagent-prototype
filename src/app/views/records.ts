@@ -5,6 +5,7 @@ import { canRetry, followupOwners, latestReport, liveTicket, ownPull, settled, t
 import { allowedSender, listedBot } from '../../policy.ts'
 import type { ChannelLink, Localized } from '../../sources/kind.ts'
 import type { SourceRegistry } from '../../sources/registry.ts'
+import { feishuClientLink, isMessageLink } from '../../sources/feishu-channel.ts'
 import { workerSessionId } from '../../executor/dsh.ts'
 import type { Store } from '../store.ts'
 import { attribute, markdown, plain, preview, readable } from './text.ts'
@@ -98,7 +99,7 @@ export function triggerView(view: Snapshot, trigger: Trigger, threadDecisions?: 
   const requeue = trigger.human && !queued && !evaluating && unjudged
   return { id: trigger.id, source: trigger.source, actor: view.actor(trigger.actor, trigger.human), human: trigger.human, at: trigger.at,
     text: plain(readable(trigger.text), true),
-    preview: preview(trigger.text), url: trigger.url, threads: trigger.threads.map(threadKey), actions: { requeue },
+    preview: preview(trigger.text), url: trigger.url ? feishuClientLink(trigger.url) : undefined, threads: trigger.threads.map(threadKey), actions: { requeue },
     disposition: { queued, evaluating, delivered, filtered: disposition?.filtered, fanout: disposition?.fanout ?? [],
       handbacks: (disposition?.handbacks ?? []).map(item => ({ ...item,
         title: store.tickets.get(item.ticketId)?.title ?? item.ticketId })),
@@ -174,7 +175,11 @@ function deliveryOf(ticket: Ticket) {
 }
 export type TicketSummaryView = ReturnType<typeof ticketSummary>
 function threadUrl(store: Store, thread: Thread): string | undefined {
-  return attribute(thread.meta.url) ?? store.read.firstTrigger(thread.key)?.url
+  // The opening message's own link wins over the thread's stored one, which an older build refreshed with the chat
+  // link. A chat link opens the conversation rather than the message a person asked about.
+  const first = store.read.firstTrigger(thread.key)?.url
+  const url = isMessageLink(first) ? first : attribute(thread.meta.url) ?? first
+  return url ? feishuClientLink(url) : undefined
 }
 export function threadFacts(store: Store, thread: Thread) {
   const url = threadUrl(store, thread)
@@ -228,7 +233,7 @@ export type ThreadSummaryView = ReturnType<typeof threadSummary>
 /** Resolves a channel link, preferring the specific trigger URL when the source link references a trigger. */
 export function channelLink({ store, links }: ViewHost, channel: ChannelRef) {
   const { url, label, triggerId } = links(channel)
-  return { source: channel.source, url: (triggerId && store.triggers.get(triggerId)?.url) || url, label }
+  return { source: channel.source, url: feishuClientLink((triggerId && store.triggers.get(triggerId)?.url) || url), label }
 }
 /** Parses stored assessment audit metadata, tolerating fields omitted or shaped differently by older versions. */
 const AuditSchema = z.object({

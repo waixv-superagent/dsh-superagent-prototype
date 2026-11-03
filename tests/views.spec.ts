@@ -465,6 +465,22 @@ it('falls back to the chat\'s client scheme link when the question card link is 
   expect(ticketDetail(host, 't1')!.reply?.url).toBe('feishu://applink/client/chat/open?openChatId=oc_1')
 })
 
+it('opens a Thread at its message through the client scheme, upgrading a stored chat link', () => {
+  const host = views()
+  const messageUrl = 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1&thread_position=3'
+  // An older build stored the chat link; the opening message's own link is what a person should open.
+  store.threads.save({ key: 'feishu:oc_1:om_root', ref: { source: 'feishu', id: 'oc_1:om_root' }, createdAt: at,
+    subscriptions: [], correlated: [], pending: [], meta: { url: 'https://applink.feishu.cn/client/chat/open?openChatId=oc_1' } })
+  store.triggers.save({ ...message('om_root', { source: 'feishu', id: 'ou_alice' }), url: messageUrl })
+  // A thread whose own description already carries the message link needs no Trigger.
+  store.threads.save({ key: 'feishu:oc_1:om_two', ref: { source: 'feishu', id: 'oc_1:om_two' }, createdAt: at,
+    subscriptions: [], correlated: [], pending: [], meta: { url: messageUrl } })
+  const view = snapshot(host)
+  const clientUrl = 'feishu://applink/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1&thread_position=3'
+  expect(threadSummary(view, store.threads.get('feishu:oc_1:om_root')!).url).toBe(clientUrl)
+  expect(threadSummary(view, store.threads.get('feishu:oc_1:om_two')!).url).toBe(clientUrl)
+})
+
 it('names a bot\'s Mandate as a bot once the Policy no longer lists it', () => {
   const host = views()
   const mandate = { strength: 'inferred' as const, policyVersion: 'v', basis: { via: 'bot' as const,

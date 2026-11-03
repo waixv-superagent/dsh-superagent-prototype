@@ -164,10 +164,14 @@ P1 时工单的工作区还没检出（`ticket.execution.directory` 为空或未
 用 `im +messages-send --msg-type interactive --content <json>`。发送成功后把
 `message_id → { ticketId, planAt, url }` 记进 `KV.feishu.cards`（48 小时后清理）；回调没有工单号时靠它反查。
 `url` 来自紧接着的 `im +messages-mget` 的 `message_app_link`（形如
-`https://applink.feishu.cn/client/thread/open?…&thread_position=…`，`position` 让它直接定位到这张卡），
-面板概览和工单页的「去飞书回答」优先用它，找不到时才退回会话链接、打开聊天最新处。链接按飞书的降级协议转成
+`https://applink.feishu.cn/client/thread/open?…&thread_position=…`，`position` 让它直接定位到这张卡）。
+面板里所有飞书入口——「去飞书回答」、工单页和话题页的「打开飞书原文」、话题 chip、过滤记录的来源链接——都优先用
+消息级链接（话题链接，或带 `position` 的会话链接）：卡片用发卡时记下的 `url`，工单和话题先用首个 Trigger 自带的
+AppLink，再问 Feishu 要话题根消息的 `message_app_link`，都拿不到才退回会话链接。链接按飞书的降级协议转成
 `feishu://applink/client/…`（Lark 品牌为 `lark://applink/…`）后再放进面板：它直接拉起已安装的客户端，
 不再先打开 `https://applink…` 的落地页，也就不会在浏览器里留下一个要手动关掉的标签页。
+旧版本只存了会话链接的卡片和话题由 `linksLoop` 定期补齐（每轮最多 12 次 `im +messages-mget`，失败的下一轮重试），
+部署后不用等新消息也能打开到具体消息。
 方案已经被人从别的入口答过、或卡片对应的 `planAt` 已过期时，回调只把卡片替换成「已处理」，不再改工单。
 只有工单的 actor 本人能点；别人的点击直接忽略。
 

@@ -117,7 +117,7 @@ it('links a Thread to the page its Source named, or else to the message that sta
   thread('feishu:oc_1:om_1', 'feishu', 'oc_1:om_1')
   store.triggers.save({ id: 'f1', source: 'feishu', threads: [{ source: 'feishu', id: 'oc_1:om_1' }], actor: { source: 'feishu', id: 'ou_a' }, human: true, at: '1', text: 'hi', url: 'https://applink.feishu.cn/client/message/link/open?token=t', meta: {} })
   expect(threadFacts(store, store.threads.get('github:7')!).url).toBe('https://github.com/acme/widgets/pull/7')
-  expect(threadFacts(store, store.threads.get('feishu:oc_1:om_1')!).url).toBe('https://applink.feishu.cn/client/message/link/open?token=t')
+  expect(threadFacts(store, store.threads.get('feishu:oc_1:om_1')!).url).toBe('feishu://applink/client/message/link/open?token=t')
   store.close()
 })
 
