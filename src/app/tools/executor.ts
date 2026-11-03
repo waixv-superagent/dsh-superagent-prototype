@@ -82,14 +82,14 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
       name: 'orchestrator_plan',
       description: 'Submit the P1 plan before any code change: 现象/代码线/资产线/配置线/修复锚点/影响面/验证方案/预算, one label per line with evidence. A person answers 1 (approve), 2 (change direction) or 3 (stop); the card question and 2–4 choices may use your own wording. Files and shells stay refused until 1.',
       schema: z.object({
-        plan: z.string().trim().min(40).max(6000).describe('The plan as label：content lines, in template order, each with evidence.'),
+        plan: z.string().trim().min(40).max(6000).describe('The plan as label：content lines, in template order, each with evidence; a long line is broken into points on the card.'),
         question: z.string().trim().min(1).max(200).optional().describe('The card question in your own words, from the conversation; the standard wording when omitted.'),
         options: z.array(z.object({ label: z.string().trim().min(1).max(24), decision: z.enum(['approve', 'revise', 'stop']),
           note: z.string().trim().max(200).optional() }).strict()).min(2).max(4).optional()
           .describe('2–4 card choices; a revise choice without a note opens the feedback form, one with a note records that direction directly.'),
         sections: z.array(z.object({ label: z.string().trim().min(1).max(20), text: z.string().trim().min(1).max(800),
           fold: z.boolean().optional() }).strict()).min(1).max(6).optional()
-          .describe('Optional card context sections in your own words when the standard 8-line layout does not fit; omit to keep the standard layout.'),
+          .describe('Optional card context sections in your own words when the standard 8-line layout does not fit; write one point per line, and omit to keep the standard layout. Each line or sentence renders as a bullet and a URL stays clickable.'),
       }).strict(),
       execute: async args => {
         const updated = host.engine.submitPlan(ticketId, args.plan, args.question, args.options, args.sections)

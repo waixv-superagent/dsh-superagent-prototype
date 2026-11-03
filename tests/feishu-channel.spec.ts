@@ -39,15 +39,38 @@ describe('Feishu outbound replies', () => {
     expect(await sendFeishu(host, message('收到'))).toBe('gone')
   })
   // A `.cmd` shim re-runs the CLI with `%*`, so a `&` in the text cut the JSON and the tail executed as a command; `^` and
-  // `!` vanish without an error. The argument must carry no character cmd reads twice.
-  it('rewrites the characters the Windows wrapper reads as syntax, so the payload stays one argument', async () => {
+  // `!` vanish without an error. The argument now unicode-escapes those characters, so cmd reads none of them and Feishu's
+  // JSON parser restores the original text — which is what keeps a URL's query string whole.
+  it('escapes the characters the Windows wrapper reads as syntax, and restores the payload byte for byte', async () => {
     const lark = vi.fn(async (_args: string[]) => ({ ok: true }))
     const host = { commands: { lark }, state: { get: () => undefined, set: () => {} } } as never
-    await sendFeishu(host, message('收集&更新飘带动画List，进度 50%，2^3，好了!'))
+    const text = '收集&更新飘带动画List，进度 50%，2^3，好了!'
+    await sendFeishu(host, message(text))
     const content = (lark.mock.calls[0]![0] as string[])[(lark.mock.calls[0]![0] as string[]).indexOf('--content') + 1]!
     expect(content).not.toMatch(/[<>&|^!%]/)
-    expect(JSON.parse(content).zh_cn.content[0][0].text)
-      .toBe('收集＆更新飘带动画List，进度 50％，2＾3，好了！')
+    expect(content).toContain('\\u0026')
+    expect(JSON.parse(content).zh_cn.content[0][0].text).toBe(text)
+  })
+  it('keeps a link whole, so its & and % still open the thread it points at', async () => {
+    const lark = vi.fn(async (_args: string[]) => ({ ok: true }))
+    const host = { commands: { lark }, state: { get: () => undefined, set: () => {} } } as never
+    const link = 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=om_2&position=12%2F34'
+    await sendFeishu(host, message(`已开话题：${link}`))
+    const content = (lark.mock.calls[0]![0] as string[])[(lark.mock.calls[0]![0] as string[]).indexOf('--content') + 1]!
+    expect(content).not.toMatch(/[<>&|^!%]/)
+    expect(JSON.parse(content).zh_cn.content[0][0].text).toContain(link)
+  })
+  it('keeps a link whole on a question card too', async () => {
+    const lark = vi.fn(async (_args: string[]) => '{"data":{"message_id":"om_card"}}')
+    const host = { commands: { lark }, state: { get: () => undefined, set: () => {} } } as never
+    const link = 'https://example.feishu.cn/docx/AbCd?from=card&user_code=AB%2FCD'
+    const asked = { ...message('这张卡里的链接能点吗？'), attention: { ticketId: 't1', attentionId: 'att-1', options: ['能', '不能'],
+      sections: [{ label: '现状', text: `见 ${link}` }] } }
+    expect(await sendFeishu(host, asked)).toBe('sent')
+    const args = lark.mock.calls[0]![0] as string[]
+    const content = args[args.indexOf('--content') + 1]!
+    expect(content).not.toMatch(/[<>&|^!%]/)
+    expect(JSON.stringify(JSON.parse(content))).toContain(link)
   })
   it('sends a question with choices as a card, and remembers its message id for the callback', async () => {
     const lark = vi.fn(async (_args: string[]) => '{"data":{"message_id":"om_card"}}')
