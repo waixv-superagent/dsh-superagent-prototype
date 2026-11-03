@@ -19,7 +19,7 @@ export interface ExecutorToolsHost {
   readonly sessions: Pick<Sessions, 'relay' | 'notify' | 'prompt'>
   readonly resources: ResourceHost
   /** Read-only Swarm and Jenkins checks; the Jenkins token stays in this host and never reaches the Session. */
-  readonly pipeline: Pick<PipelineChecks, 'status' | 'jenkins'>
+  readonly pipeline: Pick<PipelineChecks, 'review' | 'status' | 'jenkins'>
   /** GitHub Source context whose pull-request rules govern claiming a reported PR. */
   readonly github: SourceContext
   /** Sends a submitted P1 plan to the person who decides it, and returns the card's message id when it went out. */
@@ -164,7 +164,11 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
       execute: async args => {
         const target = args.target?.trim() || ticket.execution?.review
         if (!target) throw new Error('this ticket has no Swarm review yet; pass the review id or URL')
-        return /\/job\/|^https?:\/\/[^/]*jenkins/i.test(target) ? host.pipeline.jenkins(target) : host.pipeline.status(target)
+        if (/\/job\/|^https?:\/\/[^/]*jenkins/i.test(target)) return host.pipeline.jenkins(target)
+        // Read the review's current version first, so an earlier round's AI verdict never decides this one.
+        const current = await host.pipeline.review(target)
+        if (!current) throw new Error(`Swarm review ${target} no longer exists; a submitted review is closed here`)
+        return host.pipeline.status(target, current.version)
       },
     }),
     tool({

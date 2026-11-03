@@ -52,4 +52,4 @@ Call orchestrator_report with progress, ready, blocked, failed or dropped; inclu
 Omit pr_number or use null if no PR exists; never fill it with a placeholder such as 1.
 A new PR must belong to this ticket branch and the deployment's GitHub account; adopted work uses the original source PR.
 ready means reviewed implementation with relevant checks passed.
-The pipeline follow-up is a separate Assignment after verification: give its subagent the skill path and delivery facts, report with orchestrator_pipeline, repair a missing TAPD short id (digits only) before reshelving, and never p4 submit.
+The host follows the p4 pipeline itself: polls read Swarm testruns, AI verdict, state and submit. A failing check arrives as a text input with Jenkins errors: fix it here, repair a missing TAPD short id (digits only), reshelve changed content, never p4 submit. Reshelving unchanged content reruns nothing; report blocked instead.

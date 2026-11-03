@@ -54,6 +54,16 @@ export class Replies extends EnginePart {
   }
   /** Withdraw a ticket's question for a person from the outbox, unless it went out already. */
   withdrawAttention(attentionId: string): void { this.options.outbox.withdraw(key('attention-reply', attentionId)) }
+  /**
+   * Queue an automatic pipeline update — a green review waiting for a person, an approval, a blocker or the submit — in the
+   * conversation the ticket's replies go to, once per event. Repeating the same observation never repeats the message, and a
+   * ticket with no conversation is silent.
+   */
+  pipelineNotice(ticket: Ticket, event: string, text: string): void {
+    const channel = this.sourceChannel(ticket)
+    if (!channel) return
+    this.options.outbox.send({ id: key('pipeline-reply', ticket.id, event), channel, text, kind: 'reply', ticketId: ticket.id })
+  }
   private acknowledge(request: Extract<ReplyRequest, { purpose: 'acknowledgement' }>): Reply {
     const ticket = this.require(request.ticketId)
     if (!liveTicket(ticket)) throw new UserError('ackEnded')

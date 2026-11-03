@@ -19,11 +19,11 @@ export interface EngineOptions {
    * instructions the previous environment had appended; without it the recorded execution keeps its assignment text.
    */
   reprepareTicket?: (ticket: Ticket, backend: Backend) => Execution
-  /** Local pipeline-follow-up skill the ticket's worker hands to its subagent; empty uses the built-in instructions. */
+  /** Local pipeline skill the worker's fix Assignment reads; empty uses the built-in instructions. */
   pipelineSkill?: string
-  /** The Swarm base URL, so a follow-up gets a review link from a bare review id. */
+  /** The Swarm base URL, so a pipeline observation gets a review link from a bare review id. */
   swarmUrl?: () => string
-  /** Whether delivered work goes on to the pipeline follow-up: the p4 backend has one, a git backend has no Swarm/Jenkins stage. */
+  /** Whether delivered work goes on to the host's pipeline follow-up: the p4 backend has one, a git backend has no Swarm/Jenkins stage. */
   pipelineFollowup?: (ticket: Ticket) => boolean
   now?: () => string
   emit?: (event: DomainEvent) => void

@@ -2,8 +2,8 @@
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, latestReport, liveTicket, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
-import type { Assignment, Backend, ChannelRef, Evaluation, Follow, Mandate, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketEndBy, TicketInput, TicketOutcome,
-  TicketPipeline, Trigger, TriggerDisposition } from './model.ts'
+import type { Assignment, Backend, ChannelRef, Evaluation, Follow, Mandate, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketEndBy,
+  TicketInput, TicketOutcome, TicketPipeline, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { missingPlanLabels, pendingPlan, planOverdue, PLAN_GATE_HOURS, PLAN_QUESTION, ticketPhase, validCardOptions, validQuestionSections, type PlanDecision,
@@ -196,9 +196,10 @@ export class Tickets extends EnginePart {
     return ticket
   }
   /**
-   * Records a person's local verification of delivered work. A pending ticket passes and ends as completed by a person;
-   * an ended completed ticket may be verified afterwards, so the backlog of work closed before this gate can still be
-   * accounted for. It never submits, and it changes no changelist.
+   * Records a person's local verification of delivered work. On a p4 ticket the check is recorded but the ticket stays open:
+   * the host's pipeline follow-up completes it when the change is submitted. A git ticket, or one with nothing delivered,
+   * completes here. An ended completed ticket may be verified afterwards, so the backlog of work closed before this gate can
+   * still be accounted for. It never submits, and it changes no changelist.
    * @throws UserError when the ticket has nothing awaiting verification or was verified already.
    */
   verify(ticketId: string): Ticket {
@@ -210,21 +211,17 @@ export class Tickets extends EnginePart {
     ticket.verification = { at, state: 'passed', by: 'person' }
     ticket.updatedAt = at
     if (liveTicket(ticket)) {
-      // A delivered change does not end at the local check: it moves to the pipeline follow-up. A change already merged
-      // completes at once, which is the "already in the mainline" case a person must not be asked to verify again. A git
-      // backend has no Swarm/Jenkins pipeline, so its local check is the last gate and the ticket completes there.
+      // A delivered change does not end at the local check: its pipeline follow-up runs on the host and completes the ticket
+      // when the change is submitted. A change already merged completes at once; a git backend has no Swarm/Jenkins pipeline,
+      // so its local check is the last gate and the ticket completes there. The person's check is recorded either way.
       const delivered = ticket.execution?.changelist !== undefined || !!ticket.execution?.review
       if (ticket.pipeline?.state === 'merged' || !delivered || !this.followsPipeline(ticket)) {
         this.repo.tickets.save(ticket)
         this.end(ticketId, 'human', 'completed', at, '人已本地验证')
       } else {
-        ticket.pipeline ??= { state: 'running', at, ...(ticket.execution?.review ? { url: ticket.execution.review } : {}) }
-        // The worker's deliver Assignment is over once a person has checked its work, even if its last report left it
-        // pending in a test or a crashed turn; the follow-up gets a fresh Assignment of its own.
-        const previous = latestAssignment(ticket)
-        if (previous && previous.state !== 'ended') this.endAssignment(ticket, previous, 'pipelineFollowup')
+        // A ticket delivered before the host followed pipelines itself has none yet; start it here rather than end the ticket.
+        this.beginPipeline(ticket, at)
         this.repo.tickets.save(ticket)
-        this.startPipelineFollowup(ticket)
       }
     } else {
       this.repo.tickets.save(ticket)
@@ -234,9 +231,9 @@ export class Tickets extends EnginePart {
   /** Whether a delivered change has a pipeline to follow: the p4 backend does, a git backend's change is done at the local check. */
   private followsPipeline(ticket: Ticket): boolean { return this.options.pipelineFollowup?.(ticket) ?? true }
   /**
-   * Records a pipeline observation from a follow-up worker or a person. `merged` completes the ticket immediately, since
-   * the change is already in the mainline; a `blocked` observation keeps the ticket open and puts it at the top of the
-   * pipeline lane, with the reason a person must act on.
+   * Records a pipeline observation from the host's watcher or a person. `merged` completes the ticket immediately, since the
+   * change is already in the mainline; a `blocked` observation keeps the ticket open and puts it at the top of the pipeline
+   * lane, with the reason a person must act on.
    * @throws UserError when the ticket is unknown or has ended.
    */
   recordPipeline(ticketId: string, update: Omit<TicketPipeline, 'at'>): Ticket {
@@ -249,6 +246,7 @@ export class Tickets extends EnginePart {
       // The change is already in the mainline; an outstanding local check is no longer a gate, and calling it a person's
       // verification would be a lie. Mark how it actually completed so the board can say so.
       if (ticket.verification?.state === 'pending') ticket.verification = { at, state: 'passed', by: 'pipeline' }
+      this.replies.pipelineNotice(ticket, 'merged', `已提交入库，本单完成。${update.url ? `（${update.url}）` : ''}`)
       this.repo.tickets.save(ticket)
       this.end(ticketId, 'executor', 'completed', at, '流水线已入库')
     } else {
@@ -257,61 +255,145 @@ export class Tickets extends EnginePart {
     return this.require(ticketId)
   }
   /**
-   * A person asks the follow-up to run again after a blocker was cleared: the pipeline stays running and a new Assignment
-   * carries the same independent subagent job. The worker, not the person, records what the review now says.
+   * Start following a delivered change's pipeline without waiting for a person: the host polls Swarm and Jenkins itself, so a
+   * green review, a failing check, an approval and the submit each reach the ticket as an observation. The caller saves; a
+   * ticket without a changelist or review, one of a git backend, or one whose pipeline already merged keeps no new pipeline.
+   */
+  beginPipeline(ticket: Ticket, at = this.now(), restart = false): void {
+    if (!liveTicket(ticket)) return
+    const review = ticket.execution?.review
+    const changelist = ticket.execution?.changelist
+    if (changelist === undefined && !review) return
+    if (!this.followsPipeline(ticket)) return
+    if (ticket.pipeline?.state === 'merged') return
+    if (ticket.pipeline && !restart) return
+    const url = this.pipelineUrl(ticket)
+    ticket.pipeline = { state: 'running', at, check: '等待 Swarm 流水线结果', ...(url ? { url } : {}),
+      ...(ticket.pipeline?.fixes ? { fixes: ticket.pipeline.fixes } : {}) }
+    ticket.updatedAt = at
+  }
+  /**
+   * Records one observation the host made about a delivered change. A failure whose signature is new wakes the worker with
+   * the failing checks and Jenkins errors; the same signature is not handed over twice. A green review waits for a person
+   * and a blocked pipeline that needs one stops the automatic fix loop. `merged` completes the ticket, as before.
+   * @throws UserError when the ticket is unknown.
+   */
+  observePipeline(ticketId: string, observation: PipelineObservation): Ticket {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) return ticket
+    const at = this.now()
+    if (observation.kind === 'merged') {
+      const url = observation.url ?? this.pipelineUrl(ticket)
+      return this.recordPipeline(ticketId, { state: 'merged', ...(observation.check ? { check: observation.check } : {}), ...(url ? { url } : {}) })
+    }
+    // A merged pipeline is history; a later round of the ticket is not pipeline work again.
+    if (ticket.pipeline?.state === 'merged') return ticket
+    const previous = ticket.pipeline
+    const url = observation.url ?? previous?.url ?? this.pipelineUrl(ticket)
+    const signature = 'signature' in observation ? observation.signature : undefined
+    const base = { ...previous, seenAt: at, ...(url ? { url } : {}), ...(signature ? { observed: signature } : {}) }
+    if (observation.kind === 'running') {
+      // A person's blocked pipeline stays theirs until they resume it; polling must not overwrite their decision.
+      if (previous?.state === 'blocked' && previous.manual) return this.savePipelineSeen(ticket, previous, at)
+      // Keep the state's start time: a review that stays missing for long enough is a blocker, and a fresh `at` on every
+      // poll would hide how long it has been missing.
+      ticket.pipeline = { ...base, state: 'running', at: previous?.state === 'running' ? previous.at : at, check: observation.check }
+    } else if (observation.kind === 'review') {
+      // Green checks still wait for a person's review: ask once, and keep the card in the waiting style.
+      ticket.pipeline = { ...base, state: 'blocked', manual: true, at, check: observation.check }
+      this.replies.pipelineNotice(ticket, `review:${signature ?? 'ready'}`,
+        `Swarm 流水线已通过（${url ?? '见工单'}），待人工审核；审核通过并提交后，工单会自动完成。`)
+    } else if (observation.kind === 'approved') {
+      ticket.pipeline = { ...base, state: 'running', at, check: observation.check }
+      this.replies.pipelineNotice(ticket, `approved:${signature ?? 'approved'}`,
+        `Swarm 已审核通过，等待提交流水线完成（${url ?? '见工单'}）；提交成功后工单会自动完成。`)
+    } else if (observation.kind === 'failure') {
+      // A person's blocker stays theirs, but a green review is not a decision yet: an AI verdict that posts after the
+      // testruns passed still wakes the worker.
+      if (previous?.state === 'blocked' && previous.manual && !previous.check?.startsWith('Swarm 已通过')) return this.savePipelineSeen(ticket, previous, at)
+      if (previous?.observed === observation.signature) {
+        ticket.pipeline = { ...previous, seenAt: at, ...(url ? { url } : {}) }
+      } else {
+        const fixes = (previous?.fixes ?? 0) + 1
+        ticket.pipeline = { ...base, state: 'running', at, check: observation.check, fixes, fixAt: at }
+        this.repo.tickets.save(ticket)
+        this.nudgePipeline(ticket, observation.detail, observation.signature)
+        return this.require(ticketId)
+      }
+    } else {
+      // Blocked for a person: a repeated observation keeps the message out of the outbox twice.
+      ticket.pipeline = { ...base, state: 'blocked', manual: true, at, check: observation.check, reason: observation.reason }
+      this.replies.pipelineNotice(ticket, `blocked:${observation.signature ?? 'blocked'}`,
+        `流水线需要人工处理：${observation.reason}${url ? `（${url}）` : ''}`)
+    }
+    ticket.updatedAt = at
+    this.repo.tickets.save(ticket)
+    return this.require(ticketId)
+  }
+  /**
+   * A person asks the follow-up to look again after clearing a blocker: the pipeline runs again and the host polls on its
+   * next tick, without another worker Assignment. Their decision grants a fresh set of automatic fix attempts.
    * @throws UserError when the ticket is unknown or has ended.
    */
   resumePipeline(ticketId: string): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     const at = this.now()
-    const url = ticket.pipeline?.url ?? ticket.execution?.review
-    ticket.pipeline = { state: 'running', at, ...(url ? { url } : {}) }
+    const url = this.pipelineUrl(ticket)
+    ticket.pipeline = { state: 'running', at, check: '等待 Swarm 流水线结果', ...(url ? { url } : {}) }
     ticket.updatedAt = at
     this.repo.tickets.save(ticket)
-    this.startPipelineFollowup(ticket)
     return this.require(ticketId)
   }
-  /**
-   * Starts the independent follow-up that a delivered ticket's pipeline needs. The worker hands the actual Swarm/Jenkins
-   * work to a subagent: polling, reading Jenkins logs, fixing lint/compile failures and reshelving are one relatively
-   * self-contained job, and many CL descriptions arrive without their TAPD short id, which the follow-up has to repair first.
-   */
-  private startPipelineFollowup(ticket: Ticket): void {
+  /** The review URL from what the worker recorded, resolving a bare id against the configured Swarm URL. */
+  private pipelineUrl(ticket: Ticket): string | undefined {
     const review = ticket.execution?.review
-    const changelist = ticket.execution?.changelist
-    if (changelist === undefined && !review) return
-    const running = runningAssignment(ticket)
-    if (running) this.endAssignment(ticket, running, 'pipelineFollowup')
-    const current = latestAssignment(ticket)
-    if (current?.state === 'pending') return
-    const at = this.now()
+    if (!review) return undefined
+    if (/^https?:\/\//i.test(review)) return review
     const base = this.options.swarmUrl?.().trim() ?? ''
-    const url = review && /^https?:\/\//i.test(review) ? review
-      : review && base ? `${base.replace(/\/$/, '')}/reviews/${encodeURIComponent(review)}` : review
-    const skill = this.options.pipelineSkill?.trim()
-    const skillFile = skill && !/\.md$/i.test(skill) ? `${skill.replace(/[\\/]$/, '')}/SKILL.md` : skill
+    return base ? `${base.replace(/\/$/, '')}/reviews/${encodeURIComponent(review)}` : review
+  }
+  /** The delivery facts a failure nudge needs: the changelist, review, TAPD short id and the source message that holds it. */
+  private pipelineFacts(ticket: Ticket): string[] {
+    const changelist = ticket.execution?.changelist
+    const url = this.pipelineUrl(ticket)
     const trigger = this.source(ticket)
     const source = trigger?.text.trim() ?? ''
     const bugId = String(trigger?.meta.bugId ?? '').trim()
     const shortId = String(trigger?.meta.shortId ?? '').trim()
       || (bugId.length > 10 ? bugId.slice(10).replace(/^0+/, '') : '')
-    const assignment = this.newAssignment(ticket)
-    const text = [
-      '流水线跟进（独立工作，交给 subagent 执行，不要在主线程里自己轮询）。',
-      `本单交付：CL ${changelist ?? '未记录'}；review ${url || review || '未记录'}。`,
+    return [
+      `本单交付：CL ${changelist ?? '未记录'}；review ${url ?? '未记录'}。`,
       source ? `来源消息（TAPD 短单号可能只在这里；找不到就报 blocked，不要猜）：${source.slice(0, 800)}` : '',
       shortId ? `本单 TAPD 短单号：${shortId}（P4_Check 首行用它）` : '来源里没有结构化的 TAPD 短单号；先按来源消息和 TAPD 页面核对，找不到就报 blocked。',
-      skill ? `先读这个 skill：${skillFile}` : '按团队的 Swarm/Jenkins 流水线跟进 skill 执行。',
-      '很多流水线发起时 CL 描述没有带 TAPD 短单号：先核对来源里的短编号；P4_Check 要求描述首行是「短单号 + 空格」（如 123456 xxx），只取纯数字短单号，不要用长 ID、URL 或前缀；缺就先补描述再 reshelve。',
-      '先用 orchestrator_pipeline_check 读 testruns/AI 结论；失败项再把 Jenkins URL 传给同一工具读错误行，token 不写进命令或报告。',
-      '失败摘要交给 subagent：按 skill 修 ClangTidy/编译、补描述、p4 edit 后 p4 shelve -r；不要 p4 submit。',
-      'subagent 结束后再查一次，用 orchestrator_pipeline 记录结果；不要报 ready。',
+      'P4_Check 要求 CL 描述首行是「短单号 + 空格」（如 123456 xxx），只取纯数字短单号，不要用长 ID、URL 或前缀；缺就先补描述再 reshelve。'
+    ].filter(Boolean)
+  }
+  /**
+   * Hand a failing pipeline to the ticket's worker as one new Input. The worker fixes the cause in the same workspace and
+   * reshelves the same changelist; a reshelve without a content change opens no Swarm version, so the nudge says not to do it.
+   */
+  private nudgePipeline(ticket: Ticket, detail: string, signature: string): void {
+    const inputId = key('input', ticket.id, 'pipeline-fix', signature)
+    if (ticket.inputs.some(input => input.id === inputId)) return
+    const skill = this.options.pipelineSkill?.trim()
+    const skillFile = skill && !/\.md$/i.test(skill) ? `${skill.replace(/[\\/]$/, '')}/SKILL.md` : skill
+    const text = [
+      '流水线自动跟进：最近一次 Swarm/Jenkins 检查失败。这是本单交付后的同一件工作，不是新需求；请在当前工作区修复。',
+      detail,
+      ...this.pipelineFacts(ticket),
+      skill ? `需要时先读这个 skill：${skillFile}。` : '',
+      '修复后 reshelve 同一个 CL（p4 edit 后 p4 shelve -f/-r；不要 p4 submit），然后报 ready；主机上的跟进会自动看到新版本。',
+      '如果确认失败与本单改动无关，不要空 reshelve——内容没有变化时 Swarm 不会重跑：直接报 blocked，写明需要谁在 Jenkins/Swarm 重跑或如何处理。'
     ].filter(Boolean).join('\n')
-    const input: TicketInput = { id: key('input', ticket.id, 'pipeline', at), kind: 'text', text, at }
-    ticket.inputs.push(input); ticket.undelivered.push(input.id)
+    if (!runningAssignment(ticket) && latestAssignment(ticket)?.state !== 'pending') this.newAssignment(ticket)
+    this.addInput(ticket, { id: inputId, kind: 'text', text, at: this.now() })
+  }
+  /** Keep a person's blocked decision, recording only that the host looked again. */
+  private savePipelineSeen(ticket: Ticket, pipeline: TicketPipeline, at: string): Ticket {
+    ticket.pipeline = { ...pipeline, seenAt: at }
     this.repo.tickets.save(ticket)
-    this.options.executor.start(ticket, assignment)
+    return this.require(ticket.id)
   }
   /**
    * A person's local check found a problem: records it, returns the ticket to implement, and starts a new Assignment whose

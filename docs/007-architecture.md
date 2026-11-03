@@ -345,7 +345,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/source-context.ts` | `sourceContextOf`: each Source kind's `SourceContext` |
 | `src/app/links.ts` | `sourceLink`, the page of a Trigger's message, and `candidateCard` |
 | `src/app/cards.ts` | Compact cards of Triggers, Tickets, Threads and Decisions for models, the closed set of ticket card states `TICKET_STATES`, and `textPage` |
-| `src/app/pipeline.ts` | Read-only checks for a delivered change: Swarm testruns and review comments, and Jenkins console errors, summarized for the Ticket's pipeline gate |
+| `src/app/pipeline.ts` | Read-only checks for a delivered change: the review's state and versions, Swarm testruns and review comments, Jenkins console errors, and the changelist state after a submit, summarized for the Ticket's pipeline gate |
+| `src/app/pipeline-watch.ts` | The host's automatic pipeline follow-up: polls every open delivered p4 Ticket, turns a new failure into a worker Input, a green review or an approval into one queued message, and the submit into the Ticket's completion |
 | `src/app/resources.ts` | `RESOURCES` and `readResource`: what `orchestrator_read` reads, for each role |
 | `src/app/tools/tool.ts` | The `Tool` type, `readTool`, the `orchestrator_read` of both roles, and `AcknowledgementSchema` |
 | `src/app/tools/main.ts` | The main Session's tools |
@@ -471,7 +472,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx` | Each page of the panel, against a fake management API answered by route |
 | `tests/panel-editor.spec.tsx` | The 概览 editor view: the editor/board switch, the holder in each state, short timeline lane names, working rows split by editor use with their tool and expandable trail, the waiting rail, and the empty states |
 | `tests/editor.spec.ts` | The editor occupancy derivation: a person's interactive editor, an agent's commandlet, a build, missing start times, a failed probe, and the cached row the panel reads |
-| `tests/pipeline-check.spec.ts` | The read-only pipeline checks: review ids and Jenkins targets, testrun and comment summaries, console errors |
+| `tests/pipeline-check.spec.ts` | The read-only pipeline checks: review ids and Jenkins targets, testrun and comment summaries, the review's state and version, the changelist state after a submit, console errors |
+| `tests/pipeline-watch.spec.ts` | The host's automatic follow-up: a new failure wakes the worker once, a green review asks once, the AI verdict gate, the attempt and stuck limits, vanished-review detection, and one broken ticket not stopping the rest |
 | `tests/live-activity.spec.tsx` | The current-tool buffer and its bounded recent trail on fake host events, MCP name parsing, and the Ticket page's "now" card: current tool, latest progress, next step, and no reasoning or speed |
 | `tests/panel-settings.spec.tsx`, `panel-prompts.spec.tsx`, `panel-deployment.spec.tsx`, `panel-panel.spec.tsx` | The settings groups, drafts and history, the prompts, the Deployment page, and the panel's search, glossary and route memory |
 | `tests/draft.spec.ts`, `tests/prompt-config.spec.ts`, `tests/markdown.spec.ts`, `tests/marks.spec.ts` | Draft states, merges and the save bar's line; the prompt configuration by section and the line diff; the Markdown subset and its links; the mark of every state the views classify |

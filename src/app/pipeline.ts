@@ -1,4 +1,5 @@
 /** Read-only pipeline checks for a delivered change: Swarm testruns and AI review, and Jenkins console errors. */
+import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -35,6 +36,27 @@ export interface PipelineStatus extends PipelineTestruns {
   aiError?: string
 }
 
+/** One review as Swarm reports it, before any testrun detail is read. */
+export interface PipelineReview {
+  id: string
+  /** Swarm's review state, such as `needsReview`, `needsRevision`, `approved`, `committed`, or `archived`. */
+  state: string
+  stateLabel: string
+  /** Swarm's aggregate check status for the current version: `pass`, `fail`, `running`, or empty when nothing ran yet. */
+  testStatus: 'pass' | 'fail' | 'running' | 'none'
+  /** The current review version; a reshelve with content opens the next one. */
+  version: number
+  /** The changelist the current version was cut from. */
+  change: number | null
+  /** When the current version was cut, in seconds since the epoch. */
+  changedAt: number | null
+  /** Changelists Swarm reports as committed for this review. */
+  commits: number[]
+}
+
+/** What a changelist looks like on the server: still pending, or gone because a submit renumbered it. */
+export type ChangeState = 'pending' | 'submitted' | 'missing'
+
 export interface JenkinsLog {
   job: string
   build: string
@@ -50,6 +72,8 @@ export interface PipelineChecksHost {
   env?: NodeJS.ProcessEnv
   home?: string
   fetchImpl?: typeof fetch
+  /** Runs the p4 client for a changelist state check; tests inject one instead of touching the server. */
+  run?: (file: string, args: readonly string[], timeoutMs: number) => Promise<{ code: number; stdout: string; stderr: string }>
 }
 
 const TIMEOUT = 30_000
@@ -102,15 +126,28 @@ function collectStrings (node: unknown, into: string[] = []): string[] {
   return into
 }
 
-/** AI review verdict from a comments payload; null when the payload carries no verdict, never an approval. */
-export function summarizeComments (payload: unknown): PipelineAi | null {
+/**
+ * AI review verdict from a comments payload; null when the payload carries no verdict, never an approval. Swarm tags each
+ * AI comment with the review version it reviewed, so `version` keeps an old round's verdict from deciding the current one.
+ */
+export function summarizeComments (payload: unknown, version?: number): PipelineAi | null {
   if (!payload || typeof payload !== 'object') throw new Error('unexpected Swarm comments payload')
   const data = (payload as { data?: { comments?: unknown[] } }).data
   const comments = Array.isArray(data?.comments) ? data.comments : []
   const bodies = comments
-    .map(comment => (comment && typeof comment === 'object' ? (comment as { body?: unknown }).body : undefined))
-    .filter((body): body is string => typeof body === 'string' && body.trim() !== '')
-  const strings = bodies.length > 0 ? bodies : collectStrings((payload as { data?: unknown }).data ?? payload)
+    .map(comment => {
+      const body = comment && typeof comment === 'object' ? (comment as { body?: unknown }).body : undefined
+      const context = comment && typeof comment === 'object' ? (comment as { context?: { version?: unknown } }).context : undefined
+      return { body, version: typeof context?.version === 'number' ? context.version : undefined }
+    })
+    .filter((item): item is { body: string; version: number | undefined } => typeof item.body === 'string' && item.body.trim() !== '')
+  const versioned = bodies.filter(item => item.version !== undefined)
+  // An old round's verdict must not decide a newer version: when Swarm tagged comments, only the current version (or one
+  // without a tag) speaks for it. A version Swarm has not reviewed yet carries no verdict, never an approval.
+  const eligible = version === undefined || versioned.length === 0 ? bodies
+    : bodies.filter(item => item.version === undefined || item.version === version)
+  const strings = eligible.length > 0 ? eligible.map(item => item.body)
+    : bodies.length > 0 ? [] : collectStrings((payload as { data?: unknown }).data ?? payload)
   // The AI review comments are the ones that say what the review concluded. Keep the latest one; earlier rounds may still
   // carry a request for changes that a reshelve already answered.
   const candidates = strings.filter(text => /【AI】|审核结论|审核(?:通过|不通过|未通过)/.test(text))
@@ -204,33 +241,96 @@ export class PipelineChecks {
     return { user, ticket }
   }
 
-  private async json (url: string, auth: string, what: string): Promise<unknown> {
+  private async json (url: string, auth: string, what: string, allow404 = false): Promise<unknown> {
     const response = await this.fetchImpl(url, {
       headers: { authorization: `Basic ${Buffer.from(auth).toString('base64')}` },
       signal: AbortSignal.timeout(TIMEOUT)
     })
+    if (response.status === 404 && allow404) return null
     if (response.status === 401 || response.status === 403) throw new Error(`${what} rejected the credentials (HTTP ${response.status})`)
     if (!response.ok) throw new Error(`${what} returned HTTP ${response.status} for ${url}`)
     return response.json()
   }
 
-  /** Swarm testruns plus the AI review verdict; comments are optional and their failure is reported separately. */
-  async status (review: string): Promise<PipelineStatus> {
+  private swarm (review: string): { id: string; api: string; auth: string; url: string } {
     const base = this.p4.swarmUrl.trim()
     if (!base) throw new Error('Swarm URL is not configured; set executor.p4.swarmUrl first')
     const id = reviewIdOf(review)
     const { user, ticket } = this.credentials()
-    const auth = `${user}:${ticket}`
-    const api = `${base.replace(/\/$/, '')}${this.p4.reviewApi || '/api/v11'}/reviews/${id}`
+    return {
+      id,
+      api: `${base.replace(/\/$/, '')}${this.p4.reviewApi || '/api/v11'}/reviews/${id}`,
+      auth: `${user}:${ticket}`,
+      url: `${base.replace(/\/$/, '')}/reviews/${id}`
+    }
+  }
+
+  /**
+   * One review's state, aggregate check status and current version. A review Swarm no longer serves returns null, which is
+   * what a submitted or deleted review looks like here; the changelist state then says which it was (see `changeState`).
+   */
+  async review (input: string): Promise<PipelineReview | null> {
+    const { id, api, auth } = this.swarm(input)
+    const payload = await this.json(api, auth, 'Swarm', true)
+    if (payload === null) return null
+    const raw = (payload as { data?: { reviews?: unknown[] } } | null)?.data?.reviews?.[0]
+    if (!raw || typeof raw !== 'object') throw new Error('unexpected Swarm review payload: data.reviews is empty')
+    const record = raw as Record<string, unknown>
+    const versions = (Array.isArray(record.versions) ? record.versions : [])
+      .filter((value): value is Record<string, unknown> => !!value && typeof value === 'object')
+    const last = versions[versions.length - 1]
+    const rawStatus = String(record.testStatus ?? '')
+    const testStatus = rawStatus === 'pass' || rawStatus === 'fail' || rawStatus === 'running' ? rawStatus : 'none'
+    const commits = (Array.isArray(record.commits) ? record.commits : []).filter((value): value is number => typeof value === 'number')
+    return {
+      id,
+      state: String(record.state ?? ''),
+      stateLabel: String(record.stateLabel ?? record.state ?? ''),
+      testStatus,
+      version: versions.length,
+      change: typeof last?.change === 'number' ? last.change : null,
+      changedAt: typeof last?.time === 'number' ? last.time : null,
+      commits
+    }
+  }
+
+  /**
+   * What happened to a changelist: still pending, already a submitted changelist number, or missing because a submit deleted
+   * the pending number. Submitting a shelf creates a submitted changelist under a new number, so the pending one disappears.
+   */
+  async changeState (change: number): Promise<ChangeState> {
+    const result = await this.p4Run(['describe', '-S', String(change)])
+    const text = `${result.stdout}\n${result.stderr}`
+    if (result.code === 0) return /\*pending\*/i.test(result.stdout) ? 'pending' : 'submitted'
+    if (/no such changelist/i.test(text)) return 'missing'
+    throw new Error(`p4 describe -S ${change} failed: ${text.trim().split(/\r?\n/)[0] ?? `exit ${result.code}`}`)
+  }
+
+  private p4Run (args: readonly string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+    const port = this.p4.port.trim() || this.env.P4PORT?.trim()
+    const user = this.p4.user.trim() || this.env.P4USER?.trim()
+    const argv = [...port ? ['-p', port] : [], ...user ? ['-u', user] : [], ...args]
+    if (this.host.run) return this.host.run('p4', argv, TIMEOUT)
+    return new Promise(resolve => {
+      execFile('p4', argv, { timeout: TIMEOUT, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
+        const code = error ? (typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : 1) : 0
+        resolve({ code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') })
+      })
+    })
+  }
+
+  /** Swarm testruns plus the AI review verdict; comments are optional and their failure is reported separately. */
+  async status (review: string, version?: number): Promise<PipelineStatus> {
+    const { id, api, auth, url } = this.swarm(review)
     const testruns = summarizeTestruns(await this.json(`${api}/testruns`, auth, 'Swarm'))
     let ai: PipelineAi | null = null
     let aiError: string | undefined
     try {
-      ai = summarizeComments(await this.json(`${api}/comments`, auth, 'Swarm'))
+      ai = summarizeComments(await this.json(`${api}/comments`, auth, 'Swarm'), version)
     } catch (error) {
       aiError = error instanceof Error ? error.message : String(error)
     }
-    return { ...testruns, review: id, url: `${base.replace(/\/$/, '')}/reviews/${id}`, ai, ...(aiError ? { aiError } : {}) }
+    return { ...testruns, review: id, url, ai, ...(aiError ? { aiError } : {}) }
   }
 
   /** Jenkins consoleText for a failed testrun; the token is used for Basic auth and redacted from the result. */

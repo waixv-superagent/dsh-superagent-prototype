@@ -48,19 +48,22 @@ worker 自验的文本（编译结果、自动化通过数）只是证据，不�
 ## 3.1 P4.5 本地验收门
 
 P4 之后的交付物**不会自动结束工单**：worker 报 `ready` 且带 changelist 或 review 时，`assignments.report()` 写入
-`verification: { at, state: 'pending' }`，工单保持 open，`ticketStage()` 报 `person / verify`。没有交付物的分析单照旧直接结束。
+`verification: { at, state: 'pending' }`，同时从这一刻起由**主机侧**跟进 Swarm 流水线（`PipelineWatch`，见 009 第 5 节）；
+工单保持 open，阶段先报 `pipeline / running`（绿了待审是 `pipeline / blocked`），人的本地验收 `person / verify` 与流水线并行。
+没有交付物的分析单照旧直接结束。git 后端没有流水线，本地验收仍是最后一道门。
 
 字段与流转：
 
 ```
-ticket.verification = { at, state: 'pending' | 'passed' | 'failed', by?: 'person', note?: string }
+ticket.verification = { at, state: 'pending' | 'passed' | 'failed', by?: 'person' | 'pipeline', note?: string }
 ```
 
-- **通过**：`POST tickets/:id/verify`。open 的单记 `state: 'passed'` 并以 `by: 'human', outcome: 'completed'` 结束；这是唯一会把
-  「已完成」归到人头的路径。已结束的 completed 单也允许补记（历史数据没有这个门），补记只补事实、不改结论。
+- **通过**：`POST tickets/:id/verify`。p4 单只记 `state: 'passed'` 和 `by: 'person'`，**不结束工单**，因为提交还没发生；
+  主机的流水线跟进在 CL 真正提交后才以 `by: 'pipeline'` 结束它。git 单仍在通过时结束。已结束的 completed 单也允许补记
+  （历史数据没有这个门），补记只补事实、不改结论。
 - **退回**：`POST tickets/:id/rework { note }`。记 `state: 'failed'` 和人的原话，阶段回到 `implement`，结束当前 Assignment，
-  新建一个 Assignment，人的原话作为第一条 Input，worker 按它修完再报 `ready`，门重新变 `pending`。
-- **不是 submit**：通过只写 `verification`，不写 `confirmed`、不动 CL；P5 仍由人执行。
+  新建一个 Assignment，人的原话作为第一条 Input，worker 按它修完再报 `ready`，门重新变 `pending`；重新交付会重置流水线观察。
+- **不是 submit**：通过只写 `verification`，不写 `confirmed`、不动 CL；P5 仍由人执行，提交成功由流水线跟进收单。
 - **证据留档**：worker 的 `execution.verification` 文本原样保留，在卡片/工单页作为「worker 跑了什么」展示，并与人的结论分色。
 
 看板按这个门重排成四列（左→右）：**待你决定 · 待你验证 · 进行中 · 已结束**。列的顺序就是人该看的顺序；
