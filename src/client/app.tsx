@@ -177,15 +177,15 @@ function Header({ masterId }: { masterId: string | undefined }) {
   </header>
 }
 
-/** 概览 owns two views: the editor page and the duty-desk board, switched in place so the tab bar stays short. */
+/** 概览 owns two views: the board (the default, since the duty desk is what a person opens most) and the editor page. */
 function HomePage({ view, focus }: { view?: HomeView; focus?: BoardFocus }) {
   const { t, navigate } = usePanel()
-  const board = view === 'board'
+  const board = view !== 'editor'
   return <>
     <div className="dt-home-switch">
       <SegmentedControl options={[{ value: 'editor', label: t('homeViewEditor') },
         { value: 'board', label: t('homeViewBoard') }]} value={board ? 'board' : 'editor'} label={t('homeViewLabel')}
-        onChange={next => navigate(next === 'board' ? { page: 'editor', query: { view: 'board' } } : { page: 'editor' })} />
+        onChange={next => navigate(next === 'board' ? { page: 'editor' } : { page: 'editor', query: { view: 'editor' } })} />
     </div>
     {board ? <OverviewPage focus={focus} /> : <EditorPage />}
   </>
