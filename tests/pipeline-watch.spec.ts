@@ -135,7 +135,7 @@ describe('PipelineWatch', () => {
     const h = harness([stuck], { review: vi.fn(async () => review({ testStatus: 'fail' })) })
     await h.watch.poll()
     expect(h.observations[0]![1]).toMatchObject({ kind: 'blocked', check: '失败后没有新的流水线结果' })
-    expect((h.observations[0]![1] as Extract<PipelineObservation, { kind: 'blocked' }>).reason).toContain('reshelve 内容没有变化时 Swarm 不会重跑')
+    expect((h.observations[0]![1] as Extract<PipelineObservation, { kind: 'blocked' }>).reason).toContain('45 分钟没有新结果')
   })
   it('is silent while paused or disabled, and keeps checking after one ticket fails', async () => {
     const paused = harness([ticket()], {}, {}, { paused: () => true })
