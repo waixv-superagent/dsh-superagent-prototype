@@ -72,6 +72,7 @@ const TEXT = {
   'historySource.panel': ['管理页', 'Management page'],
   'historySource.defaults': ['插件默认值', 'Plugin defaults'],
   'historySource.tool': ['主 Session 工具', 'Main Session tool'],
+  'historySource.command': ['聊天指令', 'Chat command'],
   'historySource.sync': ['从群同步', 'Sync'],
   'historySource.web': ['管理页', 'Management page'],
   'historySource.member-sync': ['成员同步', 'Member sync'],

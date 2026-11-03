@@ -24,6 +24,10 @@ export interface SourceContextDeps {
   readonly feishuProblem?: SetupProblem | undefined
   /** Hands a Trigger to the Engine and schedules the pass that assesses it. */
   receive(trigger: Trigger): ReceiveResult | Promise<ReceiveResult>
+  /** Whether the Trigger's person may control processing from the conversation (see `SourceContext.mayControl`). */
+  mayControl(trigger: Trigger): boolean
+  /** Applies a pause or resume a person asked for in the conversation; returns whether processing is paused now. */
+  pauseProcessing(paused: boolean): Promise<boolean>
 }
 
 /**
@@ -45,6 +49,8 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
     },
     receive: trigger => deps.receive(trigger),
     admissible: trigger => deps.engine.admissible(trigger),
+    mayControl: trigger => deps.mayControl(trigger),
+    pauseProcessing: paused => deps.pauseProcessing(paused),
     atomic: work => store.atomic(work),
     state: sourceState(store),
     threads: {

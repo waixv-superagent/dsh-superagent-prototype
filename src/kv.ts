@@ -64,5 +64,7 @@ export const KV = {
     /** Question card `message_id` to the ticket, attention, and the card's own message link, so a click answers it and the
      * panel's answer button opens the question rather than the chat. */
     attentionCards: record<Record<string, { ticketId: string; attentionId: string; at: string; url?: string }>>('feishu-attention-cards'),
+    /** Control messages (挂起/恢复) already applied, by message ID and time, so a history replay never toggles processing again. */
+    controls: record<Record<string, string>>('feishu-controls'),
     seen: family<string[], [thread: string]>('thread-seen:'), initialized: family<boolean, [thread: string]>('thread-initialized:') },
 }

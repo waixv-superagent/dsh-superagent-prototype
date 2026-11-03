@@ -192,7 +192,11 @@ export class Runtime extends Service implements SourceHost {
         health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing() })
       this.sourceDeps = { store, engine, outbox, commands, sources, get ready() { return runtime.ready },
         get deployment() { return setup.deployment }, configured: () => setup.configured(),
-        get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => passes.receive(trigger) }
+        get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => passes.receive(trigger),
+        // A conversation control, such as the Feishu resume word, is a person's command; only a person the Policy lets
+        // originate work may issue one, and it changes the same pause setting the panel writes.
+        mayControl: trigger => trigger.human && !!allowedSender(store.settings(), trigger.actor),
+        pauseProcessing: paused => this.settings.pause(paused, 'command').then(result => result.paused) }
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
         get repository() { return setup.deployment.repository },
         pipeline: this.pipeline,
