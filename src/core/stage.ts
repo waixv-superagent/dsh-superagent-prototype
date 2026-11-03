@@ -1,5 +1,5 @@
 /** Ticket stage classification and retry eligibility (docs/003). */
-import { awaitsVerification, latestAssignment, waitsForPerson, type Follow, type Ticket } from './model.ts'
+import { awaitsVerification, currentReport, latestAssignment, waitsForPerson, type Follow, type Ticket } from './model.ts'
 
 /** High-level execution stage of a ticket: waiting on a person, in pipeline follow-up, actively working or queued, idle between turns, or ended. */
 export type TicketStage = { stage: 'person'; action: 'delivery' | 'answer' | 'review' | 'verify' | 'blocked' | 'failed' }
@@ -17,13 +17,14 @@ export function ticketStage(ticket: Ticket): TicketStage {
   if (ticket.pipeline && ticket.pipeline.state !== 'merged') return { stage: 'pipeline', action: ticket.pipeline.state === 'blocked' ? 'blocked' : 'running' }
   if (awaitsVerification(ticket)) return { stage: 'person', action: 'verify' }
   const assignment = latestAssignment(ticket)
-  const report = assignment?.report?.state
+  // A report speaks for the Ticket only while its worker has nothing newer to do, and a blocked or failed one only while the
+  // worker still waits for a person (`currentReport`): otherwise the Ticket is working again on what was delivered after it.
+  const report = currentReport(ticket)?.state
   // Work delivered into a pull request the Ticket opened is approved and merged there, not in a local check: it waits at the
   // pipeline gate, where the person opens the request and marks the Ticket merged (docs/003).
   if (report === 'ready' && ticket.pipeline?.state !== 'merged' && ownPull(ticket)) return { stage: 'pipeline', action: 'blocked' }
   if (report === 'ready') return { stage: 'person', action: 'review' }
-  // A human follow-up after a blocked or failed report returns the ticket to the executor.
-  if ((report === 'blocked' || report === 'failed') && waitsForPerson(ticket)) return { stage: 'person', action: report }
+  if (report === 'blocked' || report === 'failed') return { stage: 'person', action: report }
   if (!assignment || assignment.state === 'pending') return { stage: 'working', action: 'queued' }
   if (report === 'waiting' || assignment.state === 'ended') return { stage: 'idle' }
   return { stage: 'working' }

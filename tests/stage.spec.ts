@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canRetry, completedArchived, ticketStage, type Assignment, type ReportState, type Ticket } from '../src/core/index.ts'
+import { canRetry, completedArchived, currentReport, ticketStage, type Assignment, type ReportState, type Ticket } from '../src/core/index.ts'
 
 const assignment = (overrides: Partial<Assignment> = {}): Assignment => ({ id: 'a', state: 'running', createdAt: '', ...overrides })
 const reported = (state: ReportState, overrides: Partial<Assignment> = {}) => assignment({ report: { state, summary: '', at: '' }, ...overrides })
@@ -9,6 +9,8 @@ const attention = { id: 'q', question: '?' }
 /** A person's message that reached the Ticket after its report. */
 const answered = { inputs: [{ id: 'i', kind: 'trigger' as const, triggerId: 'e', at: 'later', human: true as const }] }
 const reportedAt = (state: ReportState) => reported(state, { report: { state, summary: '', at: 'earlier' } })
+/** A Report its worker has been busy with newer Inputs since: the Executor continues the work by itself. */
+const busy = (state: ReportState) => ({ ...reportedAt(state), deliveredAt: 'later' })
 const ended = { at: '', by: 'executor' as const, reason: 'closed', outcome: 'closed' as const }
 
 // The rows of the docs/003 table, in order; a Ticket that matches several rows takes the first.
@@ -47,6 +49,15 @@ describe('ticketStage', () => {
     ['a merged pipeline a person\'s message resumed', ticket({ pipeline: { state: 'merged', at: '' } }), { stage: 'working' }],
     ['an ended pipeline', ticket({ pipeline: { state: 'merged', at: '' }, ended }), { stage: 'ended' }],
     ['a blocked Report a person answered since', ticket({ ...answered, assignments: [reportedAt('blocked')] }), { stage: 'working' }],
+    // A Report its worker has newer Inputs than is history: the Ticket is working again on what was delivered after it.
+    ['a ready Report whose worker got an Input after it', ticket({ assignments: [busy('ready')] }), { stage: 'working' }],
+    ['a waiting Report whose worker got an Input after it', ticket({ assignments: [busy('waiting')] }), { stage: 'working' }],
+    ['a progress Report whose worker got an Input after it', ticket({ assignments: [busy('progress')] }), { stage: 'working' }],
+    // A blocked or failed Report is not continued by the worker on its own: it keeps waiting for a person.
+    ['a blocked Report whose worker got an Input after it', ticket({ assignments: [busy('blocked')] }), { stage: 'person', action: 'blocked' }],
+    ['a failed Report whose worker got an Input after it', ticket({ assignments: [busy('failed')] }), { stage: 'person', action: 'failed' }],
+    ['a ready Report whose worker got an Input after it, on an ended Assignment', ticket({ assignments: [reported('ready', { state: 'ended',
+      deliveredAt: 'later' })] }), { stage: 'idle' }],
     ['no Assignment', ticket({ assignments: [] }), { stage: 'working', action: 'queued' }],
     ['a pending Assignment', ticket({ assignments: [reported('failed', { state: 'ended' }), assignment({ state: 'pending' })] }), { stage: 'working', action: 'queued' }],
     ['a waiting Report', ticket({ assignments: [reported('waiting')] }), { stage: 'idle' }],
@@ -55,6 +66,19 @@ describe('ticketStage', () => {
     ['a progress Report', ticket({ assignments: [reported('progress')] }), { stage: 'working' }],
     ['an ended Ticket', ticket({ ended, attention, assignments: [reported('failed')] }), { stage: 'ended' }],
   ])('%s', (_name, value, stage) => { expect(ticketStage(value)).toEqual(stage) })
+})
+
+// A Report speaks for the Ticket only while its worker has nothing newer, which is what the stage and the summary read.
+describe('currentReport', () => {
+  it('keeps the report its worker still waits on, and drops the one newer work or a person superseded', () => {
+    expect(currentReport(ticket({ assignments: [reported('ready')] }))?.state).toBe('ready')
+    expect(currentReport(ticket({ assignments: [reported('failed')] }))?.state).toBe('failed')
+    expect(currentReport(ticket({ assignments: [busy('ready')] }))).toBeUndefined()
+    expect(currentReport(ticket({ ...answered, assignments: [reportedAt('failed')] }))).toBeUndefined()
+    // A retry or a re-dispatch starts a new Assignment: the old report is history, and the new one has said nothing yet.
+    expect(currentReport(ticket({ assignments: [reported('failed', { state: 'ended' }), assignment({ state: 'pending' })] }))).toBeUndefined()
+    expect(currentReport(ticket({ assignments: [assignment()] }))).toBeUndefined()
+  })
 })
 
 describe('completedArchived', () => {

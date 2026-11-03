@@ -164,6 +164,27 @@ it('follows the Ticket\'s stage: a blocked Ticket a person answered since is wor
   expect(ticketDetail(host, 't1')!.assignments[0]).not.toHaveProperty('turnEndedAt')
 })
 
+it('shows a Report only while the Ticket still waits on it: a retry or an Input delivered since does not keep its summary', () => {
+  const host = views()
+  live('t1')
+  const failed = { state: 'failed' as const, summary: 'AggregateError: the gateway dropped the connection', at: '2026-09-22T00:01:00Z' }
+  const stalled = { id: 'a1', state: 'ended' as const, createdAt: at, startedAt: at, report: failed }
+  store.tickets.save({ ...store.tickets.get('t1')!, assignments: [stalled] })
+  // Before a retry the Ticket waits for a person on that failure, so the card shows it.
+  expect(ticketSummary(store.tickets.get('t1')!)).toMatchObject({ stage: 'person', action: 'failed', summary: failed.summary,
+    note: { text: failed.summary } })
+  // A retry starts a new Assignment: it has said nothing yet, and the old failure is history rather than the Ticket's state.
+  store.tickets.save({ ...store.tickets.get('t1')!, assignments: [stalled, { id: 'a2', state: 'pending' as const, createdAt: at }] })
+  expect(ticketSummary(store.tickets.get('t1')!)).toMatchObject({ stage: 'working', action: 'queued', actions: { retry: false }, summary: '' })
+  // A worker that takes up a person's follow-up after a ready Report is working again, not waiting for that review.
+  const ready = { state: 'ready' as const, summary: 'Ready for review', at: '2026-09-22T00:03:00Z' }
+  const working = { id: 'a3', state: 'running' as const, createdAt: at, startedAt: at, deliveredAt: '2026-09-22T00:04:00Z', report: ready }
+  store.tickets.save({ ...store.tickets.get('t1')!, assignments: [working], inputs: [{ id: 'i1', kind: 'trigger' as const,
+    triggerId: 'e2', at: '2026-09-22T00:04:00Z', human: true as const }] })
+  expect(ticketSummary(store.tickets.get('t1')!)).toMatchObject({ stage: 'working', summary: '', actions: { retry: false } })
+  expect(ticketDetail(host, 't1')!.assignments[0]).not.toHaveProperty('turnEndedAt')
+})
+
 it('names who verified delivered work, and never reads "completed" as verified by itself', () => {
   const host = views()
   const delivered = { name: 'w', directory: '/w', assignment: '', changelist: 42, verification: 'Automation 19/19 passed' }
