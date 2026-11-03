@@ -25,6 +25,12 @@ export const feishuClientLink = (url: string): string => url
   .replace(/^https:\/\/applink\.feishu\.cn\//i, 'feishu://applink/')
   .replace(/^https:\/\/applink\.larksuite\.com\//i, 'lark://applink/')
 /**
+ * True when an AppLink opens a particular message or topic rather than only its chat. A chat link lands on the
+ * conversation and leaves a person to find the question themselves, so it is not a message link.
+ */
+export const isMessageLink = (url: string | undefined): url is string =>
+  !!url && /\/client\/(?:thread|message)\/|[?&]position=/.test(url)
+/**
  * True when Feishu permanently rejects a reply because the target message was recalled, withdrawn, not found, or never
  * existed. Only a Feishu response carrying one of these errors means the target is gone; timeouts or crashes do not. The
  * invalid-id failure is matched by text because Feishu reports it in the message, and settling it keeps a reply that can

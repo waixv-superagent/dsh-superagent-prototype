@@ -1,0 +1,45 @@
+{
+ "mode": "after",
+ "head": {
+  "text": "打开 飞书 原文",
+  "href": "feishu://applink/client/thread/open?open_chat_id=oc_demo&open_thread_id=omt_demo&thread_position=7",
+  "rawHref": "feishu://applink/client/thread/open?open_chat_id=oc_demo&open_thread_id=omt_demo&thread_position=7",
+  "target": null,
+  "rel": null,
+  "rect": {
+   "x": 1336.921875,
+   "y": 175,
+   "width": 120.578125,
+   "height": 30
+  }
+ },
+ "banner": {
+  "text": "去飞书回答",
+  "href": "feishu://applink/client/thread/open?open_chat_id=oc_demo&open_thread_id=omt_demo&thread_position=9",
+  "rawHref": "feishu://applink/client/thread/open?open_chat_id=oc_demo&open_thread_id=omt_demo&thread_position=9",
+  "target": null,
+  "rect": {
+   "x": 509.5,
+   "y": 289,
+   "width": 102,
+   "height": 30
+  },
+  "bannerRect": {
+   "x": 497.5,
+   "y": 255,
+   "width": 960,
+   "height": 72
+  },
+  "bannerText": "待人工决定：\n\n验证用：这条问题在等你回答\n\n去飞书回答"
+ },
+ "headClick": {
+  "created": [],
+  "landing": null,
+  "newTabs": 0
+ },
+ "bannerClick": {
+  "created": [],
+  "landing": null,
+  "newTabs": 0
+ }
+}

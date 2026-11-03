@@ -3,8 +3,9 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { setTimeout as delay } from 'node:timers/promises'
 import { z } from 'zod'
-import { threadKey, type Thread, type Trigger } from '../core/index.ts'
-import { feishuChatLink } from './feishu-channel.ts'
+import { threadKey, type Thread, type ThreadRef, type Trigger } from '../core/index.ts'
+import { feishuChatLink, isMessageLink } from './feishu-channel.ts'
+import { messageLink } from './feishu-card.ts'
 import { sweepReceipts, takeReceipt } from './feishu-receipt.ts'
 import type { FeishuBot } from '../deployment.ts'
 import { commandLine, validItems, type Tally } from '../infra/commands.ts'
@@ -18,7 +19,7 @@ import { cursorAt, POLL_HORIZON_MS, polled, pollThreads as pollEach } from './po
 import type { FeishuConfig } from './feishu.ts'
 
 export const runFeishu = (ctx: SourceContext, signal: AbortSignal): Promise<unknown> =>
-  Promise.allSettled([watch, cardWatch, backfillLoop, chatNamesLoop, receiptLoop].map(loop => loop(ctx, signal)))
+  Promise.allSettled([watch, cardWatch, backfillLoop, chatNamesLoop, receiptLoop, linksLoop].map(loop => loop(ctx, signal)))
 const enabled = (ctx: SourceContext): FeishuConfig | undefined => ctx.config<FeishuConfig>(SOURCE)
 const bot = (ctx: SourceContext): FeishuBot => {
   const resolved = ctx.deployment.feishu
@@ -70,7 +71,78 @@ async function receive(ctx: SourceContext, trigger: Trigger): Promise<void> {
   if (!chatId) return
   const name = ctx.state.get(KV.sources.labels(SOURCE))?.[chatId] ?? chatId
   const chat = trigger.meta.direct === true ? { value: { zh: '私聊', en: 'Direct message' } } : { value: name }
-  for (const ref of trigger.threads) ctx.threads.describe(threadKey(ref), { url: chatLink(ctx, chatId), facts: { chat } })
+  for (const ref of trigger.threads) {
+    const url = await threadLink(ctx, ref, trigger.url, chatId)
+    ctx.threads.describe(threadKey(ref), { url, facts: { chat } })
+  }
+}
+/**
+ * The link a thread stores for a person to open: an existing message link, the event's own AppLink, one asked of Feishu
+ * for the thread's root, and only then the chat. A chat link opens the conversation, not the message.
+ */
+export async function threadLink(ctx: SourceContext, ref: ThreadRef, triggerUrl: string | undefined, chatId: string): Promise<string> {
+  const known = ctx.threads.get(threadKey(ref))?.meta.url
+  const existing = typeof known === 'string' && known ? known : undefined
+  if (isMessageLink(existing)) return existing
+  return triggerUrl ?? await messageAppLink(ctx, ref) ?? existing ?? chatLink(ctx, chatId)
+}
+/** The AppLink of the message a thread is anchored on; undefined when Feishu cannot resolve it. */
+const messageAppLink = async (ctx: SourceContext, ref: ThreadRef): Promise<string | undefined> => {
+  const root = ref.id.slice(ref.id.indexOf(':') + 1)
+  if (!root || root === ref.id) return undefined
+  return messageLink({ commands: ctx.commands }, root).catch(() => undefined)
+}
+/** How often a pass fills message links a card or thread stored before its own link was known. */
+const LINK_PASS_MS = 10 * 60_000
+/** Message lookups one pass may spend, so a message Feishu cannot resolve never keeps a pass busy. */
+const LINK_LOOKUPS = 12
+/**
+ * Fills the message links an older build left out: a card or thread without one links to the chat, which leaves a
+ * person to find the question themselves. A pass is capped so it stays cheap, and a lookup that failed is retried by
+ * the next pass.
+ */
+export async function fillLinks(ctx: SourceContext, signal: AbortSignal): Promise<void> {
+  let lookups = LINK_LOOKUPS
+  const messageUrl = async (messageId: string): Promise<string | undefined> => {
+    if (lookups <= 0 || signal.aborted) return undefined
+    lookups -= 1
+    return messageLink({ commands: ctx.commands }, messageId).catch(() => undefined)
+  }
+  const attention = ctx.state.get(KV.feishu.attentionCards) ?? {}
+  let changed = false
+  for (const [id, entry] of Object.entries(attention)) {
+    if (entry.url || lookups <= 0) continue
+    const url = await messageUrl(id)
+    if (url) { attention[id] = { ...entry, url }; changed = true }
+  }
+  if (changed) ctx.state.set(KV.feishu.attentionCards, attention)
+  const plans = ctx.state.get(KV.feishu.cards) ?? {}
+  changed = false
+  for (const [id, entry] of Object.entries(plans)) {
+    if (entry.url || lookups <= 0) continue
+    const url = await messageUrl(id)
+    if (url) { plans[id] = { ...entry, url }; changed = true }
+  }
+  if (changed) ctx.state.set(KV.feishu.cards, plans)
+  for (const thread of ctx.threads.subscribed(SOURCE)) {
+    if (lookups <= 0 || signal.aborted) return
+    const known = thread.meta.url
+    if (isMessageLink(typeof known === 'string' ? known : undefined)) continue
+    const root = thread.ref.id.slice(thread.ref.id.indexOf(':') + 1)
+    if (!root || root === thread.ref.id) continue
+    const url = await messageUrl(root)
+    if (url) ctx.threads.describe(thread.key, { url })
+  }
+}
+/** Keeps panel links pointing at messages rather than chats; runs while a bot is configured, so it also fixes links
+ * after the Source is turned off: the panel still links to Feishu either way. */
+async function linksLoop(ctx: SourceContext, signal: AbortSignal): Promise<void> {
+  await ctx.ready
+  if (!ctx.configured() || !ctx.deployment.feishu) return
+  while (!signal.aborted) {
+    await fillLinks(ctx, signal).catch(() => {})
+    await delay(LINK_PASS_MS, undefined, { signal }).catch(() => {})
+  }
 }
 const chatLink = (ctx: SourceContext, chatId: string): string => feishuChatLink(ctx.deployment.feishu?.brand ?? 'feishu', chatId)
 function available(ctx: SourceContext): boolean {

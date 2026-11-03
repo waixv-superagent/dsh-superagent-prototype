@@ -177,7 +177,7 @@ it('answers a question, retries a failure and stops a Ticket from its decision c
   await openOverview()
   // The answer card keeps the Channel link and its primary action opens the Ticket.
   expect(all('.dt-deck-card-foot a').map(link => [link.textContent, link.getAttribute('href')])).toEqual([['去飞书回答',
-    'https://applink.feishu.cn/client/chat/open?openChatId=oc_1']])
+    'feishu://applink/client/chat/open?openChatId=oc_1']])
   await click(zh.boardAnswer)
   expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('修复回归')
   await openOverview()

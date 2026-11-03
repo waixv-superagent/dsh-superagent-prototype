@@ -727,7 +727,7 @@ it('links Channels and Threads for people, finds tickets by a bare PR number, an
   const { ticket } = await acceptedTicket(feishu('1', '@_user_1 修一下回归', { mentions: [{ id: 'ou_bot', key: '@_user_1', name: 'dsh-superagent' }] }))
   const home = `feishu:${CHAT}:om_1`
   expect(runtime.store.triggers.get(key('feishu', 'om_1'))!.text).toBe('@dsh-superagent 修一下回归')
-  const chatLink = `https://applink.feishu.cn/client/chat/open?openChatId=${CHAT}`
+  const chatLink = `feishu://applink/client/chat/open?openChatId=${CHAT}`
   expect(ticketDetail(viewsOf(runtime), ticket.id)!.channels).toEqual([expect.objectContaining({ source: 'feishu', url: chatLink })])
   expect(threadDetail(viewsOf(runtime), home, undefined, 10)!.url).toBe(chatLink)
   // A pull request the Ticket opened is a Thread it follows as its own.
