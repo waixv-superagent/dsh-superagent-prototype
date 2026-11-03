@@ -18,7 +18,7 @@ A `?view=board` query on the panel URL opens the duty-desk board directly, befor
 
 | Tab | Shows |
 | --- | --- |
-| Overview | The machine's editor board: who holds the Unreal Editor now (you, an agent, free, or unknown, treated as you), the last-hour timeline, every running or queued Ticket with its live tool, digest, elapsed time and latest progress, and what waits on a person. Read-only: it never starts, stops or hands over the editor |
+| Overview | The machine's editor board: who holds the Unreal Editor now (you, an agent, a local build that occupies the slot while it compiles, free, or unknown, treated as you), the last-hour timeline including the build window, every running or queued Ticket with its live tool, digest, elapsed time and latest progress, and what waits on a person. A running build also names the pending-verification Tickets delivered before it started, inferred from the build's start time against each delivery time. Read-only: it never starts, stops or hands over the editor |
 | Agent status | The duty desk as a five-lane board: **Needs your decision · To verify · 流水线 · Running · Recently ended**. The pipeline lane shows blocked follow-ups first, then the oldest running check. The header sums what waits on a person, each lane links to its filtered list, and ended cards name who verified the work (you, the pipeline, or nobody). Compact system problems and the day's counts sit above the board |
 | Source | Source state, setup problems and non-zero counts. Filtered Triggers and dropped messages cover the same 24-hour window as Agent status |
 | Trigger | Threads filtered by Subscribed, Evaluating, New Triggers in 24 h, or All Threads. Each Thread shows its Triggers newest first, Decisions and Subscriptions |

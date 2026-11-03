@@ -96,6 +96,8 @@ export interface PanelServer {
   activity: (ticketId: string) => ActivityView | undefined
   /** Editor occupancy the Overview reads; tests replace it to simulate a person, an agent, an unreadable probe or no probe yet. */
   editor: ApiResponse<'GET overview'>['editor']
+  /** The build the Editor page reports, including the verification Tickets delivered before it started. */
+  build?: ApiResponse<'GET editor'>['build']
   /** Replaces the Editor page's answer; by default it is derived from the lanes, `editor` and `activity` above. */
   editorPage?: () => ApiResponse<'GET editor'>
   threads: ThreadRow[]
@@ -209,7 +211,7 @@ const editorPageView = (): ApiResponse<'GET editor'> => {
     return { ticket, activity, queued: ticket.stage === 'working' && ticket.action === 'queued', usesEditor: use === 'uses', use }
   }).sort((left, right) => Number(right.activity.live) - Number(left.activity.live) || Number(left.queued) - Number(right.queued))
   const person = server.person.filter(ticket => !(ticket.stage === 'person' && ticket.action === 'verify'))
-  return { editor: server.editor, working, person, verification: server.verification,
+  return { editor: server.editor, build: server.build ?? null, working, person, verification: server.verification,
     executor: { running: working.filter(row => !row.queued).length, queued: working.filter(row => row.queued).length,
       maxWorkers: server.settings.executor.maxWorkers },
     timeline: editorTimeline(),
@@ -308,7 +310,8 @@ function initial(): PanelServer {
       defaultChanged: [], revisions: [{ ...defaults, changed: [] }], sessions: [], notificationPending: false, next_offset: null },
     tickets: { open: [ticketSummary()], ended: [ended] }, ticketDetails: { t1: ticketDetail(), t5: { ...ticketDetail(), id: 't5', title: '补 i18n 文案' } },
     activity: () => undefined,
-    editor: { holder: 'person', activity: 'editing', since: '2026-09-22T08:00:00.000Z', pid: 1, at: '2026-09-22T08:10:00.000Z' },
+    editor: { holder: 'person', activity: 'editing', since: '2026-09-22T08:00:00.000Z', pid: 1, build: null,
+      at: '2026-09-22T08:10:00.000Z' },
     working: [ticketSummary({ id: 't5', title: '补 i18n 文案', summary: '第 12 步 · 修改 zh-CN.json' }),
       ticketSummary({ id: 't6', title: '升级依赖', summary: '后台 job · 60 秒无输出', updatedAt: '2026-09-22T23:30:00Z' })],
     idle: [], pipeline: [], ended: [ended],

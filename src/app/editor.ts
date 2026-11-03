@@ -22,18 +22,34 @@ export interface EditorProcess {
   readonly started: string | null
 }
 
-/** Who holds the editor: a person's interactive editor, an agent's headless commandlet, nobody, or a state the probe could not read. */
-export type EditorHolder = 'person' | 'agent' | 'none' | 'unknown'
+/**
+ * Who holds the editor: a person's interactive editor, an agent's headless commandlet, a local build tool that locks
+ * the editor slot while it compiles, nobody, or a state the probe could not read.
+ */
+export type EditorHolder = 'person' | 'agent' | 'build' | 'none' | 'unknown'
 /** What is running against the editor: editing, a build tool, or nothing the probe knows. */
 export type EditorActivity = 'editing' | 'building' | 'unknown'
+
+/** The build tool the row observed; its start time bounds which delivered changes the build contains. */
+export interface EditorBuild {
+  /** A build process: the earliest-started UnrealBuildTool, or the earliest worker when no UBT is running. */
+  readonly pid: number
+  /**
+   * ISO start time of the earliest UnrealBuildTool, or null when a UBT row would not report one (a shader worker's
+   * later start is not used instead).
+   */
+  readonly since: string | null
+}
 
 /** The overview's editor row: the holder, what it is doing, and when the current holder started. */
 export interface EditorView {
   readonly holder: EditorHolder
   readonly activity: EditorActivity
-  /** ISO start time of the editor the row was derived from, or null when nobody holds it. */
+  /** ISO start time of the editor, or of the build when only a build holds the slot; null when nothing holds it or the time is unknown. */
   readonly since: string | null
   readonly pid: number | null
+  /** The build tool running alongside or instead of an editor; null when no build tool is running. */
+  readonly build: EditorBuild | null
   /** When this row was derived, so a stale row is recognisable after a probe failure. */
   readonly at: string
   /** A person-facing reason the state is unknown; never used to decide anything. */
@@ -50,14 +66,32 @@ export interface EditorView {
  */
 export function deriveEditor(processes: readonly EditorProcess[], at: string): EditorView {
   const editors = processes.filter(process => process.name === INTERACTIVE_EDITOR || process.name === HEADLESS_EDITOR)
-  const building = processes.some(process => BUILD_TOOLS.has(process.name))
+  const builds = processes.filter(process => BUILD_TOOLS.has(process.name))
+  const building = builds.length > 0
+  // ShaderCompileWorker children start after UnrealBuildTool: they must never stand in for a UBT whose start is
+  // unknown, because their later time would call the build younger than it is and over-count the changes it contains.
+  const ubt = builds.filter(process => process.name === 'unrealbuildtool')
+  const buildRows = ubt.length ? ubt : builds
+  // Process start times may carry different offsets, so compare instants, not their ISO text.
+  const startedAt = (value: string | null) => value === null ? Number.POSITIVE_INFINITY : Date.parse(value)
+  const buildStarted = buildRows.some(process => process.started === null) ? null
+    : buildRows.slice().sort((left, right) => startedAt(left.started) - startedAt(right.started) || left.pid - right.pid)[0]?.started ?? null
+  const build: EditorBuild | null = building ? {
+    // A row without a start time cannot be the earliest known start, so it loses to any row that has one.
+    pid: buildRows.slice().sort((left, right) => (left.started === null ? 1 : 0) - (right.started === null ? 1 : 0)
+      || startedAt(left.started) - startedAt(right.started) || left.pid - right.pid)[0]!.pid,
+    since: buildStarted,
+  } : null
   const activity: EditorActivity = building ? 'building' : editors.length ? 'editing' : 'unknown'
-  if (!editors.length) return { holder: 'none', activity, since: null, pid: null, at }
+  // A build occupies the editor slot even with no editor open: it rewrites the binaries a person would otherwise use.
+  if (!editors.length) return building
+    ? { holder: 'build', activity, since: buildStarted, pid: build!.pid, build, at }
+    : { holder: 'none', activity, since: null, pid: null, build: null, at }
   // An interactive editor wins over a headless one: both present is still a person's editor to leave alone.
   const interactive = editors.find(process => process.name === INTERACTIVE_EDITOR)
   const started = editors.map(process => process.started).filter((value): value is string => !!value).sort()[0] ?? null
   const representative = interactive ?? editors[0]!
-  return { holder: interactive ? 'person' : 'agent', activity, since: started, pid: representative.pid, at }
+  return { holder: interactive ? 'person' : 'agent', activity, since: started, pid: representative.pid, build, at }
 }
 
 /**
@@ -147,7 +181,8 @@ export class Editor {
       if (!this.disposed) this.view = deriveEditor(processes, at)
     } catch (error) {
       this.options.warn?.(`editor probe failed: ${error instanceof Error ? error.message : String(error)}`)
-      if (!this.disposed) this.view = { holder: 'unknown', activity: 'unknown', since: null, pid: null, at, detail: '读取进程表失败，按人在用' }
+      if (!this.disposed) this.view = { holder: 'unknown', activity: 'unknown', since: null, pid: null, build: null, at,
+        detail: '读取进程表失败，按人在用' }
     } finally {
       this.running = false
     }

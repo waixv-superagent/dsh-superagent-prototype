@@ -1,7 +1,7 @@
 /** Editor page view: who holds the Unreal Editor, which Tickets are working with their live tool, and what waits on a person. */
 import { completedArchived, ticketStage, type Ticket } from '../../core/index.ts'
 import { mcpToolName, type Activity, type ActivityView } from '../activity.ts'
-import type { EditorView } from '../editor.ts'
+import type { EditorBuild, EditorView } from '../editor.ts'
 import { delivered, newestFirst, snapshot, type ViewHost } from './records.ts'
 import { ticketRow } from './tickets.ts'
 
@@ -72,6 +72,16 @@ export interface EditorExecutorLoad {
   maxWorkers: number
 }
 
+/**
+ * A running build and the Tickets a person could verify from it: a pending-verification Ticket whose delivery time
+ * predates the build's start was already in the tree the build read. It is an inference from timestamps, never a
+ * claim about what the build actually compiled.
+ */
+export interface EditorBuildView extends EditorBuild {
+  /** IDs of the verification rows delivered before this build started; empty when its start time is unknown. */
+  included: string[]
+}
+
 /** One span on the editor page's last-hour timeline; times are already clamped to the window. */
 export interface EditorTimelineBand {
   id: string
@@ -131,9 +141,15 @@ function timeline(nowMs: number, editor: EditorView | null, staged: { ticket: Ti
   const fromMs = nowMs - TIMELINE_MS
   const to = iso(nowMs)
   const editorBands: EditorTimelineBand[] = []
-  if (editor?.since && editor.holder !== 'none') {
+  if (editor?.since && (editor.holder === 'person' || editor.holder === 'agent')) {
     const start = clamp(editor.since, fromMs, nowMs)
     if (start !== null && start < nowMs) editorBands.push({ id: 'editor', tone: editor.holder, from: iso(start), to })
+  }
+  // A build's own start bounds which delivered changes it contains; the holder's start is a different question.
+  if (editor?.build?.since) {
+    const start = clamp(editor.build.since, fromMs, nowMs)
+    if (start !== null && start < nowMs) editorBands.push({ id: 'build', tone: 'build', from: iso(start), to,
+      title: editor.build.since })
   }
   const rows: EditorTimelineRow[] = []
   for (const { ticket, stage } of staged) {
@@ -192,9 +208,19 @@ export function editorPage(host: ViewHost, activity: Pick<Activity, 'read'>, edi
     .map(({ row }): EditorWorkingRow => row)
   const person = staged.filter(({ stage }) => stage.stage === 'person' && stage.action !== 'verify')
     .map(({ ticket }) => ticketRow(view, ticket))
-  const verification = [...staged.filter(({ stage }) => stage.stage === 'person' && stage.action === 'verify').map(({ ticket }) => ticket),
-    ...awaiting].map(ticket => ticketRow(view, ticket))
-  return { editor, working, person, verification, executor,
+  const verificationTickets = [...staged.filter(({ stage }) => stage.stage === 'person' && stage.action === 'verify').map(({ ticket }) => ticket),
+    ...awaiting]
+  const verification = verificationTickets.map(ticket => ticketRow(view, ticket))
+  const buildStart = editor?.build?.since ? Date.parse(editor.build.since) : NaN
+  const build: EditorBuildView | null = editor?.build ? { ...editor.build,
+    // The delivery time is the pending-verification stamp or, for an already ended Ticket, when it ended; a last
+    // modification time is not a delivery and must not be guessed from.
+    included: Number.isFinite(buildStart) ? verificationTickets
+      .filter(ticket => {
+        const deliveredAt = Date.parse(ticket.verification?.at ?? ticket.ended?.at ?? '')
+        return Number.isFinite(deliveredAt) && deliveredAt <= buildStart
+      }).map(ticket => ticket.id) : [] } : null
+  return { editor, build, working, person, verification, executor,
     timeline: timeline(nowMs, editor, staged, activityById),
     counts: { working: working.length, queued: working.filter(row => row.queued).length, person: person.length,
       verification: verification.length } }

@@ -7,10 +7,11 @@ const process = (pid: number, name: string, started: string | null = '2026-11-02
 
 describe('deriveEditor', () => {
   it('reads an empty process table as free, not as unknown', () => {
-    expect(deriveEditor([], at)).toEqual({ holder: 'none', activity: 'unknown', since: null, pid: null, at })
+    expect(deriveEditor([], at)).toEqual({ holder: 'none', activity: 'unknown', since: null, pid: null, build: null, at })
   })
   it('treats an interactive editor as a person and keeps its process and start time', () => {
-    expect(deriveEditor([process(86916, 'unrealeditor')], at)).toEqual({ holder: 'person', activity: 'editing', since: '2026-11-02T14:30:29.0000000Z', pid: 86916, at })
+    expect(deriveEditor([process(86916, 'unrealeditor')], at)).toEqual({ holder: 'person', activity: 'editing',
+      since: '2026-11-02T14:30:29.0000000Z', pid: 86916, build: null, at })
   })
   it('treats a headless commandlet as an agent', () => {
     expect(deriveEditor([process(7, 'unrealeditor-cmd')], at)).toMatchObject({ holder: 'agent', activity: 'editing', pid: 7 })
@@ -18,9 +19,27 @@ describe('deriveEditor', () => {
   it('prefers the interactive editor when a headless one is also running', () => {
     expect(deriveEditor([process(7, 'unrealeditor-cmd'), process(8, 'unrealeditor')], at)).toMatchObject({ holder: 'person', pid: 8 })
   })
-  it('reports a build tool as building, with or without an editor', () => {
-    expect(deriveEditor([process(9, 'shadercompileworker')], at)).toEqual({ holder: 'none', activity: 'building', since: null, pid: null, at })
-    expect(deriveEditor([process(10, 'unrealbuildtool'), process(11, 'unrealeditor')], at)).toMatchObject({ holder: 'person', activity: 'building' })
+  it('reads a build tool as occupying the editor even when no editor is open', () => {
+    expect(deriveEditor([process(9, 'shadercompileworker')], at)).toEqual({ holder: 'build', activity: 'building',
+      since: '2026-11-02T14:30:29.0000000Z', pid: 9, build: { pid: 9, since: '2026-11-02T14:30:29.0000000Z' }, at })
+    // An editor that is also being built for stays the holder: the row keeps answering "who is using it".
+    expect(deriveEditor([process(10, 'unrealbuildtool'), process(11, 'unrealeditor')], at)).toMatchObject({ holder: 'person',
+      activity: 'building', build: { pid: 10, since: '2026-11-02T14:30:29.0000000Z' } })
+  })
+  it('takes the earliest UnrealBuildTool as the build start, and leaves the time unknown when a UBT reports none', () => {
+    const view = deriveEditor([process(3, 'shadercompileworker', '2026-11-02T14:50:00.0000000Z'),
+      process(2, 'unrealbuildtool', '2026-11-02T14:10:00.0000000Z'), process(4, 'shadercompileworker', null)], at)
+    expect(view).toMatchObject({ holder: 'build', since: '2026-11-02T14:10:00.0000000Z',
+      build: { pid: 2, since: '2026-11-02T14:10:00.0000000Z' } })
+    expect(deriveEditor([process(5, 'unrealbuildtool', null)], at))
+      .toMatchObject({ holder: 'build', since: null, pid: 5, build: { pid: 5, since: null } })
+    // A shader worker starts after UBT; its known start must not make an unknown UBT start look known.
+    expect(deriveEditor([process(6, 'unrealbuildtool', null), process(7, 'shadercompileworker', '2026-11-02T14:05:00.0000000Z')], at))
+      .toMatchObject({ holder: 'build', since: null, pid: 6, build: { pid: 6, since: null } })
+    // Compare instants, not ISO text: 22:10+08:00 (= 14:10Z) is earlier than 14:20Z though it sorts later as a string.
+    expect(deriveEditor([process(8, 'unrealbuildtool', '2026-11-02T14:20:00.0000000Z'),
+      process(9, 'unrealbuildtool', '2026-11-02T22:10:00+08:00')], at)).toMatchObject({ since: '2026-11-02T22:10:00+08:00',
+      build: { pid: 9, since: '2026-11-02T22:10:00+08:00' } })
   })
   it('uses the earliest start time when several editors are open, and ignores rows without one', () => {
     const view = deriveEditor([process(1, 'unrealeditor', '2026-11-02T15:00:00.0000000Z'), process(2, 'unrealeditor', null),
