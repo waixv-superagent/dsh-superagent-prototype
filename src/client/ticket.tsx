@@ -527,10 +527,19 @@ export function TicketPage({ id }: { id: string }) {
       </div>}</div>}
     {data.stage === 'working' && <TicketNow id={data.id} queued={data.action === 'queued'} updatedAt={data.updatedAt}
       startedAt={data.assignments.filter(assignment => assignment.startedAt).at(-1)?.startedAt} summary={data.summary} />}
-    {/* Ordinary progress stays in the Session/Channels; only a report that halted work (blocked/failed) is shown here. */}
-    {data.actions.retry && data.summary && <p className={`dt-banner${failed ? ' dt-danger' : ''}${failedText ? ' dt-mono' : ''}`}>
-      <span className="dt-banner-label">{t(failed ? 'failedPrefix' : 'blockedPrefix')}</span>{data.summary}
-    </p>}
+    {/* Ordinary progress stays in the Session/Channels; only a report that halted work (blocked/failed) is shown here.
+        A report is markdown: rendering it in a paragraph collapsed every line break into one unreadable block. An
+        error message keeps the monospace banner so its text stays byte-for-byte recognisable. */}
+    {data.actions.retry && data.summary && (failedText
+      ? <p className={`dt-banner${failed ? ' dt-danger' : ''} dt-mono`}>
+        <span className="dt-banner-label">{t(failed ? 'failedPrefix' : 'blockedPrefix')}</span>{data.summary}
+      </p>
+      : <section className="dt-report" data-tone={failed ? 'danger' : 'warning'}>
+        <div className="dt-report-head">
+          <Icon name={failed ? 'alert' : 'blocked'} size={14} />{t(failed ? 'failedPrefix' : 'blockedPrefix')}
+        </div>
+        <MarkdownLite text={data.summary} />
+      </section>)}
     {data.deliveryError && <p className="dt-banner dt-danger dt-mono">
       <span className="dt-banner-label">{t('deliveryFailedPrefix')}</span>{data.deliveryError}
     </p>}

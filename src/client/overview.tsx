@@ -22,13 +22,15 @@ function EditorLine({ editor }: { editor: EditorRow }) {
   const { t } = usePanel()
   const line = editor.holder === 'person' ? t('editorPerson')
     : editor.holder === 'agent' ? t('editorAgent')
+    : editor.holder === 'build' ? t('editorBuild')
     : editor.holder === 'none' ? (editor.activity === 'building' ? t('editorEmptyBuilding') : t('editorEmpty'))
     : t('editorUnknown')
-  const since = editor.holder === 'person' || editor.holder === 'agent' ? clock(editor.since) : ''
+  const since = editor.holder === 'person' || editor.holder === 'agent' || editor.holder === 'build' ? clock(editor.since) : ''
   return <p className="dt-editor-line" data-holder={editor.holder} title={editor.detail}>
     {line}
     {since && <span className="dt-editor-since"> · {t('editorSince', { time: since })}</span>}
-    {editor.holder !== 'none' && editor.activity === 'building' && <span className="dt-editor-since"> · {t('editorBuilding')}</span>}
+    {(editor.holder === 'person' || editor.holder === 'agent') && editor.activity === 'building'
+      && <span className="dt-editor-since"> · {t('editorBuilding')}</span>}
   </p>
 }
 

@@ -318,6 +318,29 @@ it('shows delivered work waiting for a person\'s local verification, with the wo
     && JSON.stringify(request.body).includes('PIE 里 Q 技能仍然会卡住'))).toBe(true)
 })
 
+it('renders a blocked report as paragraphs and a list instead of one collapsed line', async () => {
+  const base = server.ticketDetails.t1!
+  const summary = 'P1 阶段报 blocked：目标不是这个工作区映射的 //sun/mainline，需要改派到 git 通道。\n\n'
+    + '【阻塞证据（只读）】\n1) p4 client dsh-pipeline-pending-state 实际不存在。\n2) depot 里没有 superagent 源码。\n\n'
+    + '【需要的动作】\n把本单改派到 git。'
+  server.ticketDetails.t12 = { ...base, id: 't12', title: '阻塞报告单', stage: 'person' as const, action: 'blocked' as const,
+    actions: { retry: true, stop: true, confirm: false, verify: false, rework: false }, verification: undefined, summary }
+  at({ page: 'execution', id: 't12' })
+  await mount()
+  const report = document.querySelector('.dt-report[data-tone="warning"]')!
+  expect(report.querySelector('.dt-report-head')?.textContent).toBe(zh.blockedPrefix)
+  expect(all('.dt-report .dt-md > p').length).toBe(4)
+  expect(all('.dt-report .dt-md > ol > li').map(item => item.textContent)).toEqual([
+    'p4 client dsh-pipeline-pending-state 实际不存在。', 'depot 里没有 superagent 源码。'])
+  expect(report.textContent).toContain('【需要的动作】')
+  // A worker error keeps the monospace banner: its text must stay recognisable, not be reflowed as prose.
+  server.ticketDetails.t12 = { ...server.ticketDetails.t12, action: 'failed' as const,
+    summary: 'LlmError: no adapter registered for provider "provider-a"' }
+  await remount()
+  expect(document.querySelector('.dt-banner.dt-danger.dt-mono')?.textContent)
+    .toBe(`${zh.failedPrefix}LlmError: no adapter registered for provider "provider-a"`)
+})
+
 it('shows the pipeline gate with the last check and clears a blocker on the ticket page', async () => {
   const base = server.ticketDetails.t1!
   server.ticketDetails.t11 = { ...base, id: 't11', title: '流水线阻塞单', stage: 'pipeline' as const, action: 'blocked' as const,

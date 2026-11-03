@@ -52,19 +52,28 @@ it('rings the lane a stored count focus names when the board is opened cold', as
 })
 
 it('shows the editor row in each state, keeping an unreadable probe on the safe side', async () => {
-  server.editor = { holder: 'none', activity: 'unknown', since: null, pid: null, at: '2026-09-22T08:10:00.000Z' }
+  server.editor = { holder: 'none', activity: 'unknown', since: null, pid: null, build: null, at: '2026-09-22T08:10:00.000Z' }
   await mount()
   expect(document.querySelector('.dt-editor-line')?.getAttribute('data-holder')).toBe('none')
   expect(document.querySelector('.dt-editor-line')?.textContent).toContain('编辑器：空着')
 
   server.editor = { holder: 'agent', activity: 'building', since: new Date(Date.now() - 3_600_000).toISOString(), pid: 2,
-    at: '2026-09-22T08:10:00.000Z' }
+    build: { pid: 3, since: new Date(Date.now() - 1_800_000).toISOString() }, at: '2026-09-22T08:10:00.000Z' }
   await remount()
   expect(document.querySelector('.dt-editor-line')?.textContent).toContain('编辑器：agent 在用')
   expect(document.querySelector('.dt-editor-line')?.textContent).toContain('构建中')
   expect(document.querySelector('.dt-editor-line')?.textContent).toContain('起')
 
-  server.editor = { holder: 'unknown', activity: 'unknown', since: null, pid: null, at: '2026-09-22T08:10:00.000Z',
+  // With no editor open a running build is the holder, and its own start time is the row's start.
+  const buildSince = new Date(Date.now() - 900_000).toISOString()
+  server.editor = { holder: 'build', activity: 'building', since: buildSince, pid: 9, build: { pid: 9, since: buildSince },
+    at: '2026-09-22T08:10:00.000Z' }
+  await remount()
+  expect(document.querySelector('.dt-editor-line')?.getAttribute('data-holder')).toBe('build')
+  expect(document.querySelector('.dt-editor-line')?.textContent).toContain('编辑器：编译中')
+  expect(document.querySelector('.dt-editor-line')?.textContent).toContain('起')
+
+  server.editor = { holder: 'unknown', activity: 'unknown', since: null, pid: null, build: null, at: '2026-09-22T08:10:00.000Z',
     detail: '读取进程表失败，按人在用' }
   await remount()
   expect(document.querySelector('.dt-editor-line')?.textContent).toContain('编辑器：无法确认，按人在用')
