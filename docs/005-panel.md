@@ -50,7 +50,7 @@ The header search finds Triggers by text, id, Feishu message id or a stored link
 
 The ticket finder on Agent status searches titles, ticket ids, changelists, reviews, Thread ids, actors and summaries. It waits for two characters, queries numbers (ticket ids and CLs) immediately, and shows why each hit matched. Archived Tickets stay searchable and are marked **Archived**; the card shows the first eight characters of a ticket id.
 
-Search also finds Threads by references such as `#12` or a GitHub URL, and Tickets by title or a matching Thread.
+Search also finds Threads by references such as `#12` or a GitHub URL, and Tickets by title, a matching Thread, or their worker Session id (`worker-<ticketId>`, the id alone, or the tail a truncated session label shows). A Ticket without a started Assignment has no Session and stays reachable by its title or Thread.
 
 ## Principles
 
