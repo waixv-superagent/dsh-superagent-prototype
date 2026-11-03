@@ -4,9 +4,57 @@ import { act } from 'react'
 import { expect, it } from 'vitest'
 import { en, zh } from '../src/client/locales.ts'
 import { usePanel, mount, remount, settle, all, click, type, text, field } from './fixtures/panel.tsx'
-import { server, found } from './fixtures/panel-server.ts'
+import { server, found, threadSummary, ticketSummary } from './fixtures/panel-server.ts'
 
 usePanel()
+const wait = async (ms: number) => { await act(async () => { await new Promise(resolve => setTimeout(resolve, ms)) }); await settle() }
+
+it('searches once typing settles, without pressing Enter', async () => {
+  server.search = { items: [found('e1', '2026-09-20T00:00:00Z', { preview: 'message e1' })], threads: [] }
+  await mount()
+  await type(field<HTMLInputElement>(zh.searchLabel), 'message')
+  await wait(350)
+  expect(all('.dt-search-results .dt-row-title').map(title => title.textContent)).toEqual(['message e1'])
+})
+
+it('filters results by type, defaults to All, and names each result kind with its Source', async () => {
+  server.search = {
+    tickets: [ticketSummary({ source: 'feishu', title: '修复回归' })],
+    threads: [threadSummary({ source: 'github', title: '这个文案好奇怪' })],
+    items: [found('e1', '2026-09-20T00:00:00Z', { source: 'github', preview: 'message e1' })],
+  }
+  await mount()
+  await type(field<HTMLInputElement>(zh.searchLabel), 'message')
+  await wait(350)
+  const titles = () => all('.dt-search-results .dt-row-title').map(title => title.textContent)
+  expect(titles()).toEqual(['修复回归', '这个文案好奇怪', 'message e1'])
+  expect(text()).toContain('工单 · 飞书')
+  expect(text()).toContain('线程 · GitHub')
+  expect(text()).toContain('触发 · GitHub')
+  await click(zh['searchFilter.threads'])
+  expect(titles()).toEqual(['这个文案好奇怪'])
+  await click(zh['searchFilter.tickets'])
+  expect(titles()).toEqual(['修复回归'])
+  await click(zh['searchFilter.triggers'])
+  expect(titles()).toEqual(['message e1'])
+  // The counts still describe the whole search, so a filtered view can point at the other kinds.
+  expect(text()).toContain('找到 1 个工单、1 个线程、1 条触发')
+  await click(zh['searchFilter.all'])
+  expect(titles()).toEqual(['修复回归', '这个文案好奇怪', 'message e1'])
+})
+
+it('keeps the type filters available when the selected type has no hit', async () => {
+  server.search = { items: [found('e1', '2026-09-20T00:00:00Z', { preview: 'message e1' })], threads: [] }
+  await mount()
+  await type(field<HTMLInputElement>(zh.searchLabel), 'message')
+  await wait(350)
+  await click(zh['searchFilter.tickets'])
+  expect(document.querySelectorAll('.dt-search-results .dt-row-title').length).toBe(0)
+  expect(text()).toContain(zh.searchFilterNone)
+  await click(zh['searchFilter.all'])
+  expect(all('.dt-search-results .dt-row-title').map(title => title.textContent)).toEqual(['message e1'])
+})
+
 it('states why a filtered search result has no Thread instead of opening an empty one', async () => {
   server.search = { items: [found('e9', '2026-09-20T00:00:00Z', { source: 'github', actor: { source: 'github', id: 'someone' },
     preview: 'issue text', threads: ['github:7'],

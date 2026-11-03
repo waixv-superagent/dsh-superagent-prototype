@@ -46,7 +46,7 @@ Ticket details show the execution history built from its Assignments, Inputs and
 
 ## Search
 
-The header search finds Triggers by text, id, Feishu message id or a stored link, such as a GitHub comment URL. A Feishu link missing from the original message becomes searchable only after the host reads it during the current process lifetime.
+The header search finds Triggers by text, id, Feishu message id or a stored link, such as a GitHub comment URL. It searches once typing pauses (or on Enter), and its type filters narrow the results to Tickets, Threads or Triggers, with **All** (全部) as the default. Each row names its kind and Source together, such as 工单 · 飞书, so a Ticket and a Feishu message no longer read as the same thing. A Feishu link missing from the original message becomes searchable only after the host reads it during the current process lifetime.
 
 The ticket finder on Agent status searches titles, ticket ids, changelists, reviews, Thread ids, actors and summaries. It waits for two characters, queries numbers (ticket ids and CLs) immediately, and shows why each hit matched. Archived Tickets stay searchable and are marked **Archived**; the card shows the first eight characters of a ticket id.
 

@@ -134,7 +134,9 @@ export function ticketSummary(ticket: Ticket) {
     // panel must not offer the merge gate again. An ended Ticket keeps the observation for its record.
     ...ticket.pipeline && !(liveTicket(ticket) && ticket.pipeline.state === 'merged') ? { pipeline: ticket.pipeline } : {},
     actions: { retry: canRetry(ticket), stop: liveTicket(ticket), confirm: canConfirm(ticket), verify: canVerify(ticket),
-      rework: canRework(ticket) }, strength: ticket.mandate.strength, ended: ticket.ended,
+      rework: canRework(ticket) }, strength: ticket.mandate.strength,
+    // The Source the Ticket was accepted from, so a result row can say where the work came from (Feishu, GitHub, TAPD).
+    source: ticket.mandate.actor.source, ended: ticket.ended,
     ...ticket.verification ? { verification: ticket.verification } : {}, ...provenance ? { provenance } : {},
     attention: ticket.attention && { ...ticket.attention, question: markdown(ticket.attention.question) },
       assignments: ticket.assignments.length, inputs: ticket.inputs.length, undelivered: ticket.undelivered.length,
