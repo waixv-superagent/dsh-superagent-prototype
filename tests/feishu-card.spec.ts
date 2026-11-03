@@ -219,7 +219,12 @@ describe('question card', () => {
     expect(buttons.map(button => button.text.content)).toEqual(['先上 A', '先上 B'])
     expect(buttons[0]!.behaviors[0]!.value).toEqual({ v: 1, attention: 'att-1', choice: 0 })
     expect(text).toContain('可选项：1. 先上 A')
-    expect(JSON.stringify(attentionResolvedCard('先上 A 还是先上 B？', '先上 A', ticket.id).card)).toContain('你选了：**先上 A**')
+    const answered = attentionResolvedCard('先上 A 还是先上 B？', '先上 A', ticket.id)
+    expect(JSON.stringify(answered.card)).toContain('你选了：**先上 A**')
+    // The person answered; the worker is the one who continues, so the status must not ask the person to go on.
+    expect(JSON.stringify(answered.card)).toContain('已收到你的答复 · worker 继续处理')
+    expect(JSON.stringify(answered.card)).not.toContain('等人继续')
+    expect(answered.text).toContain('已收到你的答复：先上 A')
     expect(JSON.stringify(attentionStaleCard(ticket.id).card)).toContain('已处理')
   })
   it('adds the worker\'s context sections to a question card, with its choices unchanged', () => {
