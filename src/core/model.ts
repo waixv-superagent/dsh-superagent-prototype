@@ -402,6 +402,8 @@ export interface TicketPipeline {
   fixes?: number
   /** When a worker was last woken for a failure, which bounds how long a stale result may wait. */
   fixAt?: string
+  /** When a worker last asked Swarm to rerun checks, so a failure the rerun has not replaced yet is not a new failure. */
+  rerunAt?: string
 }
 /**
  * One fact the host observed about a delivered change. A `failure` carries the detail a worker needs to fix it; `review`

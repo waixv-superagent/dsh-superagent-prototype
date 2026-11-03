@@ -22,6 +22,8 @@ export interface PipelineWatchHost {
 
 /** How long a recorded review id may stay unknown right after delivery before it counts as missing. */
 const REVIEW_GRACE_MS = 5 * 60_000
+/** How long after a worker asked Swarm to rerun checks its old result is not treated as a new failure. */
+const RERUN_GRACE_MS = 5 * 60_000
 /** The light heartbeat that only wakes the watcher when its configured interval is due. */
 const HEARTBEAT_MS = 5_000
 const MAX_DETAIL = 3_500
@@ -143,6 +145,12 @@ export class PipelineWatch {
       return
     }
     const version = info.version
+    const rerunAt = ticket.pipeline?.rerunAt ? Date.parse(ticket.pipeline.rerunAt) : 0
+    if (rerunAt && now - rerunAt < RERUN_GRACE_MS && info.testStatus !== 'pass') {
+      // The worker asked for a rerun; until Swarm replaces the old result, it is not a new failure to hand over.
+      this.report(ticket, { kind: 'running', check: '已请求重跑检查，等待新结果', ...(url ? { url } : {}) })
+      return
+    }
     if (info.testStatus === 'fail') {
       if (ticket.pipeline?.observed === `${version}:fail`) return this.stuckOrRunning(ticket, settings, now, url)
       const status = await this.host.checks.status(review, version)

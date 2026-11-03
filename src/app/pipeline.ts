@@ -36,6 +36,13 @@ export interface PipelineStatus extends PipelineTestruns {
   aiError?: string
 }
 
+/** What a rerun request triggered: the checks Swarm accepted, and those it left alone. */
+export interface PipelineRerun {
+  review: string
+  triggered: PipelineTestrun[]
+  skipped: PipelineTestrun[]
+}
+
 /** One review as Swarm reports it, before any testrun detail is read. */
 export interface PipelineReview {
   id: string
@@ -89,21 +96,28 @@ export function reviewIdOf (input: string): string {
   return id
 }
 
-/** Normalize a testruns payload; an unknown shape is an error, never a silent pass. */
-export function summarizeTestruns (payload: unknown): PipelineTestruns {
+/** Normalize a testruns payload into its runs; an unknown shape is an error, never a silent pass. */
+export function testrunItems (payload: unknown): PipelineTestrun[] {
   const runs = (payload as { data?: { testruns?: unknown } } | null)?.data?.testruns
   if (!Array.isArray(runs)) throw new Error('unexpected Swarm payload: data.testruns is not an array')
-  const failures: PipelineTestrun[] = []
-  const pending: PipelineTestrun[] = []
-  let pass = 0
-  for (const value of runs) {
+  return runs.map(value => {
     const run = (value ?? {}) as Record<string, unknown>
-    const item: PipelineTestrun = {
+    return {
       id: typeof run.id === 'string' || typeof run.id === 'number' ? run.id : null,
       title: String(run.title ?? '(untitled)'),
       status: String(run.status ?? '(unknown)'),
       url: run.url ? String(run.url) : null
     }
+  })
+}
+
+/** Normalize a testruns payload; an unknown shape is an error, never a silent pass. */
+export function summarizeTestruns (payload: unknown): PipelineTestruns {
+  const runs = testrunItems(payload)
+  const failures: PipelineTestrun[] = []
+  const pending: PipelineTestrun[] = []
+  let pass = 0
+  for (const item of runs) {
     if (item.status === 'pass') pass++
     else if (item.status === 'fail') failures.push(item)
     else pending.push(item)
@@ -252,6 +266,19 @@ export class PipelineChecks {
     return response.json()
   }
 
+  /** A JSON POST that changes Swarm, such as asking a testrun to run again. */
+  private async post (url: string, auth: string, what: string): Promise<unknown> {
+    const response = await this.fetchImpl(url, {
+      method: 'POST',
+      headers: { authorization: `Basic ${Buffer.from(auth).toString('base64')}`, 'content-type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(TIMEOUT)
+    })
+    if (response.status === 401 || response.status === 403) throw new Error(`${what} rejected the credentials (HTTP ${response.status})`)
+    if (!response.ok) throw new Error(`${what} returned HTTP ${response.status} for ${url}`)
+    return response.json().catch(() => null)
+  }
+
   private swarm (review: string): { id: string; api: string; auth: string; url: string } {
     const base = this.p4.swarmUrl.trim()
     if (!base) throw new Error('Swarm URL is not configured; set executor.p4.swarmUrl first')
@@ -331,6 +358,30 @@ export class PipelineChecks {
       aiError = error instanceof Error ? error.message : String(error)
     }
     return { ...testruns, review: id, url, ai, ...(aiError ? { aiError } : {}) }
+  }
+
+  /**
+   * Ask Swarm to rerun checks of the current version, without a new version or a reshelve. With no `tests`, the failing
+   * checks are rerun; a title or testrun id selects specific ones. Swarm answers with the testrun now in `running`.
+   */
+  async rerun (input: string, tests: readonly string[] = []): Promise<PipelineRerun> {
+    const { id, api, auth } = this.swarm(input)
+    const runs = testrunItems(await this.json(`${api}/testruns`, auth, 'Swarm'))
+    const wanted = tests.map(test => test.trim()).filter(Boolean)
+    const chosen = wanted.length
+      ? runs.filter(run => wanted.some(test => String(run.id) === test || run.title === test || run.title.includes(test)))
+      : runs.filter(run => run.status === 'fail')
+    if (!chosen.length) {
+      throw new Error(wanted.length
+        ? `Swarm has no testrun matching ${wanted.join(', ')} on review ${id}`
+        : `Swarm reports no failing check on review ${id}`)
+    }
+    for (const run of chosen) {
+      if (run.id === null) throw new Error(`Swarm testrun "${run.title}" has no id to rerun`)
+      const answer = await this.post(`${api}/testruns/${run.id}/run`, auth, `Swarm rerun of ${run.title}`) as { error?: unknown } | null
+      if (answer?.error) throw new Error(`Swarm refused to rerun ${run.title}: ${JSON.stringify(answer.error)}`)
+    }
+    return { review: id, triggered: chosen, skipped: runs.filter(run => !chosen.includes(run)) }
   }
 
   /** Jenkins consoleText for a failed testrun; the token is used for Basic auth and redacted from the result. */

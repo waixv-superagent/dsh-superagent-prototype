@@ -216,6 +216,11 @@ export class Engine {
     return this.repo.atomic(() => this.tickets.observePipeline(ticketId, observation))
   }
   /**
+   * A worker asked Swarm to rerun the current version's checks; the next failure of the same version wakes it once more.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  rerunPipeline(ticketId: string): Ticket { return this.repo.atomic(() => this.tickets.rerunPipeline(ticketId)) }
+  /**
    * A person asks a blocked pipeline to be followed again after clearing the blocker; the host's watcher resumes polling it.
    * @throws UserError when the ticket is unknown or has ended.
    */
@@ -368,6 +373,6 @@ export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
   | 'assignmentInterrupted' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply' | 'submitPlan' | 'advancePhase'
-  | 'recordPipeline'>
+  | 'recordPipeline' | 'rerunPipeline'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>

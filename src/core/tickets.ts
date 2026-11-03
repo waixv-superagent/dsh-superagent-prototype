@@ -244,9 +244,9 @@ export class Tickets extends EnginePart {
     ticket.updatedAt = at
     if (update.state === 'merged') {
       // The change is already in the mainline; an outstanding local check is no longer a gate, and calling it a person's
-      // verification would be a lie. Mark how it actually completed so the board can say so.
+      // verification would be a lie. Mark how it actually completed so the board can say so. The GitHub Source already posts
+      // the concise "PR 已合并" message for a pull request; nobody needs an automatic "已提交入库" notice on top of it.
       if (ticket.verification?.state === 'pending') ticket.verification = { at, state: 'passed', by: 'pipeline' }
-      this.replies.pipelineNotice(ticket, 'merged', `已提交入库，本单完成。${update.url ? `（${update.url}）` : ''}`)
       this.repo.tickets.save(ticket)
       this.end(ticketId, 'executor', 'completed', at, '流水线已入库')
     } else {
@@ -292,6 +292,9 @@ export class Tickets extends EnginePart {
     const url = observation.url ?? previous?.url ?? this.pipelineUrl(ticket)
     const signature = 'signature' in observation ? observation.signature : undefined
     const base = { ...previous, seenAt: at, ...(url ? { url } : {}), ...(signature ? { observed: signature } : {}) }
+    // A green review or an approval means the rerun question is settled; a failure keeps `rerunAt` so its grace window works.
+    if (observation.kind === 'review' || observation.kind === 'approved') delete base.rerunAt
+    const reviewLink = url ? `[Swarm](${url})` : 'Swarm'
     if (observation.kind === 'running') {
       // A person's blocked pipeline stays theirs until they resume it; polling must not overwrite their decision.
       if (previous?.state === 'blocked' && previous.manual) return this.savePipelineSeen(ticket, previous, at)
@@ -302,11 +305,11 @@ export class Tickets extends EnginePart {
       // Green checks still wait for a person's review: ask once, and keep the card in the waiting style.
       ticket.pipeline = { ...base, state: 'blocked', manual: true, at, check: observation.check }
       this.replies.pipelineNotice(ticket, `review:${signature ?? 'ready'}`,
-        `Swarm 流水线已通过（${url ?? '见工单'}），待人工审核；审核通过并提交后，工单会自动完成。`)
+        `${reviewLink} 已通过，待人工审核。`)
     } else if (observation.kind === 'approved') {
       ticket.pipeline = { ...base, state: 'running', at, check: observation.check }
       this.replies.pipelineNotice(ticket, `approved:${signature ?? 'approved'}`,
-        `Swarm 已审核通过，等待提交流水线完成（${url ?? '见工单'}）；提交成功后工单会自动完成。`)
+        `${reviewLink} 已审核通过，等待提交。`)
     } else if (observation.kind === 'failure') {
       // A person's blocker stays theirs, but a green review is not a decision yet: an AI verdict that posts after the
       // testruns passed still wakes the worker.
@@ -315,7 +318,10 @@ export class Tickets extends EnginePart {
         ticket.pipeline = { ...previous, seenAt: at, ...(url ? { url } : {}) }
       } else {
         const fixes = (previous?.fixes ?? 0) + 1
-        ticket.pipeline = { ...base, state: 'running', at, check: observation.check, fixes, fixAt: at }
+        // The worker is woken for this failure now; a rerun request it made before is no longer pending.
+        const failureBase = { ...base }
+        delete failureBase.rerunAt
+        ticket.pipeline = { ...failureBase, state: 'running', at, check: observation.check, fixes, fixAt: at }
         this.repo.tickets.save(ticket)
         this.nudgePipeline(ticket, observation.detail, observation.signature)
         return this.require(ticketId)
@@ -324,8 +330,25 @@ export class Tickets extends EnginePart {
       // Blocked for a person: a repeated observation keeps the message out of the outbox twice.
       ticket.pipeline = { ...base, state: 'blocked', manual: true, at, check: observation.check, reason: observation.reason }
       this.replies.pipelineNotice(ticket, `blocked:${observation.signature ?? 'blocked'}`,
-        `流水线需要人工处理：${observation.reason}${url ? `（${url}）` : ''}`)
+        `流水线需要人工处理：${observation.reason}${url ? `（${reviewLink}）` : ''}`)
     }
+    ticket.updatedAt = at
+    this.repo.tickets.save(ticket)
+    return this.require(ticketId)
+  }
+  /**
+   * A worker asked Swarm to rerun the current version's checks. Clearing `observed` lets a still-failing rerun wake the worker
+   * once; `rerunAt` keeps the old failure from waking it again before Swarm has switched the checks to running.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  rerunPipeline(ticketId: string): Ticket {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    if (!ticket.pipeline || ticket.pipeline.state === 'merged') throw new Error('this ticket has no live pipeline to rerun')
+    const at = this.now()
+    const rest = { ...ticket.pipeline }
+    delete rest.observed
+    ticket.pipeline = { ...rest, at, rerunAt: at, check: '已请求重跑检查，等待新结果' }
     ticket.updatedAt = at
     this.repo.tickets.save(ticket)
     return this.require(ticketId)
