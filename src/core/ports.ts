@@ -1,5 +1,5 @@
 /** Ports the core depends on. Sources, policies, assessors, executors, and channels are project-specific. */
-import type { Assignment, Backend, ChannelRef, Decision, DecisionKind, Escalation, Mandate, MandateBasis, QuestionSection, Strength, Thread, Ticket, TicketEndBy, TicketOutcome, Trigger }
+import type { Assignment, ChannelRef, Decision, DecisionKind, Escalation, Mandate, MandateBasis, QuestionSection, Strength, Thread, Ticket, TicketEndBy, TicketOutcome, Trigger }
   from './model.ts'
 import type { Reason } from './reasons.ts'
 
@@ -43,12 +43,12 @@ export type AssessmentOutcome =
   /**
    * An accept: `rules` the assessment matched, `name` the ticket's requested short name, `note` a routing note for its
    * worker, `paths` the files the change is expected to touch, which the task center leases so a peer may work beside it,
-   * and `backend` the delivery environment its work belongs in (`git` for this deployment's source repository, `p4` for its
-   * depot), which the executor uses instead of the deployment's configured backend; unknown means that default.
+   * and `target` the configured repository or workspace its work belongs to, which the executor resolves to a delivery
+   * environment; absent means the Source or the deployment's configured backend decides.
    * `category` marks the ticket a defect or a feature, set only by an escalation.
    */
   | { kind: 'accept'; title: string; scope: string; reason: string | Reason; acknowledgement?: string; rules?: string[]; audit?: Record<string, unknown>;
-    name?: string; note?: string; paths?: string[]; category?: 'bug' | 'feature'; backend?: Backend }
+    name?: string; note?: string; paths?: string[]; category?: 'bug' | 'feature'; target?: string }
   /**
    * 一条对话：`reply` 是必须发给人的答复，`escalation` 是这轮闲聊里发现、值得单独做的事，`name` 是它要建的工的短名。
    * 回复总要发出，线程保留、不建工单；带 `escalation` 时再走 accept 的建单路径建一张单。

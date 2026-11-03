@@ -12,6 +12,7 @@ import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
 import type { Settings } from '../policy.ts'
 import type { Store } from '../app/store.ts'
 import { Later, type Effects } from '../app/effects.ts'
+import { resolveDelivery } from '../app/delivery-targets.ts'
 import { claimsWorkspace, conflicts, normalizePath, place, workspaceClient, type Active, type Peer, type Workspace } from './workspace.ts'
 import { executionRoot, p4Prepare, type Variable } from '../app/execution-environment.ts'
 import type { Sessions } from '../app/sessions.ts'
@@ -66,6 +67,8 @@ export interface ExecutorHost {
   readonly engine: Pick<EngineForExecutor, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed' | 'report'
     | 'assignmentInterrupted'>
   readonly store: Pick<Store, 'tickets' | 'triggers' | 'set' | 'settings' | 'atomic' | 'afterCommit'>
+  /** The GitHub repository this deployment watches, one of the configured delivery targets; empty without a GitHub Source. */
+  readonly repository: string
   /** Durable effect queue through which launches and input deliveries run. */
   readonly effects: Pick<Effects, 'enqueue' | 'handle'>
   /** The `worker` health entry, which reports whether background worker event handling failed. */
@@ -98,7 +101,7 @@ export function mandateInstructions(mandate: Pick<Mandate, 'strength'>): string 
 }
 /** Builds a newly accepted ticket's Execution metadata: its worktree name, workspace directory, delivery environment, and assignment text. */
 export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>, settings: Settings,
-  stateDir: string, backend: Backend = outcome.backend ?? settings.executor.backend): Execution {
+  stateDir: string, backend: Backend = settings.executor.backend, target?: string): Execution {
   // escalation 建的单可能没有英文短名：按类别取一个，目录名仍由票号后缀保证唯一。
   const name = ticketWorktreeName(outcome.name ?? (ticket.category === 'bug' ? 'fix' : 'feature'), ticket.id)
   const source = ticket.origin.triggerId
@@ -115,7 +118,8 @@ export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutco
   // launch message (see 011 Task center).
   const sharing = sharingInstructions(settings, backend)
   const lease = (outcome.paths ?? []).map(normalizePath).filter(Boolean)
-  return { name, directory: join(executionRoot(settings, stateDir), name), assignment: assignment + sharing, lease, backend }
+  return { name, directory: join(executionRoot(settings, stateDir), name), assignment: assignment + sharing, lease, backend,
+    ...(target ? { target } : {}) }
 }
 /**
  * The delivery instructions a worker gets for its ticket's environment, composed at each launch so a ticket moved to
@@ -303,20 +307,28 @@ export class DshExecutor implements Executor {
   /** Populates a newly accepted ticket's `execution` attributes (worktree name, workspace directory, and assignment text). */
   prepare(ticket: Ticket, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>): Ticket {
     const settings = this.host.store.settings()
-    // The accept may name the delivery environment its work belongs in; otherwise the deployment's configured backend applies.
-    const backend = outcome.backend ?? settings.executor.backend
-    const prepared = { ...ticket, execution: ticketExecution(ticket, outcome, settings, this.host.machine.stateDir, backend) }
+    // The accept may name the delivery target its work belongs to; otherwise the Source, then the deployment's configured
+    // backend, decides. A ticket is never left to a person to route: the target is one of the installation's configured ones.
+    const delivery = resolveDelivery({ settings, repository: this.host.repository, source: sourceTrigger(this.host, ticket)?.source,
+      target: outcome.target })
+    const prepared = { ...ticket, execution: ticketExecution(ticket, outcome, settings, this.host.machine.stateDir, delivery.backend, delivery.target) }
     // The p4 pipeline gates code changes behind the P1 plan: its tickets start in the plan phase (docs/012). The GitHub path
     // keeps the phases it had, so an upgrade does not change how its workers report.
-    return backend === 'p4' ? { ...prepared, phase: 'plan' as const } : prepared
+    return delivery.backend === 'p4' ? { ...prepared, phase: 'plan' as const } : prepared
   }
   /**
    * Rebuilds the Execution of a ticket a person moved to another delivery environment: its assignment keeps what the accept
-   * wrote and drops the instructions of the environment it left, so its next launch composes the new one's.
+   * wrote and drops the instructions of the environment it left, so its next launch composes the new one's, and its target
+   * becomes that environment's configured one.
    */
   rePrepare(ticket: Ticket, backend: Backend): Execution {
-    return { ...(ticket.execution ?? { name: '', directory: '', assignment: '' }),
-      assignment: baseAssignment(ticket.execution?.assignment ?? ''), backend }
+    const settings = this.host.store.settings()
+    const target = (backend === 'git' ? this.host.repository : settings.executor.p4.depot).trim()
+    const execution = ticket.execution ?? { name: '', directory: '', assignment: '' }
+    const next: Execution = { ...execution, assignment: baseAssignment(execution.assignment), backend }
+    if (target) next.target = target
+    else delete next.target
+    return next
   }
   /**
    * Runs the configured `executor.prepare` command for a new workspace in its parent directory with the ticket's execution

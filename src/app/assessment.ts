@@ -26,6 +26,7 @@ export const EscalationSchema = z.object({
   scope: z.string().trim().min(1).max(1500).describe('What the ticket may change.'),
   category: z.enum(['bug', 'feature']).describe('bug: existing behavior is wrong; feature: something new is wanted.'),
   reason: z.string().trim().min(1).max(500).describe('Why it deserves a ticket.'),
+  target: z.string().trim().min(1).max(300).nullish().describe('The configured repository or workspace the work belongs to; the host resolves its delivery channel.'),
 }).strict()
 /** 一条对话的答复文字：对人说的那句，字数上限与 IM 消息一致。 */
 const ChatReplySchema = z.string().trim().min(1)

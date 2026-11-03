@@ -126,10 +126,10 @@ describe('p4 delivery instructions', () => {
     expect(assignment).not.toContain('p4 revert')
     expect(deliveryInstructions('git')).toBe('')
   })
-  it('record the backend an accept names, so a git ticket under the p4 default gets no p4 instructions', () => {
-    const gitAccept = { kind: 'accept', title: 'Fix', scope: 'the typo', reason: 'r', name: 'fix-thing', backend: 'git' } as never
-    const execution = ticketExecution(ticket, gitAccept, settingsWith({ backend: 'p4' }), '/state')
+  it('record the resolved target and backend, so a git ticket under the p4 default gets no p4 instructions', () => {
+    const execution = ticketExecution(ticket, accept, settingsWith({ backend: 'p4' }), '/state', 'git', 'acme/widgets')
     expect(execution.backend).toBe('git')
+    expect(execution.target).toBe('acme/widgets')
     expect(execution.assignment + deliveryInstructions(execution.backend ?? 'git')).not.toContain('p4 shelve')
   })
   it('strip the old environment instructions when a ticket is moved, leaving what the accept wrote', () => {

@@ -154,10 +154,12 @@ it('routes a conversation as chat with its reply, and the ticket an escalation c
   const noticed = feishu('7', '@bot 导出崩了，顺便修下')
   h.runtime.receive(noticed); await h.runtime.idle()
   const escalated = await route({ kind: 'chat', trigger_id: noticed.id, reply: '收到，我来修这条报错。', reason: 'asked',
-    escalation: { title: '修复导出崩溃', scope: '导出时报错', category: 'bug', reason: '对话里确认了缺陷' } })
+    escalation: { title: '修复导出崩溃', scope: '导出时报错', category: 'bug', reason: '对话里确认了缺陷', target: 'acme/widgets' } })
   const ticketId = (escalated.ticket as { ticket_id: string }).ticket_id
   expect(escalated).toMatchObject({ trigger_id: noticed.id, kind: 'chat', decision: 'chat', reason: 'asked' })
-  expect(h.runtime.store.tickets.get(ticketId)).toMatchObject({ title: '修复导出崩溃', category: 'bug' })
+  // The escalation's target reaches the ticket it creates, resolved to the configured spelling.
+  expect(h.runtime.store.tickets.get(ticketId)).toMatchObject({ title: '修复导出崩溃', category: 'bug',
+    execution: expect.objectContaining({ backend: 'git', target: 'acme/widgets' }) })
   // 一条 chat 没有回复文字时只拒这一条，别处不受影响。
   expect(await route({ kind: 'chat', trigger_id: noticed.id })).toEqual({ trigger_id: noticed.id, kind: 'chat', refused: 'chat needs reply' })
 })
@@ -243,6 +245,18 @@ it('states each routing field\'s limit in its description, which the schema leav
   const limits: Record<string, string[]> = { title: ['200 characters'], worktree_name: ['kebab-case', '32 characters'],
     acknowledgement: [`${IM_WORDS} words`], note: [`${NOTE_WORDS} words`, 'Never add implementation instructions'], reason: ['500 characters'] }
   for (const [field, phrases] of Object.entries(limits)) for (const phrase of phrases) expect(fields[field]!.description, field).toContain(phrase)
+})
+
+it('resolves an accept\'s target to the configured environment, refusing one this installation does not configure', async () => {
+  const trigger = feishu('1', '@bot 修一下回归')
+  h.runtime.receive(trigger); await h.runtime.idle()
+  const unknown = { kind: 'accept', trigger_id: trigger.id, title: 'Fix', worktree_name: 'fix-regression', acknowledgement: '收到。', target: 'acme/other' }
+  const { results } = await h.runTool(h.runtime.masterId, 'orchestrator_route', { decisions: [unknown] }) as { results: Record<string, unknown>[] }
+  // The refusal names what the installation does configure, so the main Session corrects the item without asking a person.
+  expect(results[0]).toMatchObject({ trigger_id: trigger.id, kind: 'accept', refused: expect.stringContaining('acme/widgets (git)') })
+  const accepted = await h.route({ ...unknown, target: 'https://github.com/acme/widgets.git' })
+  const ticket = h.runtime.store.tickets.get((accepted.ticket as { ticket_id: string }).ticket_id)!
+  expect(ticket.execution).toMatchObject({ backend: 'git', target: 'acme/widgets' })
 })
 
 it('stops one follow-up for each ticket it reached, in one call', async () => {

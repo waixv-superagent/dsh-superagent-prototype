@@ -7,6 +7,7 @@ import { UserError, followupOwners, key, reasonText, type Decision, type Decisio
 import { IM_WORDS, NOTE_WORDS, wordCount } from '../../infra/text.ts'
 import { AssessmentSchema, EscalationSchema, EvalReadSchema, WorktreeNameSchema, type MasterAssessor } from '../assessment.ts'
 import { ticketCard } from '../cards.ts'
+import { deliveryTargets, matchDeliveryTarget } from '../delivery-targets.ts'
 import { PromptConfigSchema, savePrompts, type Prompts } from '../prompts.ts'
 import { readResource, type MainResourceHost, type ResourceHost } from '../resources.ts'
 import type { Sessions } from '../sessions.ts'
@@ -21,6 +22,8 @@ export interface MainToolsHost {
   readonly context: Context
   readonly engine: Pick<EngineForMainSession, 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'> & EngineForPeople
   readonly store: Pick<Store, 'tickets' | 'triggers' | 'threads' | 'atomic' | 'replyStatus' | 'settings'>
+  /** The GitHub repository this deployment watches, one of the configured delivery targets; empty without a GitHub Source. */
+  readonly repository: string
   readonly prompts: Pick<Prompts, 'preview' | 'save'>
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'modelRetry'>
   readonly settings: Pick<Settings, 'view' | 'block' | 'save' | 'pause' | 'sync'>
@@ -57,10 +60,9 @@ const RouteItemSchema = z.object({
   paths: z.array(z.string()).nullish().describe('accept: the repository paths the change is expected to touch, at most 20, '
     + 'such as a directory ("Source/Game/Tests/Performance/") or a file. The task center leases them so another ticket may '
     + 'work beside this one in the same workspace; leave it out when the change could touch anything, which makes this ticket run alone.'),
-  backend: z.enum(['git', 'p4']).nullish().describe('accept: the delivery environment the work belongs in — `git` when the '
-    + 'change belongs to this deployment\'s own source repository (the GitHub repository its GitHub Source watches), `p4` when it '
-    + 'belongs to files in its Perforce depot. Leave it out when unsure: the deployment\'s configured backend then applies and the '
-    + 'worker checks the target before implementing.'),
+  target: z.string().trim().max(300).nullish().describe('accept: the configured repository or workspace the change belongs to: the GitHub repository '
+    + 'slug or URL its GitHub Source watches, a Perforce depot path, or one of that depot\'s workspace ids or directories. The host resolves the '
+    + 'delivery channel from that list; never name a channel or ask a person to choose one.'),
   reason: z.string().nullish().describe('chat, ignore and stop: why, at most 500 characters; an ignore needs it.'),
 }).strict()
 type RouteItem = z.infer<typeof RouteItemSchema>
@@ -76,7 +78,7 @@ const FIELDS: Record<Field, { check: z.ZodType; reads: readonly Kind[]; needs: r
   escalation: { check: EscalationSchema, reads: ['chat'], needs: [] },
   note: { check: RoutingNoteSchema, reads: ['accept', 'attach'], needs: [] },
   paths: { check: z.array(z.string().trim().min(1).max(300)).max(20), reads: ['accept'], needs: [] },
-  backend: { check: z.enum(['git', 'p4']), reads: ['accept'], needs: [] },
+  target: { check: z.string().trim().min(1).max(300), reads: ['accept'], needs: [] },
   reason: { check: z.string().max(500), reads: ['chat', 'ignore', 'stop'], needs: ['ignore'] },
 }
 /** Why an item cannot run: a field its kind needs is missing, or one it reads breaks its limit. */
@@ -96,6 +98,18 @@ function invalid(item: RouteItem): string | undefined {
 }
 type Routed = { decision?: DecisionKind; reason: string; ticketId?: string | undefined; triggerIds?: readonly string[] }
 /**
+ * Resolves an accept's target spelling to the configured target that records it, refusing one this installation does
+ * not configure; the refusal names what it does configure, so the main Session can correct the item without asking a
+ * person which channel the work belongs in.
+ */
+function resolveTarget(host: MainToolsHost, value: string): { target: string } | { refused: string } {
+  const targets = deliveryTargets(host.store.settings(), host.repository)
+  const matched = matchDeliveryTarget(value, targets)
+  if (matched) return { target: matched.target }
+  const known = targets.map(target => `${target.target} (${target.backend})`).join(', ')
+  return { refused: `target: "${value}" is not a configured delivery target; ${known ? `use ${known}` : 'this installation configures none, so leave target out'}` }
+}
+/**
  * Carry out one routing decision as its Engine command, in a transaction of its own. `decided` holds the Triggers that this
  * call's earlier items decided, with their batches.
  */
@@ -107,10 +121,12 @@ function route(host: MainToolsHost, item: RouteItem, decided: ReadonlyMap<string
   if (earlier && (item.kind === 'ignore' || item.kind === 'chat')) return { refused: `Decided in this call with ${earlier}, whose Decision took its batch` }
   switch (item.kind) {
     case 'accept': {
+      const target = item.target ? resolveTarget(host, item.target) : undefined
+      if (target && 'refused' in target) return target
       const before = host.store.triggers.disposition(item.trigger_id)?.decisionId
       const decision = host.engine.decide(item.trigger_id, { kind: 'accept', title: item.title!, scope: item.title!, reason: { code: 'explicitRouted' },
         acknowledgement: item.acknowledgement!, name: item.worktree_name!, ...note, ...(item.paths?.length ? { paths: item.paths } : {}),
-        ...(item.backend ? { backend: item.backend } : {}) })
+        ...(target ? { target: target.target } : {}) })
       // A Decision that created no ticket is the item's refusal; one that existed before keeps what it was accepted with.
       if (decision.kind !== 'accept' || !decision.ticketId) return { refused: `Ticket was not created: ${reasonText(decision.reason)}` }
       if (decision.id === before) {
@@ -120,8 +136,16 @@ function route(host: MainToolsHost, item: RouteItem, decided: ReadonlyMap<string
     }
     // 对话：回复照发、线程保留；带 escalation 时同一轮里再建一张单，决策仍是 chat。
     case 'chat': {
+      // 只把安装配置的目标写法交给 core：未配置的值仍先被拒绝，null 与缺省同义。
+      let escalation = item.escalation ? { title: item.escalation.title, scope: item.escalation.scope, category: item.escalation.category,
+        reason: item.escalation.reason, ...(item.escalation.target ? { target: item.escalation.target } : {}) } : undefined
+      if (escalation && item.escalation?.target) {
+        const resolved = resolveTarget(host, item.escalation.target)
+        if ('refused' in resolved) return resolved
+        escalation = { ...escalation, target: resolved.target }
+      }
       const decision = host.engine.decide(item.trigger_id, { kind: 'chat', reply: item.reply!, reason: item.reason || { code: 'conversed' },
-        ...(item.worktree_name ? { name: item.worktree_name } : {}), ...(item.escalation ? { escalation: item.escalation } : {}) })
+        ...(item.worktree_name ? { name: item.worktree_name } : {}), ...(escalation ? { escalation } : {}) })
       return { ...fromDecision(decision), triggerIds: decision.triggerIds }
     }
     case 'attach': {

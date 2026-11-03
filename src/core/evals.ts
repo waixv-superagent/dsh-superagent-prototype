@@ -344,7 +344,7 @@ export class Evals extends EnginePart {
     escalation: Escalation, audit: Record<string, unknown>): Decision {
     const work: Extract<AssessmentOutcome, { kind: 'accept' }> = { kind: 'accept', title: escalation.title, scope: escalation.scope,
       category: escalation.category, reason: escalation.reason, ...(outcome.name ? { name: outcome.name } : {}),
-      ...(outcome.rules ? { rules: outcome.rules } : {}) }
+      ...(escalation.target ? { target: escalation.target } : {}), ...(outcome.rules ? { rules: outcome.rules } : {}) }
     return this.startTicket(thread, evaluation, work, { kind: 'chat', reason: reasonOf(outcome.reason), ...audit, escalation })
   }
   /**
