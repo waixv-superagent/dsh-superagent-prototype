@@ -182,6 +182,12 @@ export class Engine {
    */
   retryTicket(ticketId: string): Ticket { return this.repo.atomic(() => this.tickets.retry(ticketId)) }
   /**
+   * The host recovers a ticket whose worker stopped on a passing model or network failure: the stalled Assignment ends and a
+   * new one starts, as a person's retry does, so an outage does not leave the ticket stopped until a person notices.
+   * @throws UserError when the ticket is unknown, has ended, or is not retryable.
+   */
+  recoverTicket(ticketId: string): Ticket { return this.repo.atomic(() => this.tickets.retry(ticketId, 'recovered')) }
+  /**
    * A person moves a ticket's work to another delivery environment: its stalled assignment ends and a new one starts with
    * `backend` recorded, so its worker continues in the channel the ticket belongs in.
    * @throws UserError when the ticket is unknown or has ended.
@@ -376,3 +382,5 @@ export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelive
   | 'recordPipeline' | 'rerunPipeline'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>
+/** What the host's watchdog tells the Engine: it recovers a ticket its worker stopped on a passing failure. */
+export type EngineForWatchdog = Pick<Engine, 'recoverTicket'>

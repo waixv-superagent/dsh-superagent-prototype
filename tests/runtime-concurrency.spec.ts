@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { latestAssignment, waitsForPerson, type Ticket, type Trigger } from '../src/core/index.ts'
 import { Later } from '../src/app/effects.ts'
+import { RECOVERY_DELAYS_MS } from '../src/app/watchdog.ts'
 import { reportRelay } from '../src/app/notices.ts'
 import { WorkerSlots, inputMessage, mandateInstructions, ticketExecution, transient, triggerMessage } from '../src/executor/dsh.ts'
 import { SettingsSchema } from '../src/policy.ts'
@@ -253,6 +254,27 @@ describe('a worker that goes on after a passing failure', () => {
     } finally { vi.useRealTimers() }
     expect(told(one.sessionId)).toEqual([])
   })
+})
+
+it('recovers a ticket whose worker stopped on a passing gateway failure, once the gateway answers again', async () => {
+  const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
+  const ticket = () => h.runtime.store.tickets.get(one.ticket.id)!
+  const busy = Object.assign(new Error('503: {"message":"额度服务暂不可用"}'), { status: 503, code: 'SERVER' })
+  const fail = () => { h.ctx.emit('agent/error', { agent: h.agents.get(one.sessionId), turn: 1, step: 1, error: busy } as never) }
+  // The worker uses up its three passing retries; the fourth failure stops the ticket.
+  fail(); fail(); fail(); fail()
+  await vi.waitFor(() => expect(latestAssignment(ticket())?.report).toMatchObject({ state: 'failed' }))
+  expect(waitsForPerson(ticket())).toBe(true)
+  // One retry delay later the watchdog recovers it: the stalled Assignment ends as recovered and a new one starts.
+  const reported = Date.parse(latestAssignment(ticket())!.report!.at)
+  vi.useFakeTimers({ toFake: ['Date'], now: reported + RECOVERY_DELAYS_MS[0] + 1_000 })
+  try { await h.runtime.watchdog.poll() } finally { vi.useRealTimers() }
+  expect(ticket().assignments.at(-2)?.endedReason).toBe('recovered')
+  expect(latestAssignment(ticket())!.state).not.toBe('ended')
+  // Its worker reads that the host retried it, not a person, and the ticket no longer waits for one.
+  await vi.waitFor(() => expect(h.deliveries.mock.calls.some(([call]) =>
+    call.text.includes('automatically after a passing model or network failure'))).toBe(true))
+  expect(waitsForPerson(ticket())).toBe(false)
 })
 describe('a worker whose work runs in the background', () => {
   /** The worker's last words, as its Session holds them. */

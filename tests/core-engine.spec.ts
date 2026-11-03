@@ -1479,6 +1479,17 @@ describe('ticket commands', () => {
     expect(h.executor.stop).toHaveBeenCalledOnce()
     expect(h.executor.start).toHaveBeenLastCalledWith(expect.objectContaining({ id: ticketId }), retried.assignments[1])
   })
+
+  it('recovers a ticket its worker stopped on a passing failure with a new Assignment that records the host retried it', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    expect(() => h.engine.recoverTicket(ticketId)).toThrow(new UserError('notRetryable'))
+    h.engine.report(ticketId, { state: 'failed', summary: 'LlmError: 503: the gateway is unavailable' })
+    const recovered = h.engine.recoverTicket(ticketId)
+    expect(recovered.assignments).toEqual([expect.objectContaining({ state: 'ended', endedReason: 'recovered' }), expect.objectContaining({ state: 'pending' })])
+    expect(h.executor.stop).toHaveBeenCalledOnce()
+    expect(h.executor.start).toHaveBeenLastCalledWith(expect.objectContaining({ id: ticketId }), recovered.assignments[1])
+  })
 })
 describe('failed deliveries', () => {
   it('forgets a failed delivery once a new Assignment takes over or the ticket ends', () => {

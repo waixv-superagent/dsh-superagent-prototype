@@ -204,7 +204,7 @@ A Channel sends with the Source's own `state` too, so it can settle a record of 
 
 `WorkerSlots` reserves capacity before a launch or a delivery that wakes an idle worker. The limit is per delivery environment (the Ticket's recorded target, or the target its backend falls back to), and a human message can use one slot beyond `maxWorkers` in its own environment; wakes have priority over launches. `activeCount` supplies panel load.
 
-Transient provider and network failures get three retries. Launches use effect backoff; failed turns receive continuation messages after 15, 30 and 60 seconds. `inputMessage` renders each Input from current Ticket state, and `mandateInstructions` adds the matched-rule limits for inferred work.
+Transient provider and network failures get three retries. Launches use effect backoff; failed turns receive continuation messages after 15, 30 and 60 seconds. `transient` decides what counts as passing: DeepSeek Harness's retryable failure codes (`RATE_LIMIT`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE`) first, then an HTTP 408, 429 or 5xx or a connection failure; its terminal codes (`QUOTA`, `ACCOUNT_QUOTA`, `AUTH`, the credential codes, `CONTEXT_WINDOW_EXCEEDED`, `IMAGE_OFFLOAD_REQUIRED`) win over their message. A failure that outlasts those retries is the Watchdog's. `inputMessage` renders each Input from current Ticket state, and `mandateInstructions` adds the matched-rule limits for inferred work.
 
 `install` subscribes to Session events; `dispose` unsubscribes. A turn end normally reports waiting, except after readiness or while human action is required. Errors report failed. At startup, `resume` reports interrupted Assignments through `assignmentInterrupted` and requeues pending launches that do not wait for a person, oldest Ticket first.
 
@@ -241,6 +241,10 @@ Validation inherits an omitted base from the saved override, drops removed parts
 Each model request binds the Session to the current prompt revision. The revisions it used are stored durably: `promptVersion` identifies the active one and `mayRead` restricts which versions a worker can inspect. Registrations are tracked in one map per agent.
 
 `status` and `promptVersion` serve prompt pages. Saves go through `Prompts.save` and notify the main Session. `modelRetry` exposes model-budget retry state.
+
+### Watchdog
+
+`Watchdog` (`src/app/watchdog.ts`) recovers from a passing outage of the model gateway or the network. Its `poll` scans the open Tickets: a latest Report `failed` that `transient` counts as passing, a Ticket that still waits for a person and neither a question nor a failed delivery intervenes, is retried through `Engine.recoverTicket` after 1, 2, 5, 10, 15 and 30 minutes, up to twelve tries, the last delay repeated. The chain keeps its count across the host's own retries and starts again when a person retried; past its last try it waits for a person. `start` also watches the main Session: a turn that ended on such a failure is prompted to go on after the same backoff — a turn that ends as turns do clears the chain — and a main Session that disappeared is created again. The `watchdog` health entry names the pending recoveries, and `stop` waits for a scan in flight so none reaches a closed Store.
 
 ### Glue
 
@@ -347,6 +351,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/cards.ts` | Compact cards of Triggers, Tickets, Threads and Decisions for models, the closed set of ticket card states `TICKET_STATES`, and `textPage` |
 | `src/app/pipeline.ts` | Read-only checks for a delivered change: the review's state and versions, Swarm testruns and review comments, Jenkins console errors, and the changelist state after a submit, summarized for the Ticket's pipeline gate |
 | `src/app/pipeline-watch.ts` | The host's automatic pipeline follow-up: polls every open delivered p4 Ticket, turns a new failure into a worker Input, a green review or an approval into one queued message, and the submit into the Ticket's completion |
+| `src/app/watchdog.ts` | The host's recovery from a passing model or network outage: retries a stopped Ticket on a growing backoff, keeps the main Session alive and retries its failed turn, and mirrors what waits into the `watchdog` health entry |
 | `src/app/resources.ts` | `RESOURCES` and `readResource`: what `orchestrator_read` reads, for each role |
 | `src/app/tools/tool.ts` | The `Tool` type, `readTool`, the `orchestrator_read` of both roles, and `AcknowledgementSchema` |
 | `src/app/tools/main.ts` | The main Session's tools |
@@ -474,6 +479,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/editor.spec.ts` | The editor occupancy derivation: a person's interactive editor, an agent's commandlet, a build, missing start times, a failed probe, and the cached row the panel reads |
 | `tests/pipeline-check.spec.ts` | The read-only pipeline checks: review ids and Jenkins targets, testrun and comment summaries, the review's state and version, the changelist state after a submit, console errors |
 | `tests/pipeline-watch.spec.ts` | The host's automatic follow-up: a new failure wakes the worker once, a green review asks once, the AI verdict gate, the attempt and stuck limits, vanished-review detection, and one broken ticket not stopping the rest |
+| `tests/watchdog.spec.ts` | The host's outage recovery: a passing failure's backoff and last try, the failures it never retries, the chain's count across the host's own retries and a person's, the main Session's retry, recreation and clearing, and the `watchdog` health entry |
 | `tests/live-activity.spec.tsx` | The current-tool buffer and its bounded recent trail on fake host events, MCP name parsing, and the Ticket page's "now" card: current tool, latest progress, next step, and no reasoning or speed |
 | `tests/panel-settings.spec.tsx`, `panel-prompts.spec.tsx`, `panel-deployment.spec.tsx`, `panel-panel.spec.tsx` | The settings groups, drafts and history, the prompts, the Deployment page, and the panel's search, glossary and route memory |
 | `tests/draft.spec.ts`, `tests/prompt-config.spec.ts`, `tests/markdown.spec.ts`, `tests/marks.spec.ts` | Draft states, merges and the save bar's line; the prompt configuration by section and the line diff; the Markdown subset and its links; the mark of every state the views classify |
