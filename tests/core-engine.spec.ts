@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { Engine, MemoryRepositories, UserError, followupOwners, key, runningAssignment, ticketOutcome, ticketStage,
-  waitsForPerson } from '../src/core/index.ts'
+import { Engine, MemoryRepositories, UserError, followupOwners, key, missingVerifyLabels, runningAssignment, ticketOutcome, ticketStage,
+  verifyLines, waitsForPerson } from '../src/core/index.ts'
 import type { Assessor, Assignment, Candidate, EngineOptions, Executor, OutboundMessage, Outcome, Policy, Ticket, Trigger } from '../src/core/index.ts'
 
 const member = { source: 'chat', id: 'alice' }
@@ -125,7 +125,7 @@ describe('eval', () => {
     expect(ticket).not.toHaveProperty('ended')
     expect(ticket.assignments).toEqual([expect.objectContaining({ state: 'running', startedAt: expect.any(String) })])
     expect(h.repo.threads.get('chat:t1')?.subscriptions).toEqual([ticket.id])
-    expect(h.outbox).toEqual([{ id: key('ack', '1'), channel: trigger('1').channel, text: 'ok', kind: 'acknowledgement', ticketId: ticket.id }])
+    expect(h.outbox).toEqual([{ id: key('ack', '1'), channel: trigger('1').channel, text: `ok\n工单 ${ticket.id.slice(0, 8)}`, kind: 'acknowledgement', ticketId: ticket.id }])
     expect(h.executor.start).toHaveBeenCalledOnce()
   })
   it('chat answers the person, keeps the thread and creates no ticket', () => {
@@ -1317,7 +1317,8 @@ describe('direct decisions', () => {
     const second = h.decide(h.requests.at(-1)!, { kind: 'accept', title: 'Other', scope: 'small', reason: 'routed', acknowledgement: 'On it' })
     expect(second.ticketId).not.toBe(first.ticketId)
     expect(h.repo.tickets.get(second.ticketId!)!.origin).toEqual({ triggerId: '2', triggerIds: ['2'] })
-    expect(h.outbox.find(message => message.id === key('ack', '2'))).toMatchObject({ text: 'On it', kind: 'acknowledgement' })
+    expect(h.outbox.find(message => message.id === key('ack', '2'))).toMatchObject({ text: expect.stringContaining('On it'), kind: 'acknowledgement' })
+    expect(h.outbox.find(message => message.id === key('ack', '2'))!.text).toContain(`工单 ${second.ticketId!.slice(0, 8)}`)
     // The replayed request still answers with the ticket it started.
     expect(h.engine.decide('1', { kind: 'accept', title: 'Again', scope: 'small', reason: 'again' })).toEqual(first)
   })
@@ -1375,7 +1376,7 @@ describe('replies', () => {
     const ticketId = accepted(h).ticketId!
     // The acknowledgement of the accept stays; a later request for one reuses it.
     expect(h.engine.reply({ purpose: 'acknowledgement', ticketId, triggerId: '1', text: 'On it' })).toEqual({ id: key('ack', '1'), status: 'pending', reused: true })
-    expect(h.outbox.map(message => message.text)).toEqual(['ok'])
+    expect(h.outbox.map(message => message.text)).toEqual([`ok\n工单 ${ticketId.slice(0, 8)}`])
     h.engine.receive(trigger('2', { actor: guest }))
     expect(h.engine.reply({ purpose: 'acknowledgement', ticketId, triggerId: '2', text: 'Looking' })).toEqual({ id: key('ack', '2'), status: 'pending', reused: false })
     h.engine.receive(trigger('3', { human: false }))
@@ -2014,6 +2015,19 @@ const PLAN = `现象：翻页时列表头像闪一下
 影响面：只影响该列表，CL 冲突风险低
 验证方案：基线跑 UI 自动化 3 例 → 改后同样 3 例 → 比对闪烁帧数
 预算：编译 1 次，总时长约 20 分钟`
+describe('verification package', () => {
+  const PACKAGE = `版本与前置：PR #42，编辑器 5.8.3，地图 MovementTestLevel
+复现步骤：打开看板，切到列表页，滚动到底
+预期与证据：头像不再闪烁，截图见 PR
+待你判断：卡片是否可读`
+  it('reads the four blocks and names the ones a ready report leaves out', () => {
+    expect(verifyLines(PACKAGE).map(line => line.label)).toEqual(['版本与前置', '复现步骤', '预期与证据', '待你判断'])
+    expect(missingVerifyLabels(PACKAGE)).toEqual([])
+    expect(missingVerifyLabels('版本与前置：PR #42\n复现步骤：打开看板')).toEqual(['预期与证据', '待你判断'])
+    expect(missingVerifyLabels('跑过 typecheck 和 vitest')).toEqual(['版本与前置', '复现步骤', '预期与证据', '待你判断'])
+  })
+})
+
 describe('P1 plan gate', () => {
   it('refuses an incomplete plan, and records a complete one as the waiting gate with its deadline', () => {
     const h = harness()
@@ -2063,6 +2077,70 @@ describe('P1 plan gate', () => {
       { label: '现状', text: '两个方案都能过测试' },
       { label: '代价', text: '复用控件少一个缓存层', fold: true },
     ] })
+  })
+  it('uses a light template for an analysis and refuses a line it leaves out', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    const analysis = `问题：翻页为什么会闪
+结论：复用控件时先清了纹理
+依据：AvatarList.cpp:42 的日志
+建议：复用前重设纹理并补一例测试`
+    expect(() => h.engine.submitPlan(ticketId, '问题：x\n结论：y', undefined, undefined, undefined, 'analysis'))
+      .toThrowError(expect.objectContaining({ code: 'planIncomplete', message: expect.stringContaining('analysis') }))
+    const ticket = h.engine.submitPlan(ticketId, analysis, undefined, undefined, undefined, 'analysis')
+    expect(ticket.plan).toMatchObject({ template: 'analysis', text: analysis })
+    // The fix labels do not satisfy the analysis template, so a worker cannot submit a fix plan under the light one.
+    expect(() => h.engine.submitPlan(ticketId, PLAN, undefined, undefined, undefined, 'analysis'))
+      .toThrowError(expect.objectContaining({ code: 'planIncomplete' }))
+  })
+  it('keeps the fix template as the default, so a plan stored before templates stays a fix', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    const ticket = h.engine.submitPlan(ticketId, PLAN)
+    expect(ticket.plan!.template).toBeUndefined()
+    expect(ticket.plan).toMatchObject({ text: PLAN, waiting: true })
+  })
+  it('requires a description for each design choice, so a label alone cannot hide the consequence', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    const design = `问题：A 复用控件还是 B 新控件
+选项：A 复用控件 / B 新控件
+证据：两个都能过测试
+推荐：A，少一个缓存层`
+    expect(() => h.engine.submitPlan(ticketId, design, '选哪个？', [{ label: 'A 复用', decision: 'approve' }], undefined, 'design'))
+      .toThrowError(expect.objectContaining({ code: 'planTemplate' }))
+    const ticket = h.engine.submitPlan(ticketId, design, '选哪个？', [
+      { label: 'A 复用控件', decision: 'approve', description: '改动小，少一个缓存层' },
+      { label: 'B 新控件', decision: 'revise', description: '多一天，但彻底' },
+    ], undefined, 'design')
+    expect(ticket.plan).toMatchObject({ template: 'design', options: [
+      { label: 'A 复用控件', decision: 'approve', description: '改动小，少一个缓存层' },
+      { label: 'B 新控件', decision: 'revise', description: '多一天，但彻底' },
+    ] })
+    // The design labels are its own: a fix plan cannot be submitted as one.
+    expect(() => h.engine.submitPlan(ticketId, PLAN, undefined, undefined, undefined, 'design'))
+      .toThrowError(expect.objectContaining({ code: 'planIncomplete' }))
+  })
+  it('opens one ticket per part under a single Decision, with one receipt naming it', () => {
+    const h = harness({}, { prepareTicket: (ticket, outcome) => ({ ...ticket, execution: { name: outcome.name ?? '', directory: '', assignment: '' } }) })
+    h.engine.receive(trigger('1', { threads: [{ source: 'chat', id: 't1' }] })); h.pump()
+    const decision = h.decide(h.requests.at(-1)!, { kind: 'accept', title: 'Fix list', scope: 'list fix', reason: 'requested',
+      acknowledgement: '修列表\n接着补测试', name: 'list-fix', parts: [
+        { title: 'Add test', name: 'list-test' },
+        { title: 'Docs', name: 'list-docs' },
+      ] })
+    h.settle()
+    expect(decision.ticketIds).toHaveLength(3)
+    const tickets = decision.ticketIds!.map(id => h.repo.tickets.get(id)!)
+    expect(tickets.map(ticket => ticket.title)).toEqual(['Fix list', 'Add test', 'Docs'])
+    expect(tickets.map(ticket => ticket.execution?.name)).toEqual(['list-fix', 'list-test', 'list-docs'])
+    expect(tickets.map(ticket => ticket.decisionId)).toEqual([decision.id, decision.id, decision.id])
+    // One receipt: keyed by the single trigger, whose text now names the ticket the host created.
+    const acks = h.outbox.filter(message => message.kind === 'acknowledgement')
+    expect(acks).toHaveLength(1)
+    expect(acks[0]!.text).toContain('工单')
+    // Every part follows the source thread, so a later message reaches each ticket's worker.
+    expect(h.repo.threads.get('chat:t1')!.subscriptions).toEqual(expect.arrayContaining(decision.ticketIds!))
   })
   it('approves a plan on a person\'s 1 without handing the digit to the worker, and moves the ticket to implement', () => {
     const h = harness()
@@ -2242,5 +2320,12 @@ describe('redispatch', () => {
     const ticketId = accepted(h).ticketId!
     h.engine.redispatchTicket(ticketId, 'git')
     expect(h.repo.tickets.get(ticketId)!.execution).toMatchObject({ assignment: 'base', backend: 'git' })
+  })
+  it('records the configured target the worker named, not only the backend', () => {
+    const h = harness({}, { reprepareTicket: (ticket, backend, target) => ({
+      ...(ticket.execution ?? { name: '', directory: '', assignment: '' }), backend, ...(target ? { target } : {}) }) })
+    const ticketId = accepted(h).ticketId!
+    h.engine.redispatchTicket(ticketId, 'git', 'acme/widgets')
+    expect(h.repo.tickets.get(ticketId)!.execution).toMatchObject({ backend: 'git', target: 'acme/widgets' })
   })
 })

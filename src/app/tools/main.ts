@@ -1,4 +1,4 @@
-﻿/** Main Session tools for routing triggers, assessing candidates, sending replies, and updating settings and prompts. */
+/** Main Session tools for routing triggers, assessing candidates, sending replies, and updating settings and prompts. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { z } from 'zod'
@@ -36,13 +36,15 @@ export interface MainToolsHost {
   quietly<T>(run: () => T): T
 }
 /** Schedules an Engine pass to execute the recorded routing decision and formats the tool response. */
-function routed(host: MainToolsHost, result: { decision?: DecisionKind; reason: string; ticketId?: string | undefined }) {
+function routed(host: MainToolsHost, result: { decision?: DecisionKind; reason: string; ticketId?: string | undefined; ticketIds?: readonly string[] }) {
   host.requestPass()
-  const ticket = result.ticketId ? host.store.tickets.get(result.ticketId) : undefined
+  const ids = result.ticketIds?.length ? result.ticketIds : result.ticketId ? [result.ticketId] : []
+  const tickets = ids.flatMap(id => { const ticket = host.store.tickets.get(id); return ticket ? [ticketCard(ticket)] : [] })
   return { ...(result.decision ? { decision: result.decision } : {}), reason: result.reason,
-    ...(ticket ? { ticket: ticketCard(ticket) } : {}) }
+    ...(tickets[0] ? { ticket: tickets[0] } : {}), ...(tickets.length > 1 ? { tickets } : {}) }
 }
-const fromDecision = (decision: Decision) => ({ decision: decision.kind, reason: reasonText(decision.reason), ticketId: decision.ticketId })
+const fromDecision = (decision: Decision) => ({ decision: decision.kind, reason: reasonText(decision.reason), ticketId: decision.ticketId,
+  ...(decision.ticketIds?.length ? { ticketIds: decision.ticketIds } : {}) })
 /**
  * One routing decision of `orchestrator_route`. The schema holds only its shape: each kind's fields are checked as its item
  * runs (`FIELDS`), so an item that lacks one, or whose value breaks a limit, is refused alone.
@@ -53,7 +55,7 @@ const RouteItemSchema = z.object({
   ticket_id: z.string().nullish().describe('attach and stop: the ticket.'),
   title: z.string().nullish().describe('accept: a short label of at most 200 characters describing the original request; no added requirements or implementation advice.'),
   worktree_name: z.string().nullish().describe(`accept, and chat with an escalation: ${WorktreeNameSchema.description ?? ''}`),
-  acknowledgement: z.string().nullish().describe(`accept: one brief sentence of at most ${IM_WORDS} words naming the concrete change and intended result in the source language. It is posted as a reply to the original source on acceptance, so do not quote the source; quote an earlier proposal briefly only when the trigger merely confirms it and the sentence does not already state it. No generic I will handle it.`),
+  acknowledgement: z.string().nullish().describe(`accept: a receipt of at most ${IM_WORDS} words in the source language, as 2–3 short lines: line 1 the goal as understood, line 2 the next steps (up to three); the host appends the ticket number. It is posted as a reply to the original source on acceptance, so do not quote the source; quote an earlier proposal briefly only when the trigger merely confirms it. No generic I will handle it.`),
   reply: z.string().nullish().describe('chat: the answer sent to the person, in the source language.'),
   escalation: EscalationSchema.nullish().describe('chat: something the conversation established that deserves its own ticket; the reply still goes out.'),
   note: z.string().nullish().describe(`accept and attach: ${RoutingNoteSchema.description ?? ''}`),
@@ -64,6 +66,12 @@ const RouteItemSchema = z.object({
     + 'slug or URL its GitHub Source watches, a Perforce depot path, or one of that depot\'s workspace ids or directories. The host resolves the '
     + 'delivery channel from that list; never name a channel or ask a person to choose one.'),
   reason: z.string().nullish().describe('chat, ignore and stop: why, at most 500 characters; an ignore needs it.'),
+  parts: z.array(z.object({
+    title: z.string().trim().min(1).max(200).describe('The further goal as one short label, without added requirements or implementation advice.'),
+    worktree_name: WorktreeNameSchema,
+    paths: z.array(z.string().trim().min(1).max(300)).max(20).nullish().describe('The paths this part is expected to touch, as the accept item’s paths.'),
+    target: z.string().trim().max(300).nullish().describe('The configured target this part belongs to, as the accept item’s target.'),
+  }).strict()).min(1).max(3).nullish().describe('accept: 1–3 further separable goals of the same message, each opened as its own ticket; the message’s own goal is the primary ticket. Leave it out for one goal.'),
 }).strict()
 type RouteItem = z.infer<typeof RouteItemSchema>
 type Kind = RouteItem['kind']
@@ -80,6 +88,7 @@ const FIELDS: Record<Field, { check: z.ZodType; reads: readonly Kind[]; needs: r
   paths: { check: z.array(z.string().trim().min(1).max(300)).max(20), reads: ['accept'], needs: [] },
   target: { check: z.string().trim().min(1).max(300), reads: ['accept'], needs: [] },
   reason: { check: z.string().max(500), reads: ['chat', 'ignore', 'stop'], needs: ['ignore'] },
+  parts: { check: z.array(z.unknown()).max(3), reads: ['accept'], needs: [] },
 }
 /** Why an item cannot run: a field its kind needs is missing, or one it reads breaks its limit. */
 function invalid(item: RouteItem): string | undefined {
@@ -96,7 +105,7 @@ function invalid(item: RouteItem): string | undefined {
   }
   return undefined
 }
-type Routed = { decision?: DecisionKind; reason: string; ticketId?: string | undefined; triggerIds?: readonly string[] }
+type Routed = { decision?: DecisionKind; reason: string; ticketId?: string | undefined; ticketIds?: readonly string[]; triggerIds?: readonly string[] }
 /**
  * Resolves an accept's target spelling to the configured target that records it, refusing one this installation does
  * not configure; the refusal names what it does configure, so the main Session can correct the item without asking a
@@ -123,14 +132,23 @@ function route(host: MainToolsHost, item: RouteItem, decided: ReadonlyMap<string
     case 'accept': {
       const target = item.target ? resolveTarget(host, item.target) : undefined
       if (target && 'refused' in target) return target
+      // Further goals of the same message become their own tickets under this one Decision; each may name its own target.
+      const parts: { title: string; name: string; paths?: string[]; target?: string }[] = []
+      for (const part of item.parts ?? []) {
+        const resolved = part.target ? resolveTarget(host, part.target) : undefined
+        if (resolved && 'refused' in resolved) return resolved
+        parts.push({ title: part.title, name: part.worktree_name,
+          ...(part.paths?.length ? { paths: part.paths } : {}), ...(resolved ? { target: resolved.target } : {}) })
+      }
       const before = host.store.triggers.disposition(item.trigger_id)?.decisionId
       const decision = host.engine.decide(item.trigger_id, { kind: 'accept', title: item.title!, scope: item.title!, reason: { code: 'explicitRouted' },
         acknowledgement: item.acknowledgement!, name: item.worktree_name!, ...note, ...(item.paths?.length ? { paths: item.paths } : {}),
-        ...(target ? { target: target.target } : {}) })
+        ...(target ? { target: target.target } : {}), ...(parts.length ? { parts } : {}) })
       // A Decision that created no ticket is the item's refusal; one that existed before keeps what it was accepted with.
       if (decision.kind !== 'accept' || !decision.ticketId) return { refused: `Ticket was not created: ${reasonText(decision.reason)}` }
       if (decision.id === before) {
-        return { decision: 'accept', reason: `Already accepted as ${decision.ticketId}; title and acknowledgement unchanged`, ticketId: decision.ticketId }
+        return { decision: 'accept', reason: `Already accepted as ${decision.ticketId}; title and acknowledgement unchanged`, ticketId: decision.ticketId,
+          ...(decision.ticketIds?.length ? { ticketIds: decision.ticketIds } : {}) }
       }
       return { ...fromDecision(decision), triggerIds: decision.triggerIds }
     }
@@ -189,9 +207,10 @@ function routeTool(host: MainToolsHost): Tool {
           const result = route(host, item, decided)
           if ('refused' in result) return { ...head, ...result }
           for (const id of result.triggerIds ?? []) if (!decided.has(id)) decided.set(id, item.trigger_id)
-          const ticket = result.ticketId ? host.store.tickets.get(result.ticketId) : undefined
+          const ids = result.ticketIds?.length ? result.ticketIds : result.ticketId ? [result.ticketId] : []
+          const tickets = ids.flatMap(id => { const found = host.store.tickets.get(id); return found ? [ticketCard(found)] : [] })
           return { ...head, ...(result.decision ? { decision: result.decision } : {}), reason: result.reason,
-            ...(ticket ? { ticket: ticketCard(ticket) } : {}) }
+            ...(tickets[0] ? { ticket: tickets[0] } : {}), ...(tickets.length > 1 ? { tickets } : {}) }
         } catch (error) {
           if (error instanceof UserError) return { ...head, refused: error.message }
           host.context.logger.warn('dsh-superagent could not route trigger %s: %s', item.trigger_id, String(error))

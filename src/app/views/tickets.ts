@@ -1,5 +1,5 @@
 /** Ticket list, ticket detail, mandate basis formatting, and executor load views. */
-import { completedArchived, latestReport, liveTicket, pendingPlan, planLines, threadKey, ticketStage, type AcceptMode, type AdmissionCell,
+import { completedArchived, latestReport, liveTicket, pendingPlan, planLines, planTemplate, threadKey, ticketStage, type AcceptMode, type AdmissionCell,
   type MandateBasis, type Ticket, type TicketStage } from '../../core/index.ts'
 import { workerSessionId } from '../../executor/dsh.ts'
 import { KV } from '../../kv.ts'
@@ -156,7 +156,10 @@ export function executorLoad(store: Store, running: number): ExecutorLoad {
 function planView(ticket: Ticket) {
   const plan = ticket.plan
   if (!plan) return undefined
-  return { text: plan.text, lines: planLines(plan.text), at: plan.at, waiting: !!pendingPlan(ticket),
+  const template = planTemplate(plan)
+  return { text: plan.text, template, lines: planLines(plan.text, template), at: plan.at, waiting: !!pendingPlan(ticket),
+    ...plan.question ? { question: plan.question } : {}, ...plan.options?.length ? { options: plan.options } : {},
+    ...plan.sections?.length ? { sections: plan.sections } : {},
     ...plan.deadline ? { deadline: plan.deadline } : {}, ...plan.approved ? { approved: plan.approved } : {},
     ...plan.feedback?.length ? { feedback: plan.feedback } : {} }
 }

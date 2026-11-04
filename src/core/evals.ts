@@ -12,7 +12,7 @@ import type { Tickets } from './tickets.ts'
 /** An outcome for the Eval that holds a Trigger; `evalId` names the Eval it was judged for, so a later Eval refuses it. */
 export type Outcome = AssessmentOutcome & { evalId?: string }
 /** What an Eval ends with, as its Decision records it. */
-interface Finished { kind: DecisionKind; reason: Reason[]; audit?: Record<string, unknown>; ticketId?: string; mandate?: Mandate; escalation?: Escalation }
+interface Finished { kind: DecisionKind; reason: Reason[]; audit?: Record<string, unknown>; ticketId?: string; ticketIds?: string[]; mandate?: Mandate; escalation?: Escalation }
 /** 一次会建单的决策的收尾：accept，或携带了 escalation 的 chat（两者只差 kind 与 escalation）。 */
 type Started = Omit<Finished, 'kind'> & { kind: 'accept' | 'chat' }
 /** An outcome's reason: a code it carries, else the words its assessor or person wrote. */
@@ -357,9 +357,17 @@ export class Evals extends EnginePart {
     const { strength, policyVersion, actor } = evaluation
     const basis = { ...evaluation.basis, ...(work.rules ? { rules: work.rules } : {}) }
     const mandate: Mandate = { strength, policyVersion, basis, actor, scope: work.scope }
-    const ticketId = key('ticket', evaluation.id)
-    const decision = this.finish(thread, evaluation, { ...started, mandate, ticketId })
-    this.tickets.create(ticketId, decision.id, mandate, evaluation, work, at)
+    const parts = work.parts ?? []
+    // One Decision opens the primary ticket and one ticket per further goal, so a message with several separable goals
+    // becomes sub-tickets instead of making one worker hand the extra goals back. Only the primary carries the receipt.
+    const ticketIds = [key('ticket', evaluation.id), ...parts.map((_, index) => key('ticket', evaluation.id, 'part', String(index)))]
+    const decision = this.finish(thread, evaluation, { ...started, mandate, ticketId: ticketIds[0]!, ticketIds })
+    const primary = { ...work }
+    delete primary.parts
+    this.tickets.create(ticketIds[0]!, decision.id, mandate, evaluation, primary, at)
+    for (const [index, part] of parts.entries()) {
+      this.tickets.create(ticketIds[index + 1]!, decision.id, mandate, evaluation, { ...work, ...part, acknowledgement: undefined, parts: undefined }, at)
+    }
     return decision
   }
   /** Record an Eval's Decision; the Thread's own Eval ends with it, while a gate-only one leaves the Thread's Eval going. */
@@ -376,7 +384,8 @@ export class Evals extends EnginePart {
     const at = this.now()
     const decision: Decision = { id: key('decision', evaluation.id), evalId: evaluation.id, threadKey: thread.key, triggerIds: evaluation.triggerIds,
       policyVersion: evaluation.policyVersion, at, kind: outcome.kind, reason: outcome.reason, strength: evaluation.strength,
-      ...(outcome.ticketId ? { ticketId: outcome.ticketId } : {}), ...(outcome.mandate ? { mandate: outcome.mandate } : {}),
+      ...(outcome.ticketId ? { ticketId: outcome.ticketId } : {}), ...(outcome.ticketIds?.length ? { ticketIds: outcome.ticketIds } : {}),
+      ...(outcome.mandate ? { mandate: outcome.mandate } : {}),
       ...(outcome.escalation ? { escalation: outcome.escalation } : {}), ...(outcome.audit ? { audit: outcome.audit } : {}) }
     this.repo.decisions.save(decision)
     for (const id of evaluation.triggerIds) {

@@ -179,8 +179,8 @@ export function deliveryInstructions(backend: Backend): string {
       + 'If this Ticket came from TAPD, start the changelist description with the TAPD short id '
       + '(DSH_SUPERAGENT_TAPD_SHORT_ID when set, otherwise the bug page\'s short number) followed by a space and a title: '
       + 'never the long bug id or a URL. '
-      + 'Report the delivery\'s facts with the report: changelist=<CL>, swarm_review=<id or URL>, and verification=<what you ran and '
-      + 'how it ended>; a ready report without verification is not evidence.'
+      + 'Report the delivery\'s facts with the report: changelist=<CL>, swarm_review=<id or URL>, and verification= as the four '
+      + 'blocks 版本与前置 / 复现步骤 / 预期与证据 / 待你判断; a ready report missing a block is refused, and an unrun rehearsal says so honestly.'
     : ''
 }
 /** The prefix every sharing instruction block starts with, so a moved ticket can drop the previous one. */
@@ -381,12 +381,12 @@ export class DshExecutor implements Executor {
    * wrote and drops the instructions of the environment it left, so its next launch composes the new one's, and its target
    * becomes that environment's configured one.
    */
-  rePrepare(ticket: Ticket, backend: Backend): Execution {
+  rePrepare(ticket: Ticket, backend: Backend, target?: string): Execution {
     const settings = this.host.store.settings()
-    const target = (backend === 'git' ? this.host.repository : settings.executor.p4.depot).trim()
+    const resolved = (target?.trim() || (backend === 'git' ? this.host.repository : settings.executor.p4.depot)).trim()
     const execution = ticket.execution ?? { name: '', directory: '', assignment: '' }
     const next: Execution = { ...execution, assignment: baseAssignment(execution.assignment), backend }
-    if (target) next.target = target
+    if (resolved) next.target = resolved
     else delete next.target
     return next
   }

@@ -163,7 +163,7 @@ export class Runtime extends Service implements SourceHost {
         // Both follow the ticket's own delivery environment, falling back to the deployment's configured backend.
         pipelineFollowup: ticket => (ticket.execution?.backend ?? store.settings().executor.backend) === 'p4',
         prepareTicket: (ticket, outcome) => executor.prepare(ticket, outcome),
-        reprepareTicket: (ticket, backend) => executor.rePrepare(ticket, backend), emit: event => {
+        reprepareTicket: (ticket, backend, target) => executor.rePrepare(ticket, backend, target), emit: event => {
           // Notify the main Session only about domain events it did not initiate itself.
           const notice = this.quiet ? undefined : eventNotice(event, id => store.tickets.get(id))
           if (notice) sessions.notify(...notice)

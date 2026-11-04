@@ -3,7 +3,8 @@
  * buttons answer a worker's `human_action`, the forms for a typed direction, the cards that record an answer, and the text
  * fallback when Feishu refuses a card.
  */
-import { PLAN_CARD_QUESTION, PLAN_REPLY_HINT, planLines, type Plan, type PlanDecision, type PlanOption, type QuestionSection, type Ticket } from '../core/index.ts'
+import { PLAN_CARD_QUESTION, PLAN_REPLY_HINT, PLAN_TEMPLATES, planLines, planTemplate, type Plan, type PlanDecision, type PlanOption, type PlanTemplate,
+  type QuestionSection, type Ticket } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
 import { feishuPostContent, jsonForCmd, textSafe } from './feishu-text.ts'
 
@@ -14,7 +15,7 @@ export interface CardMessage { card: Record<string, unknown>; text: string }
 /** The short ticket id a card shows, as the panel links it: the first eight characters of the full id. */
 const shortId = (ticket: Pick<Ticket, 'id'>): string => ticket.id.slice(0, 8)
 /** The plan's lines by label; a card shows the lines the worker wrote and `—` for one it left out (the gate refuses those). */
-const linesOf = (text: string): Map<string, string> => new Map(planLines(text).map(line => [line.label, line.text]))
+const linesOf = (text: string, template: PlanTemplate = 'fix'): Map<string, string> => new Map(planLines(text, template).map(line => [line.label, line.text]))
 /** A bare URL's display title: what it is, not the address, while the link still opens the URL. */
 const linkTitle = (url: string): string => {
   let parsed: URL
@@ -144,23 +145,32 @@ const foldPanel = (sections: readonly QuestionSection[], title: string): Record<
   vertical_spacing: '8px', padding: '8px 8px 8px 8px',
   elements: sections.length === 1 ? [bodyMarkdown(sections[0]?.text ?? '')] : sections.map(section => block(section.label, section.text)),
 })
-/** The four evidence lines the standard plan card folds away; a worker's custom sections replace them. */
+/** The four evidence lines the fix plan card folds away; a worker's custom sections replace them. */
 const EVIDENCE = ['代码线', '资产线', '配置线', '验证方案'] as const
-const evidencePanel = (get: (label: string) => string): Record<string, unknown> =>
-  foldPanel(EVIDENCE.map(label => ({ label, text: get(label) || '—' })), '证据')
+/** Which plan lines a card leads with and which it folds, per template: the fix layout is the original one. */
+const PLAN_LAYOUTS: Readonly<Record<PlanTemplate, { front: readonly string[]; fold: readonly string[] }>> = {
+  fix: { front: ['现象', '修复锚点', '影响面', '预算'], fold: EVIDENCE },
+  analysis: { front: ['问题', '结论', '建议'], fold: ['依据'] },
+  design: { front: ['问题', '推荐'], fold: ['选项', '证据'] },
+}
+const evidencePanel = (sections: readonly { label: string; text: string }[]): Record<string, unknown> => foldPanel(sections, '证据')
 /** The deadline as month, day and minute in China time, which is all a person needs to know when the gate stops. */
 const deadlineText = (deadline: string): string => new Date(deadline).toLocaleString('zh-CN', {
   timeZone: 'Asia/Shanghai', hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 /**
  * The P1 plan gate card as a decision brief: the worker's question (or the gate's standard one), then the plan's own key
- * lines (现象/修复锚点/影响面/预算) in full, the code/asset/config/verification evidence folded behind one tap, what approving
- * does, the deadline, and the worker's 2–4 choices (the standard three when it wrote none). The text fallback carries the
- * key lines and the labels in full, since only a person who cannot see the card reads it.
+ * lines for its template in full (the fix template leads with 现象/修复锚点/影响面/预算, an analysis with 问题/结论/建议, a design
+ * with 问题/推荐), the rest folded behind one tap, what approving does, the deadline, the choices in full and the worker's 2–4
+ * buttons (the standard three when it wrote none). The text fallback carries the key lines and the labels in full, since only
+ * a person who cannot see the card reads it.
  */
-export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 'text' | 'question' | 'options' | 'deadline' | 'sections'>): CardMessage {
-  const lines = linesOf(plan.text)
+export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 'text' | 'template' | 'question' | 'options' | 'deadline' | 'sections'>): CardMessage {
+  const template = planTemplate(plan)
+  const lines = linesOf(plan.text, template)
   const get = (label: string): string => lines.get(label) ?? ''
+  const layout = { front: [...PLAN_LAYOUTS[template].front], fold: [...PLAN_LAYOUTS[template].fold] }
   const choices = planChoices(plan)
+  const described = choices.some(choice => choice.description)
   const question = plan.question || PLAN_CARD_QUESTION
   const custom = plan.sections?.length ? plan.sections : undefined
   const body = custom?.filter(section => !section.fold) ?? []
@@ -178,13 +188,10 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
       elements: [
         markdown(`**${question}**`),
         ...body.length ? body.map(section => block(section.label, section.text))
-          : custom ? [] : [
-            block('现象', get('现象')),
-            block('修复锚点', get('修复锚点')),
-            block('影响面', get('影响面'), { text_size: 'notation' }),
-            block('预算', get('预算'), { text_size: 'notation' }),
-          ],
-        ...folded.length ? [foldPanel(folded, '补充')] : custom ? [] : [evidencePanel(get)],
+          : custom ? [] : layout.front.map(label => block(label, get(label), ['影响面', '预算'].includes(label) ? { text_size: 'notation' } : {})),
+        ...folded.length ? [foldPanel(folded, '补充')] : custom ? [] : [evidencePanel(layout.fold.map(label => ({ label, text: get(label) || '—' })))],
+        ...described ? [markdown(`**选项说明**\n${choices.map((choice, index) =>
+          `${index + 1}、${choice.label}${choice.description ? `：${choice.description}` : ''}`).join('\n')}`, { text_size: 'notation' })] : [],
         { tag: 'hr', margin: '4px 0px 0px 0px' },
         markdown([
           '**通过后** worker 开始实现并按验证方案自测，交你确认后才交付，不会直接 submit',
@@ -198,16 +205,13 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
       ],
     },
   }
-  const context = custom ?? [
-    { label: '现象', text: get('现象') || '—' }, { label: '修复锚点', text: get('修复锚点') || '—' },
-    { label: '影响面', text: get('影响面') || '—' }, { label: '预算', text: get('预算') || '—' },
-  ]
+  const context = custom ?? layout.front.map(label => ({ label, text: get(label) || '—' }))
   const text = textSafe([`待确认 · 方案已出：${ticket.title}（工单 ${shortId(ticket)}）`,
     `要你定：${question}`,
     ...context.map(section => blockText(section.label, section.text)),
     '通过后：开始实现，按验证方案验证，再交给你确认交付；不会直接 submit。',
-    `选项：${choices.map(choice => choice.label).join(' ｜ ')}`,
-    custom ? '卡片按这次对话的语境用了自定义分块。' : '证据（代码线/资产线/配置线/验证方案）在卡片折叠与工单面板里。', PLAN_REPLY_HINT].join('\n'))
+    `选项：${choices.map(choice => choice.description ? `${choice.label}（${choice.description}）` : choice.label).join(' ｜ ')}`,
+    custom ? '卡片按这次对话的语境用了自定义分块。' : `证据（${layout.fold.join('/')}）在卡片折叠与工单面板里。`, PLAN_REPLY_HINT].join('\n'))
   return { card, text }
 }
 /**
@@ -215,7 +219,7 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
  * no longer hides what is being revised, and it offers a way back to the plan card. The form itself cannot upload files, so
  * the hint sends a person with a screenshot to reply to the card instead of losing the evidence.
  */
-export function reviseCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 'text' | 'question'>): CardMessage {
+export function reviseCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 'text' | 'template' | 'question'>): CardMessage {
   const question = plan.question?.trim() || PLAN_CARD_QUESTION
   const card = {
     schema: '2.0',
@@ -234,7 +238,7 @@ export function reviseCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan
           },
           border: { color: 'grey', corner_radius: '5px' },
           vertical_spacing: '8px', padding: '8px 8px 8px 8px',
-          elements: planLines(plan.text).map(line => block(line.label, line.text)),
+          elements: planLines(plan.text, planTemplate(plan)).map(line => block(line.label, line.text)),
         },
         markdown('**要改什么？** 写一句方向就行；提交后回到方案阶段，worker 按它重新给方案。'),
         {

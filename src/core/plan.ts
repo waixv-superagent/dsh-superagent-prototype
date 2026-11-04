@@ -3,6 +3,8 @@ import { liveTicket, type QuestionSection, type Ticket } from './model.ts'
 
 /** The phases a ticket passes, from the P1 plan gate to delivery; the submit after delivery stays a person's (P5). */
 export type TicketPhase = 'plan' | 'implement' | 'verify' | 'deliver'
+/** The kind of work a plan describes: a fix keeps the code/asset/config template, an analysis or a design choice uses a light one. */
+export type PlanTemplate = 'fix' | 'analysis' | 'design'
 export const TICKET_PHASES: readonly TicketPhase[] = ['plan', 'implement', 'verify', 'deliver']
 /** Where a person answered a plan: the Feishu card, the panel's ticket page, or the main Session. */
 export type PlanVia = 'feishu' | 'panel' | 'session'
@@ -10,6 +12,8 @@ export type PlanVia = 'feishu' | 'panel' | 'session'
 export interface Plan {
   text: string
   at: string
+  /** The template the text follows; absent means `fix`, so plans stored before templates stay readable. */
+  template?: PlanTemplate
   /** A person's approval, which moves the ticket to implement. */
   approved?: { at: string; via?: PlanVia; option?: string }
   /** What a person asked to change instead of approving, oldest first; the worker revises and submits again. */
@@ -28,8 +32,18 @@ export interface Plan {
    */
   sections?: QuestionSection[]
 }
-/** The labels of the fixed plan template, in the order a worker writes them (docs/012 §2). */
+/** The labels of the fix plan template, in the order a worker writes them (docs/012 §2). */
 export const PLAN_LABELS = ['现象', '代码线', '资产线', '配置线', '修复锚点', '影响面', '验证方案', '预算'] as const
+/** The light template for an investigation or analysis: what was asked, what was found, the evidence, what to do next. */
+export const ANALYSIS_PLAN_LABELS = ['问题', '结论', '依据', '建议'] as const
+/** The template for a design choice: the open question, the options with consequences, the evidence, and a recommendation. */
+export const DESIGN_PLAN_LABELS = ['问题', '选项', '证据', '推荐'] as const
+/** Every plan template's labels; a worker picks one when the default fix template does not fit the conversation. */
+export const PLAN_TEMPLATES: Readonly<Record<PlanTemplate, readonly string[]>> = {
+  fix: PLAN_LABELS, analysis: ANALYSIS_PLAN_LABELS, design: DESIGN_PLAN_LABELS,
+}
+/** The template a stored plan follows; plans written before templates existed are fixes. */
+export const planTemplate = (plan: Pick<Plan, 'template'> | undefined): PlanTemplate => plan?.template ?? 'fix'
 /** The question a submitted plan asks, worded for a card, the panel, and the main Session alike. */
 export const PLAN_QUESTION = 'P1 方案待确认'
 /** How a person answers in plain chat when the card's buttons are unavailable; the panel and the card need no protocol. */
@@ -46,11 +60,13 @@ export interface PlanOption {
   decision: PlanDecision
   /** A revise option's new direction; absent means the option opens the form so the person writes one. */
   note?: string
+  /** What choosing this option means and costs, shown under the choice so a label alone never hides the consequence. */
+  description?: string
 }
 /** The card's question when the worker does not write one; the gate's own question stays `PLAN_QUESTION` for plain replies. */
 export const PLAN_CARD_QUESTION = '这版方案能不能开工'
 /** How many choices a card shows, and how long each label may be before the row no longer reads as buttons. */
-export const PLAN_OPTION_LIMITS = { min: 2, max: 4, label: 24 } as const
+export const PLAN_OPTION_LIMITS = { min: 2, max: 4, label: 24, description: 160 } as const
 /** The same bounds for a question card's choice labels. */
 export const CARD_OPTION_LIMITS = PLAN_OPTION_LIMITS
 /** Whether labels are 2–4, unique, non-empty and short enough for a button row. */
@@ -58,6 +74,11 @@ export const validCardOptions = (options: readonly string[]): boolean =>
   options.length >= CARD_OPTION_LIMITS.min && options.length <= CARD_OPTION_LIMITS.max
   && new Set(options).size === options.length
   && options.every(label => label.trim().length > 0 && Array.from(label).length <= CARD_OPTION_LIMITS.label)
+/** Whether plan choices are valid labels and, when asked, each carries the consequence it would have. */
+export const validPlanOptions = (options: readonly PlanOption[], requireDescription = false): boolean =>
+  validCardOptions(options.map(option => option.label.trim()))
+  && options.every(option => !requireDescription || (option.description?.trim().length ?? 0) > 0)
+  && options.every(option => Array.from(option.description?.trim() ?? '').length <= PLAN_OPTION_LIMITS.description)
 /** How many context blocks a question card shows, and how long each label and its text may be. */
 export const QUESTION_SECTION_LIMITS = { min: 1, max: 6, label: 20, text: 800 } as const
 /** Whether context sections are 1–6, each a short unique label and its own non-empty text. */
@@ -98,17 +119,18 @@ export function planChoice(text: string, plan: Pick<Plan, 'options'> | undefined
   return choice ? { decision: choice.decision, note: choice.note ?? '', option: choice.label } : undefined
 }
 /** The plan's lines as label and content, for the card and the panel; text before the first label is dropped. */
-export function planLines(text: string): { label: string; text: string }[] {
+export function planLines(text: string, template: PlanTemplate = 'fix'): { label: string; text: string }[] {
+  const labels = PLAN_TEMPLATES[template]
   const lines: { label: string; text: string }[] = []
   for (const line of text.split(/\r?\n/)) {
-    const match = new RegExp(`^\\s*(?:[-*]\\s*)?(${PLAN_LABELS.join('|')})\\s*[：:]\\s*(.*)$`).exec(line)
+    const match = new RegExp(`^\\s*(?:[-*]\\s*)?(${labels.join('|')})\\s*[：:]\\s*(.*)$`).exec(line)
     if (match) lines.push({ label: match[1]!, text: match[2]! })
     else if (lines.length) lines.at(-1)!.text += `\n${line}`
   }
   return lines.map(line => ({ ...line, text: line.text.trim() })).filter(line => line.text)
 }
 /** The labels the plan text leaves out: the gate refuses an incomplete plan rather than guess what it would have said. */
-export const missingPlanLabels = (text: string): string[] => {
-  const found = new Set(planLines(text).map(line => line.label))
-  return PLAN_LABELS.filter(label => !found.has(label))
+export const missingPlanLabels = (text: string, template: PlanTemplate = 'fix'): string[] => {
+  const found = new Set(planLines(text, template).map(line => line.label))
+  return PLAN_TEMPLATES[template].filter(label => !found.has(label))
 }

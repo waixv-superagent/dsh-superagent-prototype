@@ -40,7 +40,9 @@ interface Skill { name: string; description: string; content: string }
  * 对应的可观测性说明见 docs/007-architecture.md 的 Decision 一节。缩减文本时应同步下调。
  * The plan card's choices and the read-only pipeline check add worker-tool schema, measured at 46.2k; the cap keeps headroom.
  */
-const BUDGET: Record<Role, number> = { orchestrator: 65_000, worker: 47_000 }
+// The S1–S6 workflow protocol added the plan templates and option descriptions, the split-accept `parts`, the worker
+// redispatch tool and the four-block verification package; the budget grows with that surface, not with incidental prose.
+const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 49_500 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'
@@ -358,7 +360,7 @@ function failures(): Map<string, string> {
 it('collects both roles\' tools, prompts, skills and inputs', () => {
   expect([...toolsOf('worker').keys()].sort()).toEqual(['orchestrator_ack', 'orchestrator_phase',
     'orchestrator_pipeline', 'orchestrator_pipeline_check', 'orchestrator_pipeline_rerun', 'orchestrator_plan',
-    'orchestrator_read', 'orchestrator_report', 'orchestrator_thread_follow',
+    'orchestrator_read', 'orchestrator_redispatch', 'orchestrator_report', 'orchestrator_thread_follow',
     'orchestrator_thread_unrelated', 'orchestrator_trigger_handback'])
   expect([...toolsOf('orchestrator').keys()]).toEqual(expect.arrayContaining(['orchestrator_route', 'orchestrator_eval_decide', 'orchestrator_reply']))
   // The one routing tool takes the place of four.

@@ -1,5 +1,5 @@
 /** Compact, bounded model-facing projections of triggers, tickets, threads, and decisions; full texts stay behind readable resources. */
-import { latestReport, reasonText, threadKey, ticketPhase, ticketStage, type Decision, type Mandate, type Thread, type Ticket, type TicketInput,
+import { latestReport, reasonText, threadKey, ticketPhase, ticketStage, waitingOf, type Decision, type Mandate, type Thread, type Ticket, type TicketInput,
   type Trigger, type TriggerDisposition } from '../core/index.ts'
 import { pullOf } from '../sources/github-pull.ts'
 import { batchLine, inputResource } from '../executor/dsh.ts'
@@ -31,6 +31,8 @@ export function ticketCard(ticket: Ticket) {
     ...ticket.plan.question ? { question: ticket.plan.question } : {}, ...ticket.plan.options?.length ? { options: ticket.plan.options } : {} } : undefined
   return { ticket_id: ticket.id, title: ticket.title, state: cardState(ticket), phase: ticketPhase(ticket), strength: ticket.mandate.strength,
     ...(ticket.category ? { category: ticket.category } : {}),
+    // Who the ticket waits for and what it is doing, so a reader does not have to translate a stage word into an action.
+    next: waitingOf(ticket),
     ...(pullOf(ticket) ? { pr_number: pullOf(ticket) } : {}), ...(ended ? { ended } : {}), ...(gate ? { plan: gate } : {}),
     ...(attention ? { attention: { question: attention.question, ...attention.options?.length ? { options: attention.options } : {},
       ...attention.triggerId ? { trigger_id: attention.triggerId } : {} } } : {}),
@@ -83,7 +85,8 @@ export function threadCard(thread: Thread, label: string) {
 export function decisionCard(decision: Decision) {
   return { decision_id: decision.id, kind: decision.kind, reason: reasonText(decision.reason), strength: decision.strength,
     thread: decision.threadKey,
-    trigger_ids: decision.triggerIds, ...(decision.ticketId ? { ticket_id: decision.ticketId } : {}), at: decision.at,
+    trigger_ids: decision.triggerIds, ...(decision.ticketId ? { ticket_id: decision.ticketId } : {}),
+    ...(decision.ticketIds?.length ? { ticket_ids: decision.ticketIds } : {}), at: decision.at,
     ...(decision.escalation ? { escalation: decision.escalation } : {}),
     read: `decision/${decision.id}` }
 }

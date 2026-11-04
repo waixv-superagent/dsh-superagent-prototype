@@ -89,7 +89,7 @@ it('decides a waiting plan on the Ticket page, with the evidence behind its own 
   const planText = ['现象：翻页闪一下', '代码线：AvatarList.cpp:42 — 复用控件时清空了纹理', '资产线：已排除', '配置线：已排除',
     '修复锚点：AvatarList.cpp 清空纹理；补回复用时的重置', '影响面：只影响列表', '验证方案：基线 3 例 → 改后 3 例', '预算：约 20 分钟'].join('\n')
   const lines = planText.split('\n').map(line => { const at = line.indexOf('：'); return { label: line.slice(0, at), text: line.slice(at + 1) } })
-  server.ticketDetails.t1 = { ...server.ticketDetails.t1!, plan: { text: planText, lines, at: '2026-09-22T00:05:00Z', waiting: true,
+  server.ticketDetails.t1 = { ...server.ticketDetails.t1!, plan: { text: planText, template: 'fix', lines, at: '2026-09-22T00:05:00Z', waiting: true,
     deadline: '2026-09-23T00:05:00Z' }, attention: { id: 'q1', question: 'P1 方案待确认：回 1 通过 ｜ 回 2 换方向 ｜ 回 3 停' } }
   await mount()
   await click('修复回归')

@@ -38,11 +38,17 @@ export class Replies extends EnginePart {
     return request.purpose === 'acknowledgement' ? this.acknowledge(request) : this.answer(request)
   }
   /**
-   * Queue the acknowledgement an accept carries where the message that started the ticket was written, if it has a Channel
-   * and a person wrote it.
+   * Queue the receipt an accept carries where the message that started the ticket was written: the understood goal, the
+   * next steps, and the ticket the host appends, so a person can tell what was opened without opening the panel. It falls
+   * back to the conversation the ticket replies in when the primary message itself has no Channel.
    */
-  acknowledgeAccepted(ticketId: string, trigger: Trigger, text: string): void {
-    if (trigger.channel && trigger.human) this.options.outbox.send({ id: key('ack', trigger.id), channel: trigger.channel, text, kind: 'acknowledgement', ticketId })
+  acknowledgeAccepted(ticket: Pick<Ticket, 'id' | 'channels' | 'replyChannel'>, trigger: Trigger, text: string): void {
+    if (!trigger.human) return
+    const channel = trigger.channel ?? ticket.replyChannel ?? ticket.channels[0]
+    if (!channel) return
+    // The ticket exists only now, so the worker's receipt names the goal and the next steps and the host adds the number.
+    const receipt = text.includes(ticket.id.slice(0, 8)) ? text : `${text.trimEnd()}\n工单 ${ticket.id.slice(0, 8)}`
+    this.options.outbox.send({ id: key('ack', trigger.id), channel, text: receipt, kind: 'acknowledgement', ticketId: ticket.id })
   }
   /**
    * 把一条对话的答复排到那条触发所在的渠道：chat 决策不建工单，所以这条批复不经过工单的答复规则，也不认领任何工单。

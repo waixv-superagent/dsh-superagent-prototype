@@ -48,13 +48,21 @@ export type AssessmentOutcome =
    * `category` marks the ticket a defect or a feature, set only by an escalation.
    */
   | { kind: 'accept'; title: string; scope: string; reason: string | Reason; acknowledgement?: string; rules?: string[]; audit?: Record<string, unknown>;
-    name?: string; note?: string; paths?: string[]; category?: 'bug' | 'feature'; target?: string }
+    name?: string; note?: string; paths?: string[]; category?: 'bug' | 'feature'; target?: string
+    /**
+     * The other separable goals of the same message, each opened as its own ticket under this Decision. One source message
+     * becomes one Decision and 1–4 tickets; only the first carries the receipt, and every part follows the same threads.
+     */
+    parts?: AcceptPart[] }
   /**
    * 一条对话：`reply` 是必须发给人的答复，`escalation` 是这轮闲聊里发现、值得单独做的事，`name` 是它要建的工的短名。
    * 回复总要发出，线程保留、不建工单；带 `escalation` 时再走 accept 的建单路径建一张单。
    */
   | { kind: 'chat'; reply: string; escalation?: Escalation; name?: string; rules?: string[]; reason: string | Reason; audit?: Record<string, unknown> }
   | { kind: 'stop'; ticketId: string; reason: string | Reason; audit?: Record<string, unknown> }
+
+/** One further goal split out of the same message: its own title, ticket name, leased paths and target. */
+export interface AcceptPart { title: string; name: string; paths?: string[]; target?: string }
 
 /** Semantic judgement. `request` queues the assessment, idempotently per `evalId`; the outcome returns through `Engine.decide`. */
 export interface Assessor {
