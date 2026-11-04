@@ -1,6 +1,6 @@
 /** Overview: the duty desk. One verdict, decision cards for Tickets waiting on a person, a running lane, and recently ended work. */
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { usePoll, type EditorRow, type Problem, type TicketRow, type TicketSearchView } from './api.ts'
+import { usePoll, type BillingView, type EditorRow, type Problem, type TicketRow, type TicketSearchView } from './api.ts'
 import { Button, Icon, Input, Tag } from './controls.tsx'
 import { ticketMark } from './marks.ts'
 import { PIPELINE_TRACK, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackState } from './pipeline.ts'
@@ -34,6 +34,73 @@ function EditorLine({ editor }: { editor: EditorRow }) {
       && <span className="dt-editor-since"> · {t('editorBuilding')}</span>}
   </p>
 }
+
+/** A money figure small enough that two decimals would read as zero still says something. */
+function moneyText(value: number): string {
+  if (value === 0) return '¥0.00'
+  return value < 0.01 ? '<¥0.01' : `¥${value.toFixed(2)}`
+}
+
+/** A compact token count; the exact number is in the title when a person needs it. */
+function tokensText(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
+  return String(value)
+}
+
+/**
+ * The billing strip: which route charged last and what the rolling hour cost. It sits directly above the board so the
+ * provider that would burn a personal balance is visible before a person reads the lanes.
+ */
+function BillingStrip({ billing }: { billing: BillingView }) {
+  const { t } = usePanel()
+  const base = billing.configured.find(role => role.role === 'default')
+  const overrides = billing.configured.filter(role => role.role !== 'default' && base
+    && (role.provider !== base.provider || role.model !== base.model))
+  const current = billing.current
+  const recent = current.at !== null && Date.now() - current.at < 10 * 60_000
+  const extra = Math.max(0, billing.providers.length - 1)
+  const metric = billing.priced ? billing.buckets.map(bucket => bucket.cost) : billing.buckets.map(bucket => bucket.tokens)
+  const max = Math.max(0, ...metric)
+  const currentUsage = billing.providers.find(row => row.provider === current.provider)
+  const currentUnpriced = !!currentUsage && currentUsage.tokens > 0 && currentUsage.cost === null
+  const sparkTotal = billing.total.cost !== null ? moneyText(billing.total.cost) : `${tokensText(billing.total.tokens)} tokens`
+  return <section className="dt-billing" aria-label={t('billingTitle')} data-priced={billing.priced || undefined}
+    title={t('billingSourceNote')}>
+    <div className="dt-billing-now">
+      <span className="dt-billing-label">{recent ? t('billingNow') : current.at !== null ? t('billingLast') : t('billingConfigured')}</span>
+      <span className="dt-billing-provider" data-unpriced={currentUnpriced || undefined}>
+        {current.name || current.provider || t('billingUnknown')}
+      </span>
+      {current.model && <span className="dt-billing-model">{current.model}</span>}
+      {extra > 0 && <span className="dt-billing-more" title={t('billingMoreProviders', { count: extra })}>+{extra}</span>}
+      {overrides.map(role => <Tag key={role.role} tone="warning">
+        {t('billingRoleOverride', { role: t(role.role === 'orchestrator' ? 'billingRoleEval' : 'billingRoleWorker'),
+          provider: role.name || role.provider })}
+      </Tag>)}
+    </div>
+    <div className="dt-billing-window">
+      {billing.total.cost !== null
+        ? <span className="dt-billing-money">{moneyText(billing.total.cost)}</span>
+        : <span className="dt-billing-money" data-unpriced>{t('billingUnpriced')}</span>}
+      {billing.total.unpricedTokens > 0 && <span className="dt-billing-unpriced"
+        title={t('billingUnpricedTokens', { tokens: tokensText(billing.total.unpricedTokens) })}>+</span>}
+      <span className="dt-billing-window-label">{t('billingWindow')}</span>
+      <span className="dt-billing-spark" role="img"
+        aria-label={t('billingSpark', { metric: t(billing.priced ? 'billingCostMetric' : 'billingTokenMetric') })}>
+        {billing.buckets.map((bucket, index) => {
+          const value = metric[index] ?? 0
+          return <span key={bucket.at} className="dt-billing-bar" data-zero={value === 0 || undefined}
+            style={{ height: `${max > 0 ? Math.max(2, Math.round(value / max * 100)) : 2}%` }} />
+        })}
+      </span>
+      <span className="dt-billing-requests">{billing.total.requests > 0
+        ? t('billingRequests', { count: billing.total.requests }) : t('billingNoUsage')}</span>
+      <span className="dt-billing-total" title={sparkTotal}>{tokensText(billing.total.tokens)} tokens</span>
+    </div>
+  </section>
+}
+
 
 function ProblemLine({ problem, onChanged }: { problem: Problem; onChanged: () => Promise<void> }) {
   const { t, call, navigate } = usePanel()
@@ -514,6 +581,8 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
         onChanged={reload} />)}</ul>
       {data.problems.length > 4 && <p className="dt-problem-more">{t('boardMoreProblems', { count: data.problems.length - 4 })}</p>}
     </details>}
+
+    {data.billing && <BillingStrip billing={data.billing} />}
 
     <div className="dt-board-scroll" ref={boardScroll} data-more={boardMore} onScroll={measureBoard}>
       <section className="dt-board" aria-label={t('boardNeedsTitle')}>

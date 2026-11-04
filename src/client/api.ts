@@ -131,6 +131,8 @@ export type TriggerRow = ThreadPageView['timeline'][number]
 export type DecisionRow = ApiResponse<'GET decisions'>['items'][number]
 export type Problem = ApiResponse<'GET overview'>['problems'][number]
 export type EditorRow = NonNullable<ApiResponse<'GET overview'>['editor']>
+/** The board's billing strip; absent when an older host serves the overview. */
+export type BillingView = NonNullable<ApiResponse<'GET overview'>['billing']>
 export type EditorPageView = ApiResponse<'GET editor'>
 export type EditorTicketRow = EditorPageView['working'][number]
 export type EditorTimelineView = EditorPageView['timeline']

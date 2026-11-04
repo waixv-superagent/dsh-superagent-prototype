@@ -42,6 +42,38 @@ it('leads with a verdict and a five-lane board: decisions, verification, pipelin
   expect(all('.dt-verify-card')[1]!.querySelectorAll('.dt-verify-foot button').length).toBe(2)
 })
 
+it('shows the charging provider and the rolling hour directly above the board, warning about a role on a personal account', async () => {
+  await mount()
+  await openOverview()
+  const strip = document.querySelector('.dt-billing')
+  expect(strip).not.toBeNull()
+  expect(strip?.querySelector('.dt-billing-label')?.textContent).toBe(zh.billingNow)
+  expect(strip?.querySelector('.dt-billing-provider')?.textContent).toBe('kurogames')
+  expect(strip?.querySelector('.dt-billing-model')?.textContent).toBe('DeepSeek V4.1 Flash')
+  expect(strip?.querySelector('.dt-billing-money')?.textContent).toBe('¥1.23')
+  expect(strip?.querySelector('.dt-billing-window-label')?.textContent).toBe(zh.billingWindow)
+  expect(strip?.querySelectorAll('.dt-billing-bar')).toHaveLength(60)
+  expect(all('.dt-billing-now .dt-tag').map(tag => tag.textContent)).toEqual(['执行走 DeepSeek Account'])
+  // The strip is the board's last element before its lanes, not a detached banner somewhere in the page.
+  expect(strip?.nextElementSibling?.classList.contains('dt-board-scroll')).toBe(true)
+})
+
+it('keeps an unpriced route visible by its tokens instead of inventing a money figure', async () => {
+  const at = Date.now()
+  server.billing = { ...server.billing, priced: false, current: { provider: 'deepseek-account', name: 'DeepSeek Account',
+    model: 'deepseek-flash', at },
+  providers: [{ provider: 'deepseek-account', name: 'DeepSeek Account', model: 'deepseek-flash', cost: null, tokens: 12_345,
+    requests: 3, lastAt: at, unpricedTokens: 12_345 }],
+  total: { cost: null, tokens: 12_345, requests: 3, unpricedTokens: 12_345 } }
+  await mount()
+  await openOverview()
+  expect(document.querySelector('.dt-billing-money')?.textContent).toBe(zh.billingUnpriced)
+  expect(document.querySelector('.dt-billing-provider')?.textContent).toBe('DeepSeek Account')
+  expect(document.querySelector('.dt-billing-provider')?.hasAttribute('data-unpriced')).toBe(true)
+  expect(document.querySelector('.dt-billing-total')?.textContent).toBe('12.3k tokens')
+})
+
+
 it('rings the lane a stored count focus names when the board is opened cold', async () => {
   at({ page: 'editor', query: { view: 'board', focus: 'verification' } })
   await mount()

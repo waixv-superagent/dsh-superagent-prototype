@@ -500,6 +500,24 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 /* The editor page uses the board's working width, not the 960px reading column: its live list and waiting rail need room. */
 .dt-page > .dt-column:has(.dt-editor-grid) { max-width: 1440px; }
 /* Below the readable five-lane width the board scrolls sideways instead of squeezing its lanes into the page. */
+/* Billing strip above the board: which route charges now and what the rolling hour cost. */
+.dt-billing { display: flex; align-items: center; justify-content: space-between; gap: 8px 18px; flex-wrap: wrap; padding: 7px 12px; border: .5px solid var(--dsw-alias-border-l2); border-radius: 10px; background: color-mix(in srgb, var(--dsw-alias-label-caption) 3%, transparent); }
+.dt-billing-now { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.dt-billing-label { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); }
+.dt-billing-provider { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-primary); white-space: nowrap; }
+.dt-billing-provider[data-unpriced] { color: var(--dsw-alias-state-warn-primary); }
+.dt-billing-model { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
+.dt-billing-more { padding: 0 5px; border-radius: 4px; font-size: 11px; line-height: 17px; color: var(--dsw-alias-label-caption); background: var(--dsw-alias-bg-skeleton); cursor: default; }
+.dt-billing-window { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.dt-billing-money { font-size: 15px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-primary); font-variant-numeric: tabular-nums; }
+.dt-billing-money[data-unpriced] { color: var(--dsw-alias-state-warn-primary); font-weight: 500; }
+.dt-billing-unpriced { margin-left: -5px; font-size: 12px; color: var(--dsw-alias-state-warn-primary); cursor: default; }
+.dt-billing-window-label { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); white-space: nowrap; }
+.dt-billing-spark { display: flex; align-items: flex-end; gap: 1px; width: 120px; height: 20px; }
+.dt-billing-bar { flex: 1 1 0; min-width: 1px; border-radius: 1px 1px 0 0; background: color-mix(in srgb, var(--dsw-alias-brand-primary) 70%, transparent); }
+.dt-billing-bar[data-zero] { opacity: .22; }
+.dt-billing-requests { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
+.dt-billing-total { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dt-board-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
 /* Fade the edge that still has hidden lanes, so a narrow page shows the board scrolls sideways (same cue as the tab bar). */
 .dt-board-scroll[data-more='end'] { mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent); }
