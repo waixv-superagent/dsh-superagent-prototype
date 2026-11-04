@@ -26,9 +26,9 @@ it('words a reason by its code with its values, each of a batch, and words a per
 
 it('names every health entry of dsh-superagent itself, which the overview shows when it fails', () => {
   // Each entry by its writer: dsh-superagent, the model budget retries, every kind of the effect queue, Channel messages, the
-  // Executor, the watchdog's outage recovery and the unavailable Evals of the last hour.
+  // Executor, the watchdog's outage recovery, the stall alert and the unavailable Evals of the last hour.
   const entries = { runtime: 0, models: 0, reply: 0, worker: 0, assessment: 0, launch: 0, delivery: 0, relay: 0,
-    notice: 0, watchdog: 0, evals: 0 } satisfies Record<EffectKind | 'runtime' | 'models' | 'reply' | 'worker' | 'watchdog' | 'evals', 0>
+    notice: 0, watchdog: 0, stall: 0, evals: 0 } satisfies Record<EffectKind | 'runtime' | 'models' | 'reply' | 'worker' | 'watchdog' | 'stall' | 'evals', 0>
   expect(Object.keys(entries).filter(name => !(`health.${name}` in zh))).toEqual([])
 })
 

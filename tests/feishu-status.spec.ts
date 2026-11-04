@@ -192,6 +192,19 @@ describe('composeCard', () => {
     // A state API without the field keeps the card it had before the watchdog reported one.
     expect(snapshotOf(overview, runtime).watchdog).toBeNull()
   })
+
+  it('turns orange and names the stalled tickets the stall alert found', () => {
+    const stalled = snapshotOf(overview, { ...runtime, stall: { tickets: 2, items: [] } })
+    const view = composeCard(stalled, { now: at })
+    expect(view.template).toBe('orange')
+    expect(view.title).toBe('🟠 2 张工单疑似卡住')
+    expect(view.summary).toBe('状态｜2 张工单疑似卡住')
+    expect(((view.card.body as { elements: { content?: string }[] }).elements.at(-1)!).content).toContain('面板重试')
+    // An outage being recovered explains the stall, so it stays first; a state API without the field counts none.
+    const both = snapshotOf(overview, { ...runtime, stall: { tickets: 2 }, watchdog: { recovering: true, tickets: 1, master: false, gaveUp: false, missing: false } })
+    expect(composeCard(both, { now: at }).title).toContain('自动恢复中')
+    expect(snapshotOf(overview, runtime).stalled).toBe(0)
+  })
 })
 
 describe('ago', () => {

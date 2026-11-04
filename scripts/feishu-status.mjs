@@ -89,12 +89,15 @@ export function snapshotOf (overview, state) {
   const number = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0
   // 断连恢复状态由 state 里的 watchdog 字段给出；服务端没带这个字段时保持 null，卡片按原来的样子显示。
   const recovery = state?.watchdog && typeof state.watchdog === 'object' ? state.watchdog : undefined
+  // 卡住告警由 state 里的 stall 字段给出；老服务端没有这个字段时按 0 处理。
+  const stall = state?.stall && typeof state.stall === 'object' ? state.stall : undefined
   return {
     online: true,
     paused: state?.paused === true,
     runtime: typeof state?.health?.runtime?.state === 'string' ? state.health.runtime.state : 'ready',
     setupProblem: Boolean(state?.setup?.problem || state?.setup?.feishuProblem),
     problems: count(overview?.problems),
+    stalled: number(stall?.tickets),
     watchdog: recovery ? {
       recovering: recovery.recovering === true,
       tickets: number(recovery.tickets),
@@ -125,7 +128,7 @@ export function snapshotOf (overview, state) {
 
 /** 连不上管理 API 时的快照：不猜数字，只保留“掉线”这个事实。 */
 export function offlineSnapshot (error) {
-  return { online: false, error: String(error?.message ?? error), paused: false, runtime: 'unknown', setupProblem: false, problems: 0, watchdog: null,
+  return { online: false, error: String(error?.message ?? error), paused: false, runtime: 'unknown', setupProblem: false, problems: 0, stalled: 0, watchdog: null,
     counts: null, tickets: null, executor: null }
 }
 
@@ -146,7 +149,7 @@ export function idleMood (now) {
   return IDLE_MOODS[hour % IDLE_MOODS.length]
 }
 
-/** 卡片要呈现的状态优先级：掉线 > 暂停 > 模型上游断连的恢复 > 其他问题 > 等人 > 在跑 > 空闲。 */
+/** 卡片要呈现的状态优先级：掉线 > 暂停 > 模型上游断连的恢复 > 工单卡住 > 其他问题 > 等人 > 在跑 > 空闲。 */
 function stateOf (snapshot, now) {
   if (!snapshot.online) return { kind: 'offline', title: '🔴 掉线了', template: TEMPLATES.offline }
   if (snapshot.paused) return { kind: 'paused', title: '⏸️ 暂停中', template: TEMPLATES.paused }
@@ -154,6 +157,8 @@ function stateOf (snapshot, now) {
   if (snapshot.watchdog?.gaveUp) return { kind: 'watchdog', title: '🔴 模型上游断连 · 自动恢复已停止', template: TEMPLATES.offline }
   if (snapshot.watchdog?.missing) return { kind: 'watchdog', title: '🟠 主对话掉线 · 正在重建', template: TEMPLATES.problem }
   if (snapshot.watchdog?.recovering) return { kind: 'watchdog', title: '🟠 模型上游断连 · 自动恢复中', template: TEMPLATES.waiting }
+  // 卡住的工单不会自己好，人需要去看：排在一般问题前面。
+  if (snapshot.stalled > 0) return { kind: 'stall', title: `🟠 ${snapshot.stalled} 张工单疑似卡住`, template: TEMPLATES.problem }
   if (snapshot.problems > 0 || snapshot.setupProblem) return { kind: 'problem', title: `🟠 有 ${Math.max(snapshot.problems, 1)} 个问题`, template: TEMPLATES.problem }
   if (snapshot.counts.person > 0) return { kind: 'person', title: `🟠 有 ${snapshot.counts.person} 件等你拍板`, template: TEMPLATES.waiting }
   if (snapshot.counts.verification > 0) return { kind: 'verify', title: `🟠 有 ${snapshot.counts.verification} 件等你验证`, template: TEMPLATES.waiting }
@@ -180,6 +185,7 @@ function summaryOf (snapshot, status, now) {
     if (snapshot.watchdog?.missing) return '状态｜主对话掉线，正在重建'
     return '状态｜模型上游断连，自动恢复中'
   }
+  if (status.kind === 'stall') return `状态｜${snapshot.stalled} 张工单疑似卡住`
   const counts = snapshot.counts
   const line = `在跑 ${counts.working} · 待验证 ${counts.verification} · 待拍板 ${counts.person}`
   if (status.kind === 'idle') return `状态｜${line}｜${idleMood(now)}`
@@ -307,6 +313,7 @@ export function composeCard (snapshot, { now = new Date(), lastOkAt = null, link
   if (!snapshot.online) note = '主机服务没响应 · 等待重连'
   else if (snapshot.paused) note = '暂停期间不接新活 · 恢复请点面板'
   else if (snapshot.watchdog && (snapshot.watchdog.recovering || snapshot.watchdog.gaveUp || snapshot.watchdog.missing)) note = watchdogNote(snapshot.watchdog)
+  else if (snapshot.stalled > 0) note = '长时间没有进展 · 已在工单原会话提醒 · 可在面板重试或停止'
   else if (snapshot.problems > 0 || snapshot.setupProblem) note = `面板上有 ${Math.max(snapshot.problems, 1)} 个问题`
   else {
     const executor = snapshot.executor

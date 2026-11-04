@@ -174,6 +174,15 @@ export const IdleConfigSchema = z.object({
   priorityAskMin: z.number().int().min(5).max(720).default(IDLE_DEFAULTS.priorityAskMin),
 }).strict()
 export type IdleSettings = z.infer<typeof IdleConfigSchema>
+/**
+ * The host's stall alert: how long a working Ticket may go without visible progress, and a queued one without starting,
+ * before its conversation hears of it once. `notify: false` keeps the alert on the board and the status card only.
+ */
+export const StallConfigSchema = z.object({
+  minutes: z.number().int().min(5).max(240).default(15),
+  queuedMinutes: z.number().int().min(5).max(480).default(30),
+  notify: z.boolean().default(true),
+}).strict()
 /** Executor settings: worker model, concurrency, ticket directory root (empty defaults to `<stateDir>/work`), `prepare` command, blocked commands, and the delivery backend. */
 export const ExecutorConfigSchema = z.object({
   model: RoleModelSchema.nullable().default(null),
@@ -186,6 +195,8 @@ export const ExecutorConfigSchema = z.object({
   /** When `P2`/`P3` work may start and how a TAPD priority question expires (see `core/idle.ts`). */
   idle: IdleConfigSchema.default(() => IdleConfigSchema.parse({})),
   p4: P4ConfigSchema.default(() => P4ConfigSchema.parse({})),
+  /** When a stalled Ticket is announced; a deployment that never set it keeps the defaults. */
+  stall: StallConfigSchema.default(() => StallConfigSchema.parse({})),
   /** The task center's workspaces: empty means one implicit directory per ticket under `directory` or `<stateDir>/work`. */
   workspaces: z.array(WorkspaceSchema).default([]),
 }).strict()
