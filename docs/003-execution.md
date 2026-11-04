@@ -151,6 +151,8 @@ Once a person's message reached a blocked or failed Ticket, the Executor has the
 
 A retry ends the current Assignment and starts a new one in the same Executor Session, directory, branch and pull request.
 
+A new Assignment answers what the Ticket asked a person: the question it left open, and its unsent reply, go, so the board shows the round that runs now rather than an answer that waits. A P1 plan's question is the exception, since only a person decides that gate, so it stays across a restart.
+
 The Executor model applies only when a Session is created; an existing Session keeps its model.
 ### Restart
 
