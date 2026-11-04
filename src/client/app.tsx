@@ -5,6 +5,7 @@ import { Button, Dot, Icon, Input, Modal, Pill, SegmentedControl, SegmentedTabs 
 import type { DeploymentForm } from './deployment.tsx'
 import { EditorPage } from './editor.tsx'
 import { EvalStatus } from './eval.tsx'
+import { GraphPage } from './graph.tsx'
 import { ExecutionStatus } from './execution.tsx'
 import { ticketMark } from './marks.ts'
 import { GLOSSARY, GLOSSARY_VALUES, en, zh, type DshSuperagentKey } from './locales.ts'
@@ -177,17 +178,21 @@ function Header({ masterId }: { masterId: string | undefined }) {
   </header>
 }
 
-/** 概览 owns two views: the board (the default, since the duty desk is what a person opens most) and the editor page. */
+/**
+ * 概览 owns three views: the board (the default, since the duty desk is what a person opens most), the editor page, and
+ * the relation graph a person reads to see and review how Tickets started one another.
+ */
 function HomePage({ view, focus }: { view?: HomeView; focus?: BoardFocus }) {
   const { t, navigate } = usePanel()
-  const board = view !== 'editor'
+  const current: HomeView = view ?? 'board'
   return <>
     <div className="dt-home-switch">
       <SegmentedControl options={[{ value: 'editor', label: t('homeViewEditor') },
-        { value: 'board', label: t('homeViewBoard') }]} value={board ? 'board' : 'editor'} label={t('homeViewLabel')}
-        onChange={next => navigate(next === 'board' ? { page: 'editor' } : { page: 'editor', query: { view: 'editor' } })} />
+        { value: 'board', label: t('homeViewBoard') }, { value: 'graph', label: t('homeViewGraph') }]} value={current}
+        label={t('homeViewLabel')}
+        onChange={next => navigate(next === 'board' ? { page: 'editor' } : { page: 'editor', query: { view: next } })} />
     </div>
-    {board ? <OverviewPage focus={focus} /> : <EditorPage />}
+    {current === 'board' ? <OverviewPage focus={focus} /> : current === 'graph' ? <GraphPage /> : <EditorPage />}
   </>
 }
 

@@ -18,6 +18,8 @@ export const USER_ERRORS = {
   sourceThread: ['refused', 'This is the thread the ticket started on; it stays subscribed'],
   followedThread: ['refused', 'This thread is the ticket\'s own, such as its pull request\'s; it stays subscribed'],
   notFollowing: ['refused', 'This ticket does not follow that thread'],
+  selfRelation: ['refused', 'A ticket cannot be related to itself'],
+  unknownRelated: ['missing', 'Unknown ticket {ticket}; link to the id of an existing ticket'],
   questionWithResult: ['refused', 'A question for a person cannot also be a ready result or an answer; report it separately'],
   askerWithoutQuestion: ['refused', 'The message that raised a question needs the question it raised'],
   notAsker: ['refused', 'A question must name the person\'s message that raised it, which reached this ticket'],

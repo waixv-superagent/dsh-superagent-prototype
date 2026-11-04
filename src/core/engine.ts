@@ -1,7 +1,7 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
 import { isoTime, liveTicket } from './model.ts'
-import type { Backend, ChannelRef, Decision, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketPipeline, TicketRepair, Trigger } from './model.ts'
+import type { Backend, ChannelRef, Decision, LinkedRelationKind, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketPipeline, TicketRepair, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
 import type { PlanDecision, PlanOption, PlanTemplate, PlanVia } from './plan.ts'
@@ -330,6 +330,14 @@ export class Engine {
     return this.repo.atomic(() => this.tickets.followForContext(ticketId, thread))
   }
   /**
+   * An Executor's record of how its ticket relates to another ticket: see `Tickets.link`.
+   * @returns false when the ticket recorded that relation already.
+   * @throws UserError when either ticket is unknown, the ticket has ended, or it names itself.
+   */
+  link(ticketId: string, kind: LinkedRelationKind, otherId: string, reason: string): boolean {
+    return this.repo.atomic(() => this.tickets.link(ticketId, kind, otherId, reason))
+  }
+  /**
    * A fact the main Session gives an open ticket's Executor: see `Tickets.note`.
    * @throws UserError when the ticket is unknown or has ended.
    */
@@ -404,7 +412,7 @@ export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'redis
 export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
-  | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply'
+  | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'reply'
   | 'submitPlan' | 'advancePhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>

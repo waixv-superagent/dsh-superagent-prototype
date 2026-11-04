@@ -11,6 +11,7 @@ import type { OverviewView } from './views/overview.ts'
 import type { SettingsView } from './views/settings.ts'
 import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
+import type { TicketGraphView } from './views/graph.ts'
 import type { TicketListView, TicketSearchView } from './views/tickets.ts'
 
 export const TICKET_FILTERS = ['open', 'person', 'verify', 'unverified', 'working', 'idle', 'pipeline', 'ended'] as const
@@ -46,6 +47,8 @@ export interface Api {
   'GET tickets': { query?: Paged & { state?: TicketFilter; kind?: TicketKind }; response: TicketListView }
   /** Ticket-first search for the Overview box, ordered by match strength rather than recency alone. */
   'GET tickets/search': { query: { q: string; limit?: number }; response: TicketSearchView }
+  /** Every recent Ticket and how they relate, derived and recorded, for the overview's relation view; read-only. */
+  'GET tickets/graph': { response: TicketGraphView }
   'GET tickets/:id': { response: TicketPageView }
   /** Live execution activity of the ticket's worker; the panel polls the summary collapsed and the reasoning text expanded. */
   'GET tickets/:id/activity': { response: ActivityView }

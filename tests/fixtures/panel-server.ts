@@ -109,6 +109,8 @@ export interface PanelServer {
   person: TicketRow[]; verification: TicketRow[]; working: TicketRow[]; idle: TicketRow[]; pipeline: TicketRow[]; ended: TicketRow[]
   /** Answers `GET tickets/search`; the Overview finder lets a test provide ranked hits. */
   ticketSearch?: (query: string) => ApiResponse<'GET tickets/search'>
+  /** Answers `GET tickets/graph`, the relation view's tickets and edges. */
+  graph: ApiResponse<'GET tickets/graph'>
   search: Pick<ApiResponse<'GET search'>, 'items' | 'threads'> & { tickets?: ApiResponse<'GET search'>['tickets'] }; history: HistoryView
   requests: { path: string; method: string; body?: unknown }[]
   /** Requests with undeclared query params or invalid body presence; asserted empty after each test. */
@@ -270,6 +272,8 @@ const ticketDetail = (): TicketPageView => ({
     { source: 'github', url: 'https://github.com/acme/widgets/issues/42', label: { zh: 'GitHub #42', en: 'GitHub #42' } }],
   reply: undefined,
   plan: undefined,
+  relations: [{ ticket: { id: 't5', title: '补 i18n 文案', stage: 'working' }, kind: 'spawned', via: 'handback', outgoing: true,
+    reason: '文案另开一单' }],
   assignments: [{ id: 'a1', state: 'running', createdAt: '2026-09-22T00:00:00Z',
     startedAt: '2026-09-22T00:01:00Z',
     report: { state: 'progress', summary: 'working', at: '2026-09-22T00:02:00Z' } }],
@@ -277,6 +281,26 @@ const ticketDetail = (): TicketPageView => ({
     trigger: { id: 'e2', actor: actor('feishu', MEMBER), human: true, preview: '顺便改标题', thread: 'feishu:oc_1:om_root' } },
   { id: 'i2', kind: 'policy-changed', at: '2026-09-22T00:04:00Z', delivered: true, from: 'aaaaaaaaaaaaaaaa', to: 'bbbbbbbbbbbbbbbb' }],
 })
+/** A small relation graph: t1 spawned t5 and t6 from hand-backs, t6 supersedes t0, and t7 blocks t8. */
+export const graphView = (): ApiResponse<'GET tickets/graph'> => {
+  const node = (id: string, title: string, createdAt: string, stage: TicketStage['stage'], thread: string, ended?: { outcome: 'completed' | 'stopped' | 'merged'; at: string }) =>
+    ({ id, title, stage, source: 'feishu', createdAt, thread, ...ended ? { outcome: ended.outcome, endedAt: ended.at } : {} })
+  return {
+    nodes: [node('t0', '旧工单', '2026-09-20T02:00:00Z', 'ended', 'feishu:oc_1:om_a', { outcome: 'stopped', at: '2026-09-21T00:00:00Z' }),
+      node('t1', '修复回归', '2026-09-21T03:00:00Z', 'working', 'feishu:oc_1:om_root'),
+      node('t5', '补 i18n 文案', '2026-09-21T09:00:00Z', 'working', 'feishu:oc_1:om_root'),
+      node('t6', '升级依赖', '2026-09-22T01:00:00Z', 'person', 'feishu:oc_1:om_root'),
+      node('t7', 'README 更新', '2026-09-22T04:00:00Z', 'ended', 'github:42', { outcome: 'merged', at: '2026-09-22T20:00:00Z' }),
+      node('t8', '修复移动普攻后接 Q 技能无法起飞', '2026-09-22T06:00:00Z', 'person', 'github:42')],
+    edges: [{ from: 't1', to: 't5', kind: 'spawned', via: 'handback', reason: '文案另开一单', at: '2026-09-21T09:00:00Z' },
+      { from: 't1', to: 't6', kind: 'spawned', via: 'handback', reason: '依赖升级另开一单', at: '2026-09-22T01:00:00Z' },
+      { from: 't6', to: 't0', kind: 'supersedes', via: 'link', reason: '换方案重做', at: '2026-09-22T02:00:00Z' },
+      { from: 't7', to: 't8', kind: 'blocks', via: 'link', reason: '先合 README', at: '2026-09-22T06:00:00Z' },
+      { from: 't5', to: 't6', kind: 'related', via: 'thread', at: '2026-09-22T01:00:00Z' }],
+    lanes: [{ key: 'feishu:oc_1:om_a', title: '旧话题' }, { key: 'feishu:oc_1:om_root', title: '这个文案好奇怪' }, { key: 'github:42', title: '#42 Fix login' }],
+    total: 6,
+  }
+}
 function threadPage(key: string, { before, around }: { before?: string; around?: string }): ThreadPageView | undefined {
   if (key !== threadSummary().key) return undefined
   const base = { ...threadSummary(), tickets: [ticketSummary()], correlated: [{ key: 'github:42', title: 'PR 42' }], decisions: [],
@@ -331,6 +355,7 @@ function initial(): PanelServer {
         tokens: index === 59 ? 20_000 : 0 })),
       priced: true, updatedAt: Date.now(),
     },
+    graph: graphView(),
     working: [ticketSummary({ id: 't5', title: '补 i18n 文案', summary: '第 12 步 · 修改 zh-CN.json' }),
       ticketSummary({ id: 't6', title: '升级依赖', summary: '后台 job · 60 秒无输出', updatedAt: '2026-09-22T23:30:00Z' })],
     idle: [], pipeline: [], ended: [ended],
@@ -378,6 +403,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET state': { answer: stateView },
   'GET overview': { answer: overviewView },
   'GET editor': { answer: editorPageView },
+  'GET tickets/graph': { answer: () => server.graph },
   'GET tickets/search': { query: ['q', 'limit'], answer: ({ query }) => server.ticketSearch?.(String(query.q ?? '')) ?? { tickets: [], total: 0 } },
   'GET search': { query: ['q'], answer: async ({ query }) => {
     const q = query.q ?? ''

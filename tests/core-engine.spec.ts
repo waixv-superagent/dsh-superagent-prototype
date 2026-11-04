@@ -527,6 +527,22 @@ describe('subscription fan-out', () => {
     h.engine.bindThread(first, { source: 'gh', id: 'pr-9' }, true)
     expect(() => h.engine.markUnrelated(first, 'gh:pr-9', 'its PR')).toThrow(new UserError('followedThread'))
   })
+  it('records a worker\'s relation from its ticket to another once, refusing itself, an unknown ticket and an ended ticket', () => {
+    const h = harness()
+    const first = accepted(h).ticketId!
+    const second = accepted(h, '2', 't2').ticketId!
+    expect(h.engine.link(second, 'supersedes', first, 'Redoes the fix another way')).toBe(true)
+    // A retry of the same relation changes nothing and keeps the first reason.
+    expect(h.engine.link(second, 'supersedes', first, 'again')).toBe(false)
+    expect(h.engine.link(second, 'blocks', first, 'Lands first')).toBe(true)
+    expect(h.repo.tickets.get(second)!.relations?.map(({ kind, ticketId, reason }) => ({ kind, ticketId, reason }))).toEqual([
+      { kind: 'supersedes', ticketId: first, reason: 'Redoes the fix another way' }, { kind: 'blocks', ticketId: first, reason: 'Lands first' }])
+    expect(h.repo.tickets.get(first)!.relations).toBeUndefined()
+    expect(() => h.engine.link(second, 'related', second, 'self')).toThrow(new UserError('selfRelation'))
+    expect(() => h.engine.link(second, 'related', 'nope', 'unknown')).toThrow(new UserError('unknownRelated', { ticket: 'nope' }))
+    h.engine.report(first, { state: 'dropped', summary: 'nothing to do' })
+    expect(() => h.engine.link(first, 'related', second, 'late')).toThrow(new UserError('ticketEnded'))
+  })
 })
 describe('resume and stop', () => {
   async function ended(h: ReturnType<typeof harness>, by: 'executor' | 'human') {

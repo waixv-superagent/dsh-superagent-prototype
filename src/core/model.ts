@@ -386,7 +386,22 @@ export interface Ticket {
    * They are the "system handled it" trace a person reads instead of inspecting the ticket.
    */
   repairs?: TicketRepair[]
+  /**
+   * Relations its worker recorded from this ticket to others, oldest first, one per kind and target (see
+   * `Tickets.link`). A `spawned` relation is never stored: the panel derives it from the records (see `app/views/graph.ts`).
+   */
+  relations?: TicketRelation[]
 }
+/**
+ * What one ticket is to another: `spawned` started it (derived, never stored), `supersedes` replaces its work, `blocks` holds
+ * it back until this one lands, and `related` is context only.
+ */
+export type TicketRelationKind = 'spawned' | 'supersedes' | 'blocks' | 'related'
+/** The relation kinds a worker records with `orchestrator_ticket_link`; `spawned` comes from the records instead. */
+export const LINKED_RELATION_KINDS = ['supersedes', 'blocks', 'related'] as const satisfies readonly TicketRelationKind[]
+export type LinkedRelationKind = typeof LINKED_RELATION_KINDS[number]
+/** A relation its worker recorded from the ticket that holds it to `ticketId`, with why. */
+export interface TicketRelation { kind: LinkedRelationKind; ticketId: string; reason: string; at: string }
 /**
  * A Thread a ticket follows, by its key: `own` when the ticket opened it, such as its own pull request, and when and how it
  * closed. `followsDone` holds once no Thread of its own is open, or, when the ticket has no `own` Thread, once every followed
