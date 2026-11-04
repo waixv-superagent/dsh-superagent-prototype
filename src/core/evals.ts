@@ -366,7 +366,7 @@ export class Evals extends EnginePart {
     delete primary.parts
     this.tickets.create(ticketIds[0]!, decision.id, mandate, evaluation, primary, at)
     for (const [index, part] of parts.entries()) {
-      this.tickets.create(ticketIds[index + 1]!, decision.id, mandate, evaluation, { ...work, ...part, acknowledgement: undefined, parts: undefined }, at)
+      this.tickets.create(ticketIds[index + 1]!, decision.id, mandate, evaluation, { ...work, ...part, acknowledgement: undefined, parts: undefined, ticketKind: undefined }, at)
     }
     return decision
   }

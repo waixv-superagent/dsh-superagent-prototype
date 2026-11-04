@@ -38,7 +38,7 @@ export function actor(source: string, id: string, human = true): Actor {
 }
 type TicketFields = Omit<TicketRow, 'stage' | 'action'>
 const TICKET = {
-  id: 't1', title: '修复回归', state: 'open', actions: { retry: false, stop: true, confirm: false, verify: false, rework: false }, strength: 'explicit', source: 'feishu', ended: undefined,
+  id: 't1', title: '修复回归', state: 'open', kind: 'bug', kindSource: 'rule', actions: { retry: false, stop: true, confirm: false, verify: false, rework: false }, strength: 'explicit', source: 'feishu', ended: undefined,
   attention: undefined, assignments: 1, inputs: 2, undelivered: 0, deliveryError: undefined, sessionId: 'worker-t1', directory: '/w/t1',
   summary: 'working on it', createdAt: '2026-09-22T00:00:00Z', updatedAt: '2026-09-23T00:00:00Z',
   threads: [{ key: 'github:42', source: 'github', title: '#42 Fix login', url: 'https://github.com/acme/widgets/pull/42',
@@ -415,8 +415,12 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     server.failing = server.failing.filter(item => item.id !== params.id)
     return { withdrawn: true }
   } },
-  'GET tickets': { query: ['state', 'offset', 'limit'], answer: ({ query }) => page(server.tickets[query.state === 'ended' ? 'ended'
-    : 'open']) },
+  'GET tickets': { query: ['state', 'kind', 'offset', 'limit'], answer: ({ query }) => {
+    const all = server.tickets[query.state === 'ended' ? 'ended' : 'open']
+    const kinds: Partial<Record<TicketRow['kind'], number>> = {}
+    for (const ticket of all) kinds[ticket.kind] = (kinds[ticket.kind] ?? 0) + 1
+    return { ...page(query.kind ? all.filter(ticket => ticket.kind === query.kind) : all), kinds }
+  } },
   'GET tickets/:id': { answer: ({ params }) => server.ticketDetails[params.id] ?? refuse(404, 'Ticket not found') },
   'GET tickets/:id/activity': { answer: ({ params }) => server.activity(params.id) ?? {
     live: false, updatedAt: 0, tool: null, recent: [] } },

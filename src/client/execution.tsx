@@ -1,6 +1,7 @@
 /** Execution status view (active Tickets and pause control) and Execution settings group (Executor capacity and workspace environment). */
 import { useRef, useState } from 'react'
 import { TICKET_FILTERS, type TicketFilter } from '../app/api.ts'
+import { TICKET_KINDS, type TicketKind } from '../core/kind.ts'
 import { LIMITS } from '../limits.ts'
 import { usePoll, type SettingsView, type SourceView, type StateView } from './api.ts'
 import { DisclosureRow, Icon, InfoTip, Input, Pill, SegmentedControl } from './controls.tsx'
@@ -11,12 +12,13 @@ import { ConfigHistory, Field, Fields, ModelField, numberOf, useBlockDraft, useS
 import { localized } from './text.ts'
 import { ConfirmButton, Hint, LabelValue, LoadMore, LoadState, Section, StatusHead } from './widgets.tsx'
 
-export function ExecutionStatus({ filter: current, state, reload }: {
-  filter: TicketFilter; state: StateView; reload: () => Promise<void>
+export function ExecutionStatus({ filter: current, kind, state, reload }: {
+  filter: TicketFilter; kind?: TicketKind; state: StateView; reload: () => Promise<void>
 }) {
   const { t, call, navigate } = usePanel()
   const [limit, setLimit] = useState(20)
-  const { data, error, reload: reloadTickets } = usePoll(() => call('GET tickets', { query: { state: current, limit } }), [current, limit])
+  const { data, error, reload: reloadTickets } = usePoll(() => call('GET tickets', { query: { state: current, limit, ...kind ? { kind } : {} } }),
+    [current, kind, limit])
   const { paused } = state
   // Pausing uses its own block revision so toggling pause does not invalidate an open Execution settings draft.
   const pause = async () => { await call('POST executor/pause', { body: { paused: !paused } }); await reload() }
@@ -38,8 +40,15 @@ export function ExecutionStatus({ filter: current, state, reload }: {
     </div>
     <div className="dt-filters">
       {TICKET_FILTERS.map(value => <Pill key={value} active={current === value}
-        onClick={() => { setLimit(20); navigate({ page: 'execution', query: value === 'open' ? {} : { filter: value } },
+        onClick={() => { setLimit(20); navigate({ page: 'execution', query: { ...value === 'open' ? {} : { filter: value }, ...kind ? { kind } : {} } },
           true) }}>{t(`ticketFilter.${value}`)}</Pill>)}
+    </div>
+    {/* The kind of work cuts across the stage filters above: it narrows the same list and counts that stage's tickets per kind. */}
+    <div className="dt-filters dt-kind-filters" role="group" aria-label={t('ticketKindLabel')}>
+      {[undefined, ...TICKET_KINDS].map(value => <Pill key={value ?? 'all'} active={kind === value}
+        onClick={() => { setLimit(20); navigate({ page: 'execution', query: { ...current === 'open' ? {} : { filter: current }, ...value ? { kind: value } : {} } },
+          true) }}>{value ? t(`ticketKind.${value}`) : t('ticketKindAll')}
+        {data && <span className="dt-count">{value ? data.kinds[value] ?? 0 : Object.values(data.kinds).reduce((sum, count) => sum + (count ?? 0), 0)}</span>}</Pill>)}
     </div>
     {current === 'idle' && <Hint>{t('idleHint')}</Hint>}
     <LoadState error={error} loading={!data} />

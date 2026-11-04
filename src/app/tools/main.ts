@@ -2,8 +2,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { z } from 'zod'
-import { UserError, followupOwners, key, reasonText, type Decision, type DecisionKind, type EngineForMainSession, type EngineForPeople }
-  from '../../core/index.ts'
+import { TICKET_KINDS, UserError, followupOwners, key, reasonText, type Decision, type DecisionKind, type EngineForMainSession, type EngineForPeople,
+  type TicketKind } from '../../core/index.ts'
 import { IM_WORDS, NOTE_WORDS, wordCount } from '../../infra/text.ts'
 import { AssessmentSchema, EscalationSchema, EvalReadSchema, WorktreeNameSchema, type MasterAssessor } from '../assessment.ts'
 import { ticketCard } from '../cards.ts'
@@ -66,6 +66,8 @@ const RouteItemSchema = z.object({
     + 'slug or URL its GitHub Source watches, a Perforce depot path, or one of that depot\'s workspace ids or directories. The host resolves the '
     + 'delivery channel from that list; never name a channel or ask a person to choose one.'),
   reason: z.string().nullish().describe('chat, ignore and stop: why, at most 500 characters; an ignore needs it.'),
+  ticket_kind: z.string().nullish().describe('accept: the kind of work, for counting and filtering only: feature (something new), bug (existing behavior is wrong), '
+    + 'self (this agent\'s own iteration), inquiry (an answer, analysis or review); left out, the host derives it from the Source and title.'),
   parts: z.array(z.object({
     title: z.string().trim().min(1).max(200).describe('The further goal as one short label, without added requirements or implementation advice.'),
     worktree_name: WorktreeNameSchema,
@@ -88,6 +90,7 @@ const FIELDS: Record<Field, { check: z.ZodType; reads: readonly Kind[]; needs: r
   paths: { check: z.array(z.string().trim().min(1).max(300)).max(20), reads: ['accept'], needs: [] },
   target: { check: z.string().trim().min(1).max(300), reads: ['accept'], needs: [] },
   reason: { check: z.string().max(500), reads: ['chat', 'ignore', 'stop'], needs: ['ignore'] },
+  ticket_kind: { check: z.enum(TICKET_KINDS), reads: ['accept'], needs: [] },
   parts: { check: z.array(z.unknown()).max(3), reads: ['accept'], needs: [] },
 }
 /** Why an item cannot run: a field its kind needs is missing, or one it reads breaks its limit. */
@@ -143,7 +146,8 @@ function route(host: MainToolsHost, item: RouteItem, decided: ReadonlyMap<string
       const before = host.store.triggers.disposition(item.trigger_id)?.decisionId
       const decision = host.engine.decide(item.trigger_id, { kind: 'accept', title: item.title!, scope: item.title!, reason: { code: 'explicitRouted' },
         acknowledgement: item.acknowledgement!, name: item.worktree_name!, ...note, ...(item.paths?.length ? { paths: item.paths } : {}),
-        ...(target ? { target: target.target } : {}), ...(parts.length ? { parts } : {}) })
+        ...(target ? { target: target.target } : {}), ...(parts.length ? { parts } : {}),
+        ...(item.ticket_kind ? { ticketKind: item.ticket_kind as TicketKind } : {}) })
       // A Decision that created no ticket is the item's refusal; one that existed before keeps what it was accepted with.
       if (decision.kind !== 'accept' || !decision.ticketId) return { refused: `Ticket was not created: ${reasonText(decision.reason)}` }
       if (decision.id === before) {

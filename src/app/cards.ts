@@ -1,5 +1,5 @@
 /** Compact, bounded model-facing projections of triggers, tickets, threads, and decisions; full texts stay behind readable resources. */
-import { latestReport, reasonText, threadKey, ticketPhase, ticketStage, waitingOf, type Decision, type Mandate, type Thread, type Ticket, type TicketInput,
+import { latestReport, reasonText, threadKey, ticketKind, ticketPhase, ticketStage, waitingOf, type Decision, type Mandate, type Thread, type Ticket, type TicketInput,
   type Trigger, type TriggerDisposition } from '../core/index.ts'
 import { pullOf } from '../sources/github-pull.ts'
 import { batchLine, inputResource } from '../executor/dsh.ts'
@@ -30,7 +30,7 @@ export function ticketCard(ticket: Ticket) {
   const gate = ticket.plan?.waiting && !ticket.plan.approved ? { at: ticket.plan.at, preview: preview(ticket.plan.text), ...ticket.plan.deadline ? { deadline: ticket.plan.deadline } : {},
     ...ticket.plan.question ? { question: ticket.plan.question } : {}, ...ticket.plan.options?.length ? { options: ticket.plan.options } : {} } : undefined
   return { ticket_id: ticket.id, title: ticket.title, state: cardState(ticket), phase: ticketPhase(ticket), strength: ticket.mandate.strength,
-    ...(ticket.category ? { category: ticket.category } : {}),
+    ...(ticket.category ? { category: ticket.category } : {}), kind: ticketKind(ticket).kind,
     // Who the ticket waits for and what it is doing, so a reader does not have to translate a stage word into an action.
     next: waitingOf(ticket),
     // Where the ticket stands in the queue: its level and who set it, a question nobody answered yet, and whether it waits for idle.

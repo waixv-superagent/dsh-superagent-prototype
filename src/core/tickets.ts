@@ -6,6 +6,7 @@ import type { Assignment, Backend, ChannelRef, Evaluation, Follow, Mandate, Pipe
   TicketInput, TicketOutcome, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
+import { classifyTicket } from './kind.ts'
 import { missingPlanLabels, pendingPlan, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planTemplate, ticketPhase, validPlanOptions, validQuestionSections,
   type PlanDecision, type PlanOption, type PlanTemplate, type PlanVia, type TicketPhase } from './plan.ts'
 import { defaultPriority, priorityAskDeadline, PRIORITY_ASK_MINUTES, priorityAskOverdue, systemPriority, waitsForIdle, type PriorityLevel,
@@ -62,6 +63,10 @@ export class Tickets extends EnginePart {
       if (channel && !ticket.channels.some(item => sameChannel(item, channel))) ticket.channels.push(channel)
     }
     ticket = this.options.prepareTicket?.(ticket, outcome) ?? ticket
+    // Every new ticket gets a kind, once its delivery environment is known: the router's, else the Source's, else the title's.
+    const kind = classifyTicket({ ...outcome.ticketKind ? { routed: outcome.ticketKind } : {}, ...outcome.category ? { category: outcome.category } : {},
+      source: primary?.source ?? mandate.actor.source, ...ticket.execution?.backend ? { backend: ticket.execution.backend } : {}, title: ticket.title })
+    ticket = { ...ticket, kind: kind.kind, kindSource: kind.source }
     const assignment = this.newAssignment(ticket)
     this.repo.tickets.save(ticket)
     for (const triggerId of triggerIds) for (const ref of this.repo.triggers.get(triggerId)?.threads ?? []) this.subscribe(id, ref)

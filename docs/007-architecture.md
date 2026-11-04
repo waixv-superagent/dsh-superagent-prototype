@@ -323,6 +323,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/core/errors.ts` | `UserError` and `USER_ERRORS` |
 | `src/core/reasons.ts` | `Reason`, `REASONS` and `reasonText`: why the core recorded a Decision or set a Trigger aside, by code |
 | `src/core/ids.ts` | `key`: ids derived from their inputs, equal for equal inputs |
+| `src/core/kind.ts` | Ticket kinds (docs/020): `classifyTicket`, the order router, Source, then title rule, and `ticketKind`, which derives one for an older ticket |
 | `src/core/memory.ts` | `MemoryRepositories`: the Store's repositories in memory, in the Store's order and with its nested rollback, for domain tests |
 | `src/core/index.ts` | The core's exports |
 | `src/app/runtime.ts` | The Runtime, the composition root, with its start and stop |
@@ -467,6 +468,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/runtime.spec.ts` | The whole application on a simulated DeepSeek Harness host, through tools and HTTP |
 | `tests/smoke.spec.ts` | S1 smoke: accept, a worker with its tools, its readable transcript, a ready report, and the ticket's end |
 | `tests/worker-tools.spec.ts` | The worker tool face: a normal profile passes and reports `worker-tools` ready, a profile that resolves none blocks the Assignment at launch naming the tools |
+| `tests/kind.spec.ts` | Ticket kinds: the classification order, the derivation for older tickets, and the kind each created ticket and split part records |
 | `tests/invariants.spec.ts` | I4 reprojection: relaunching a pending Assignment whose launch effect is gone, restarting a running one with no live worker, re-queuing delivery, the repair limit, and the trace on the ticket row |
 | `tests/session-recovery.spec.ts` | Session store recovery: bounded reopen retries, a blocked report that keeps the history when the store stays unreadable, and a shutdown that tolerates a failed flush |
 | `tests/tools.spec.ts` | The Sessions' tools: what `orchestrator_read` reads for each role, and the shapes and checks of the other main Session tools |

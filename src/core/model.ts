@@ -3,6 +3,7 @@ import type { Reason } from './reasons.ts'
 import type { Plan, TicketPhase } from './plan.ts'
 import type { IdleLevel } from './idle.ts'
 import type { PriorityAsk, TicketPriority } from './priority.ts'
+import type { TicketKind, TicketKindSource } from './kind.ts'
 
 /** Actor identity in the source's own vocabulary; Policy decides which actors may originate work on that Source. */
 export interface ActorRef { source: string; id: string }
@@ -328,6 +329,13 @@ export interface Ticket {
    * daily budget counts the tickets whose `launchedIn` falls on the current day.
    */
   idle?: { enteredAt: string; launchedIn?: IdleLevel; launchedAt?: string }
+  /**
+   * What kind of work it is, decided at acceptance (`core/kind.ts`): every ticket created since kinds exist has one; read
+   * it through `ticketKind`, which derives it for older tickets. A label for counting and filtering, never an authority.
+   */
+  kind?: TicketKind
+  /** Who decided `kind`: the router's accept, the Source or delivery target, or the title rule. */
+  kindSource?: TicketKindSource
   /** The Channels of the messages it was accepted from. */
   channels: ChannelRef[]
   /** Where its replies go now; a Source may move them to a conversation it opened, such as a topic. */

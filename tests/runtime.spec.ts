@@ -256,6 +256,32 @@ it('relays an explicit member mention as a candidate and creates the ticket, ack
   expect(await route({ kind: 'accept', trigger_id: trigger.id, title: 'again', worktree_name: worktreeName, acknowledgement: 'x' })).toMatchObject({ ticket: { ticket_id: ticket.id } })
 })
 
+it('records the kind an accept names, derives one otherwise, and lets the board filter and count tickets by kind', async () => {
+  const { ticket } = await acceptedTicket()
+  // The default backend here is git, the deployment's own repository: work there is the agent's self-iteration.
+  expect(ticket).toMatchObject({ kind: 'self', kindSource: 'source' })
+  const other = feishu('5', '@bot 为什么昨天的单都失败了')
+  await receive(other)
+  const routed = await route({ kind: 'accept', trigger_id: other.id, title: '分析昨天的失败', worktree_name: 'analyse-failures',
+    acknowledgement: '收到，分析失败原因。', ticket_kind: 'inquiry' })
+  const asked = runtime.store.tickets.get((routed.ticket as { ticket_id: string }).ticket_id)!
+  expect(asked).toMatchObject({ kind: 'inquiry', kindSource: 'router' })
+  expect(routed.ticket).toMatchObject({ kind: 'inquiry' })
+  const wrong = feishu('6', '@bot 再看看')
+  await receive(wrong)
+  const { results } = await runTool(runtime.masterId, 'orchestrator_route', { decisions: [{ kind: 'accept', trigger_id: wrong.id, title: 'x',
+    worktree_name: 'look-again', acknowledgement: '收到。', ticket_kind: 'chore' }] }) as { results: Record<string, unknown>[] }
+  expect(String(results[0]!.refused)).toMatch(/^ticket_kind:/)
+  const all = (await api('GET', 'tickets')).body as { kinds: Record<string, number>; items: { id: string; kind: string; kindSource: string }[] }
+  expect(all.kinds).toEqual({ self: 1, inquiry: 1 })
+  expect(all.items.map(item => item.kind).sort()).toEqual(['inquiry', 'self'])
+  const filtered = (await api('GET', 'tickets?kind=inquiry')).body as typeof all
+  expect(filtered.items.map(item => item.id)).toEqual([asked.id])
+  // The counts stay those of the whole stage, so every pill keeps its own total while one kind is shown.
+  expect(filtered.kinds).toEqual({ self: 1, inquiry: 1 })
+  expect(((await api('GET', 'tickets?kind=nonsense')).body as typeof all).items).toHaveLength(2)
+})
+
 it('fans a person\'s later thread message out to the live worker as context and tells the orchestrator, without an Eval', async () => {
   const { ticket, sessionId } = await acceptedTicket()
   deliveries.mockClear()

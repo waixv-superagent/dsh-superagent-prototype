@@ -2,6 +2,7 @@
 import type { Assignment, ChannelRef, Decision, DecisionKind, Escalation, Mandate, MandateBasis, QuestionSection, Strength, Thread, Ticket, TicketEndBy, TicketOutcome, Trigger }
   from './model.ts'
 import type { Reason } from './reasons.ts'
+import type { TicketKind } from './kind.ts'
 
 /** Gate admission result: either inadmissible with a reason code, or admissible with strength and MandateBasis. */
 export type GateResult = { admissible: false; reason: string } | { admissible: true; strength: Strength; basis: MandateBasis }
@@ -45,10 +46,11 @@ export type AssessmentOutcome =
    * worker, `paths` the files the change is expected to touch, which the task center leases so a peer may work beside it,
    * and `target` the configured repository or workspace its work belongs to, which the executor resolves to a delivery
    * environment; absent means the Source or the deployment's configured backend decides.
-   * `category` marks the ticket a defect or a feature, set only by an escalation.
+   * `category` marks the ticket a defect or a feature, set only by an escalation; `ticketKind` the kind of work the
+   * router judged it, which the host otherwise derives (`core/kind.ts`).
    */
   | { kind: 'accept'; title: string; scope: string; reason: string | Reason; acknowledgement?: string; rules?: string[]; audit?: Record<string, unknown>;
-    name?: string; note?: string; paths?: string[]; category?: 'bug' | 'feature'; target?: string
+    name?: string; note?: string; paths?: string[]; category?: 'bug' | 'feature'; target?: string; ticketKind?: TicketKind
     /**
      * The other separable goals of the same message, each opened as its own ticket under this Decision. One source message
      * becomes one Decision and 1–4 tickets; only the first carries the receipt, and every part follows the same threads.

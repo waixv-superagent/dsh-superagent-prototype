@@ -88,8 +88,9 @@ it('shows a follow-up delivered to its Ticket without an Eval, a hand-back with 
   expect(events()).toEqual([['message f2', [zh.dispositionQueued], '“修复回归”的执行器把这条触发交回评估：Asks for a new page'],
     ['message f1', [zh.dispositionDelivered], undefined]])
   expect(document.querySelector(`.dt-tag[title="${zh.dispositionDeliveredHint}"]`)).not.toBeNull()
-  expect(all('.dt-list .dt-ticket').map(row => [row.querySelector('.dt-open')?.textContent, row.querySelector('.dt-tag')?.textContent]))
-    .toEqual([['修复回归', undefined], ['相关工单', zh.contextOnly]])
+  // Each row leads with its kind tag; a context-only ticket adds its context tag after it.
+  expect(all('.dt-list .dt-ticket').map(row => [row.querySelector('.dt-open')?.textContent, [...row.querySelectorAll('.dt-tag')].map(tag => tag.textContent)]))
+    .toEqual([['修复回归', ['缺陷']], ['相关工单', ['缺陷', zh.contextOnly]]])
   await remount(en)
   expect(events()[1]).toEqual(['message f1', [en.dispositionDelivered], undefined])
   expect(events()[0]![2]).toBe('The Executor of “修复回归” handed it back for an Eval: Asks for a new page')

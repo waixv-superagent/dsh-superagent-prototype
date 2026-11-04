@@ -1,5 +1,6 @@
 /** Type-only management API contract between the web panel and host routes, imported by the panel without bundling host code. */
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
+import type { TicketKind } from '../core/kind.ts'
 import type { PlanDecision } from '../core/plan.ts'
 import type { ActivityView } from './activity.ts'
 import type { PromptConfig, Prompts } from './prompts.ts'
@@ -39,7 +40,7 @@ export interface Api {
   'POST outbox/:id/retry': { response: { retried: true } }
   /** Withdraws a waiting Channel message, so it is never sent. */
   'POST outbox/:id/withdraw': { response: { withdrawn: true } }
-  'GET tickets': { query?: Paged & { state?: TicketFilter }; response: TicketListView }
+  'GET tickets': { query?: Paged & { state?: TicketFilter; kind?: TicketKind }; response: TicketListView }
   /** Ticket-first search for the Overview box, ordered by match strength rather than recency alone. */
   'GET tickets/search': { query: { q: string; limit?: number }; response: TicketSearchView }
   'GET tickets/:id': { response: TicketPageView }
