@@ -3,7 +3,7 @@ import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, latestReport, liveTicket, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
 import type { Assignment, Backend, ChannelRef, Evaluation, Follow, Mandate, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketEndBy,
-  TicketInput, TicketOutcome, TicketPipeline, Trigger, TriggerDisposition } from './model.ts'
+  TicketInput, TicketOutcome, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { missingPlanLabels, pendingPlan, planOverdue, PLAN_GATE_HOURS, PLAN_QUESTION, ticketPhase, validCardOptions, validQuestionSections, type PlanDecision,
@@ -874,6 +874,18 @@ export class Tickets extends EnginePart {
   private endAssignment(ticket: Ticket, assignment: Assignment, reason: string): void {
     assignment.state = 'ended'; assignment.endedAt = this.now(); assignment.endedReason = reason
     this.emit('assignment.ended', { ticketId: ticket.id, assignmentId: assignment.id, reason })
+  }
+  /**
+   * Record a state the host found provably inconsistent and repaired on its own, keeping the last five as the system's trace
+   * (the "system handled it" line the board reads). A person's own notes are separate fields and are never rewritten.
+   * @throws UserError when the ticket is unknown.
+   */
+  recordRepair(ticketId: string, repair: Omit<TicketRepair, 'at'>, at = this.now()): Ticket {
+    const ticket = this.require(ticketId)
+    ticket.repairs = [...ticket.repairs ?? [], { ...repair, at }].slice(-5)
+    ticket.updatedAt = at
+    this.repo.tickets.save(ticket)
+    return ticket
   }
   /**
    * Give an open ticket's Executor a fact as a note Input, such as what another ticket found; it grants nothing (see `TicketInput`).

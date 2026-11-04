@@ -131,8 +131,9 @@ export class Runtime extends Service implements SourceHost {
       const resources: ResourceHost = { store, pages: new TextCache(4_000_000), prompts, commands, masterId, context: ctx,
         promptVersion: id => this.sessions.promptVersion(id), mayRead: (id, revision) => this.sessions.mayRead(id, revision),
         feishuPageSize: () => feishuSettings(sources).readPageSize, sourceLink: link }
-      const sessions = this.sessions = new Sessions({ context: ctx, store, prompts, effects, health: board.claim('models'), masterId,
-        lifetime: this.lifetime, wroteInSession: (id, text) => this.engine.wroteInSession(id, text),
+      const sessions = this.sessions = new Sessions({ context: ctx, store, prompts, effects, health: board.claim('models'),
+        toolsHealth: board.claim('worker-tools', { state: 'starting', detail: 'No worker Session has started yet' }),
+        masterId, lifetime: this.lifetime, wroteInSession: (id, text) => this.engine.wroteInSession(id, text),
         closing: () => this.closing(), environment,
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }
@@ -199,7 +200,8 @@ export class Runtime extends Service implements SourceHost {
         health: board.claim('watchdog', { state: 'ready', detail: 'No passing model or network failure waits for automatic recovery' }),
         paused: () => this.paused(), warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       const passes = this.passes = new Passes({ engine: { receive: trigger => engine.receive(trigger), evaluateDue }, effects,
-        health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing() })
+        health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing(),
+        reproject: () => this.executor.reproject() })
       this.sourceDeps = { store, engine, outbox, commands, sources, get ready() { return runtime.ready },
         get deployment() { return setup.deployment }, configured: () => setup.configured(),
         get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => passes.receive(trigger),
@@ -296,7 +298,11 @@ export class Runtime extends Service implements SourceHost {
       this.activity.dispose()
       this.editor.dispose()
       for (const dispose of this.disposers.reverse()) dispose()
-      await this.ctx.sessionPersistence.flush()
+      // A flush failure must not keep the host from stopping and starting again: the event log is durable for the next open,
+      // whose write path truncates a torn tail, and the failure is logged instead of rejecting the stop.
+      await this.ctx.sessionPersistence.flush().catch(error => {
+        this.ctx.logger.warn('dsh-superagent could not flush the session store before shutdown: %s', String(error))
+      })
     } finally {
       // Close the database before releasing the directory lock so another process cannot open the database mid-write; a compromised lock may already be released.
       this.setup.restore()

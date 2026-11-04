@@ -1,7 +1,7 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
 import { isoTime, liveTicket } from './model.ts'
-import type { Backend, ChannelRef, Decision, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketPipeline, Trigger } from './model.ts'
+import type { Backend, ChannelRef, Decision, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketPipeline, TicketRepair, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
 import type { PlanDecision, PlanOption, PlanVia } from './plan.ts'
@@ -355,6 +355,18 @@ export class Engine {
   assignmentInterrupted(ticketId: string, assignmentId: string): void {
     this.repo.atomic(() => { this.assignments.interrupted(ticketId, assignmentId) })
   }
+  /**
+   * The Executor's fact that a Ticket's state was provably inconsistent and the host repaired it: the repair is kept on the
+   * ticket as the system's trace (I4), so the board can show what was handled without a person inspecting it.
+   */
+  repaired(ticketId: string, repair: Omit<TicketRepair, 'at'>): Ticket { return this.repo.atomic(() => this.tickets.recordRepair(ticketId, repair)) }
+  /**
+   * The Executor found a running Assignment with no live worker Session: restart it with a recovery note, or after repeated
+   * repairs report the Ticket blocked for a person instead of looping.
+   */
+  repairAssignment(ticketId: string, assignmentId: string): void {
+    this.repo.atomic(() => { this.assignments.repairAssignment(ticketId, assignmentId) })
+  }
 
   // Settings
 
@@ -378,8 +390,8 @@ export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'redis
 export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
-  | 'assignmentInterrupted' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply' | 'submitPlan' | 'advancePhase'
-  | 'recordPipeline' | 'rerunPipeline'>
+  | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply'
+  | 'submitPlan' | 'advancePhase' | 'recordPipeline' | 'rerunPipeline'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>
 /** What the host's watchdog tells the Engine: it recovers a ticket its worker stopped on a passing failure. */

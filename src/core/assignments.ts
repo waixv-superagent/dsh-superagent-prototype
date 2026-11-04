@@ -4,6 +4,7 @@ import { UserError } from './errors.ts'
 import { latestAssignment, liveTicket, runningAssignment } from './model.ts'
 import type { Assignment, QuestionSection, ReportState, Ticket } from './model.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
+import { REPAIR_LIMIT } from './invariants.ts'
 import { pendingPlan, validCardOptions, validQuestionSections, ticketPhase } from './plan.ts'
 import type { Replies } from './replies.ts'
 import { automatic, type Tickets } from './tickets.ts'
@@ -38,6 +39,10 @@ export interface WorkerReport {
   delivery?: DeliveryFacts
 }
 const RECOVERY_NOTE = 'The host restarted during this ticket. Inspect the current worktree, its delivery state and the ticket\'s records before continuing. Do not repeat an already completed external operation. Finish the original assignment and report its status.'
+/** What a worker reads when the host restarted an Assignment it found running with no live worker. */
+const REPAIRED_NOTE = 'The host found this Assignment running with no live worker Session and restarted it. Inspect the current worktree, '
+  + 'its delivery state and the ticket\'s records before continuing. Do not repeat an already completed external operation. '
+  + 'Finish the original assignment and report its status.'
 /**
  * The note a restarted Assignment starts from: the recovery instruction plus what its ticket already reported, so the resumed
  * worker neither redoes settled work nor submits again a plan a person may already have answered.
@@ -120,6 +125,30 @@ export class Assignments extends EnginePart {
     const settled = !!report && ['waiting', 'ready', 'blocked', 'failed'].includes(report.state) && !busy
     if (!settled) this.tickets.restart(ticket, running, 'hostRestarted', recoveryNote(ticket, running))
     else if (ticket.undelivered.length) this.options.executor.deliver(ticket, running)
+  }
+  /**
+   * The Executor found a running Assignment with no live worker Session and no report (I4): record the repair and restart it
+   * with a recovery note in the same worker Session. After `REPAIR_LIMIT` such repairs the host stops repairing it and reports
+   * the Ticket blocked, so a persistent defect goes to a person instead of looping.
+   */
+  repairAssignment(ticketId: string, assignmentId: string): void {
+    const ticket = this.running(ticketId, assignmentId)
+    const running = ticket && runningAssignment(ticket)
+    if (!ticket || !running) return
+    const repaired = (ticket.repairs ?? []).filter(item => item.invariant === 'assignment').length
+    if (repaired >= REPAIR_LIMIT) {
+      this.report(ticketId, { state: 'blocked', summary: 'The host found this Assignment running with no live worker Session more than twice '
+        + 'and stopped repairing it automatically. Inspect the worker Session (it may have been deleted or corrupted), then retry, '
+        + 'redispatch, or stop the ticket.' })
+      return
+    }
+    // Read the ticket back after recording the repair: the restart saves the whole Ticket, so it must be the copy that carries
+    // the repair, and the copy whose running Assignment this restart ends.
+    const updated = this.tickets.recordRepair(ticketId, { invariant: 'assignment', action: 'restart', assignment: assignmentId,
+      detail: 'The Assignment ran with no live worker Session and had not reported; the host restarted it with a recovery note' })
+    const current = runningAssignment(updated)
+    if (!current) return
+    this.tickets.restart(updated, current, 'stateRepaired', REPAIRED_NOTE)
   }
   /**
    * Records a worker status report on an open ticket's current assignment, updating `attention`, `answers`, held automated
@@ -212,4 +241,3 @@ export class Assignments extends EnginePart {
     return liveTicket(ticket) && runningAssignment(ticket)?.id === assignmentId ? ticket : undefined
   }
 }
-

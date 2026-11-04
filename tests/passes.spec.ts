@@ -8,8 +8,9 @@ function passes(closing = () => false) {
   const health = new HealthBoard().claim('runtime', { state: 'starting', detail: '' })
   const engine = { receive: vi.fn(() => 'stored' as const), evaluateDue: vi.fn() }
   const effects = { kick: vi.fn(), idle: vi.fn(async () => {}) }
-  const value = new Passes({ engine, effects, health, lifetime: new AbortController().signal, configured: () => true, closing })
-  return { passes: value, engine, effects, health }
+  const reproject = vi.fn()
+  const value = new Passes({ engine, effects, health, lifetime: new AbortController().signal, configured: () => true, closing, reproject })
+  return { passes: value, engine, effects, health, reproject }
 }
 const trigger = { id: 't1', source: 'feishu', threads: [{ source: 'feishu', id: 'oc_1:om_1' }], actor: { source: 'feishu', id: 'ou_a' }, human: true,
   at: '2026-10-01T00:00:00.000Z', text: 'hi', meta: {} } as Trigger
@@ -25,12 +26,13 @@ it('reports a failed pass as an error of the runtime, which the next pass that s
   expect(h.health.get()).toMatchObject({ state: 'ready', detail: 'Orchestrator is ready' })
 })
 
-it('runs the passes asked for during a pass as one pass after it', async () => {
+it('runs the passes asked for during a pass as one pass after it, and reprojects state after each', async () => {
   const h = passes()
   await Promise.all([h.passes.pump(), h.passes.pump(), h.passes.pump(), h.passes.pump()])
   expect([h.engine.evaluateDue.mock.calls.length, h.effects.kick.mock.calls.length]).toEqual([2, 2])
   await h.passes.pump()
   expect(h.engine.evaluateDue).toHaveBeenCalledTimes(3)
+  expect(h.reproject).toHaveBeenCalledTimes(3)
 })
 
 it('refuses a Trigger while dsh-superagent stops, before the Engine stores anything, and starts a pass for one it stored', async () => {

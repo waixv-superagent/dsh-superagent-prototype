@@ -4,9 +4,9 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { mkdir, rmdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
-import type { AssessmentOutcome, Assignment, Backend, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
-  from '../core/index.ts'
+import { key, latestAssignment, latestReport, liveTicket, reprojectable, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
+import type { AssessmentOutcome, Assignment, Backend, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, TicketRepair,
+  Trigger } from '../core/index.ts'
 import type { Machine } from '../deployment.ts'
 import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
 import type { Settings } from '../policy.ts'
@@ -16,6 +16,7 @@ import { deliveryKey, resolveDelivery } from '../app/delivery-targets.ts'
 import { claimsWorkspace, conflicts, normalizePath, place, workspaceClient, type Active, type Peer, type Workspace } from './workspace.ts'
 import { executionRoot, p4Prepare, type Variable } from '../app/execution-environment.ts'
 import type { Sessions } from '../app/sessions.ts'
+import { MissingWorkerTools } from '../app/worker-tools.ts'
 import { WorktreeNameSchema } from '../app/assessment.ts'
 import { resultRelay } from '../app/notices.ts'
 import type { HealthEntry } from '../infra/health.ts'
@@ -36,6 +37,8 @@ const BACKGROUND_LIMIT_MS = 30 * 60_000
 const SHUTDOWN_STOP_MS = 10_000
 /** How long a worker that goes on after a passing failure waits for a worker slot, or for processing to resume, between looks. */
 const SLOT_WAIT_MS = 5000
+/** How often the Executor looks for provably inconsistent Ticket state, so a pass does not rescan it every two seconds. */
+const REPROJECT_INTERVAL_MS = 30_000
 /** True when an input comes from a person (a non-context human trigger, a direct text input such as a status request, or a
  * message they wrote in the worker's Session). */
 const fromPerson = (input?: TicketInput): boolean => input?.kind === 'trigger' ? !!input.human && !input.context
@@ -96,18 +99,18 @@ export interface ExecutorHost {
   readonly context: Context
   /** Where the Executor reports what happened to Assignments and Inputs. */
   readonly engine: Pick<EngineForExecutor, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed' | 'report'
-    | 'assignmentInterrupted'>
+    | 'assignmentInterrupted' | 'repaired' | 'repairAssignment'>
   readonly store: Pick<Store, 'tickets' | 'triggers' | 'set' | 'settings' | 'atomic' | 'afterCommit'>
   /** The GitHub repository this deployment watches, one of the configured delivery targets; empty without a GitHub Source. */
   readonly repository: string
   /** Durable effect queue through which launches and input deliveries run. */
-  readonly effects: Pick<Effects, 'enqueue' | 'handle'>
+  readonly effects: Pick<Effects, 'enqueue' | 'handle' | 'pending'>
   /** The `worker` health entry, which reports whether background worker event handling failed. */
   readonly health: HealthEntry
   readonly machine: Pick<Machine, 'stateDir'>
   readonly lifetime: AbortSignal
   /** Session manager for worker sessions and for relaying worker reports to the main Session. */
-  readonly sessions: Pick<Sessions, 'ensure' | 'prompt' | 'promptedId' | 'relay' | 'holds'>
+  readonly sessions: Pick<Sessions, 'ensure' | 'prompt' | 'promptedId' | 'relay' | 'holds' | 'workerToolGap'>
   closing(): boolean
   /** Whether processing is paused, which holds launches and input deliveries. */
   paused(): boolean
@@ -344,6 +347,8 @@ export class DshExecutor implements Executor {
   private readonly left = new Map<string, { jobs: Set<string>; collect: AbortController }>()
   /** When a person's message typed into a worker's Session last started a turn, by ticket. */
   private readonly personal = new Map<string, string>()
+  /** When the last state reprojection ran, so the pass's every-two-second schedule does not rescan the board each time. */
+  private lastReproject = 0
   /** The timers of workers that go on after a passing failure, which dispose clears. */
   private readonly timers = new Set<ReturnType<typeof setTimeout>>()
   /** Registers the `launch` and `delivery` effect handlers; both are held (concurrency limit 0) while processing is paused. */
@@ -434,6 +439,11 @@ export class DshExecutor implements Executor {
       // would treat whatever a failed prepare command left behind in the directory as a prepared workspace; instead the
       // ticket is marked failed and waits until new human input or an explicit retry arrives.
       if (this.host.closing() || error instanceof Later) throw error
+      // A worker whose profile no longer resolves the tools it needs is a defect for a person, not a passing failure:
+      // report it blocked at the first message instead of starting a worker that silently cannot work.
+      if (error instanceof MissingWorkerTools) { this.launchBlocked(ticketId, assignmentId, error.message); return }
+      // A Session the host could not open even after the bounded reopen is a corrupt-store failure: `retries` refuses it
+      // (see `corruptSession`) and `launchFailed` reports it with the repair hint, never retrying it without limit.
       if (!(error instanceof PrepareFailed) && this.retries(`launch:${assignmentId}`, error)) throw error
       this.launchFailed(ticketId, assignmentId, error)
     } finally { this.slots.free(ticketId) }
@@ -571,6 +581,19 @@ export class DshExecutor implements Executor {
     if (!ticket || !liveTicket(ticket) || latestAssignment(ticket)?.id !== assignmentId) return
     this.failed(ticketId, String(error))
   }
+  /** Marks a ticket blocked after a launch found a defect a person must fix, and relays the reason to the main Session. */
+  private launchBlocked(ticketId: string, assignmentId: string, summary: string): void {
+    const ticket = this.host.store.tickets.get(ticketId)
+    if (!ticket || !liveTicket(ticket) || latestAssignment(ticket)?.id !== assignmentId) return
+    this.blocked(ticketId, summary)
+  }
+  /** Records a `blocked` report on the ticket and relays it to the main Session in one transaction. */
+  private blocked(ticketId: string, summary: string): void {
+    this.host.store.atomic(() => {
+      const updated = this.host.engine.report(ticketId, { state: 'blocked', summary })
+      this.relay(resultRelay(updated, 'blocked', summary))
+    })
+  }
   /** Records a `failed` report on the ticket and relays the failure to the main Session in one transaction. */
   private failed(ticketId: string, summary: string): void {
     // A corrupt stored Session never heals on its own: its report names the fix, and neither the host nor the main Session
@@ -636,6 +659,10 @@ export class DshExecutor implements Executor {
     const sessionId = workerSessionId(ticket.id)
     const agent = await this.host.sessions.ensure(sessionId, workspace, ticket.title, 'worker')
     if (!current()) return
+    // Sessions decorates a Session when DSH creates it, and another listener may have done it first: re-check the tool
+    // face here so a worker never starts with none of the tools it needs, whatever order the listeners ran in.
+    const gap = this.host.sessions.workerToolGap(agent)
+    if (gap.length) throw new MissingWorkerTools(gap)
     // The background work of the Assignment this one replaces stops first, so its end does not clear this one's message.
     await this.stopped(ticket.id)
     if (!current()) return
@@ -734,9 +761,38 @@ export class DshExecutor implements Executor {
       else if (latest?.state === 'pending' && !waitsForPerson(ticket)) this.start(ticket, latest)
     }
   }
+  /**
+   * Repairs provable state inconsistencies on open tickets (I4, see `reprojectable`): a running Assignment with no live
+   * worker, a pending one whose launch effect is gone, or waiting Inputs whose delivery effect is gone. Called by each pass,
+   * throttled, and never on a state a worker reported. Each repair is recorded on the ticket as the system's trace; the main
+   * Session is not woken for a state the system handled itself.
+   */
+  reproject(now = Date.now()): void {
+    if (this.host.closing() || this.host.paused()) return
+    if (now - this.lastReproject < REPROJECT_INTERVAL_MS) return
+    this.lastReproject = now
+    for (const ticket of this.host.store.tickets.open()) {
+      const decision = reprojectable(ticket, { active: id => this.workerActive(id), launching: id => this.host.effects.pending('launch', id),
+        delivering: id => this.host.effects.pending('delivery', id) }, now)
+      if (!decision) continue
+      if (decision.action === 'blocked') { this.blocked(ticket.id, decision.reason); continue }
+      // A restart is the core's own repair and keeps the worker Session and its history; the other two re-queue a lost effect,
+      // after which the effect queue takes over again.
+      if (decision.action === 'restart') { this.host.engine.repairAssignment(ticket.id, decision.assignment.id); continue }
+      const repair: Omit<TicketRepair, 'at'> = { invariant: decision.invariant, action: decision.action,
+        assignment: decision.assignment.id, detail: decision.detail }
+      this.host.engine.repaired(ticket.id, repair)
+      if (decision.action === 'relaunch') this.start(ticket, decision.assignment)
+      else this.deliver(ticket, decision.assignment)
+    }
+  }
+  /** Whether a ticket's worker Session is loaded and still runs its turn or the background work of its turn. */
+  private workerActive(ticketId: string): boolean {
+    const agent = this.host.context.agents.get(workerSessionId(ticketId) as SessionId)
+    return agent !== undefined && (agent.status === 'running' || this.settling.has(ticketId))
+  }
   /** Runs background worker event handling and updates the `worker` health entry on failure or recovery. */
-  private background(work: Promise<void>): Promise<void> {
-    const { health } = this.host
+  private background(work: Promise<void>): Promise<void> {    const { health } = this.host
     return work.then(() => { if (health.get()?.state === 'error') health.set({ state: 'ready', detail: 'Worker events are handled', at: now() }) },
       (error: unknown) => { health.set({ state: 'error', detail: String(error), at: now() }) })
   }
