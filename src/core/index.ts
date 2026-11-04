@@ -10,3 +10,4 @@ export { canRetry, ownPull, ticketStage, type TicketStage } from './stage.ts'
 export { missingPlanLabels, pendingPlan, planChoice, planDecision, planLines, planOverdue, PLAN_CARD_QUESTION, PLAN_GATE_HOURS, PLAN_LABELS, PLAN_QUESTION,
   PLAN_REPLY_HINT, ticketPhase, TICKET_PHASES, type Plan, type PlanDecision, type PlanOption, type PlanVia, type TicketPhase } from './plan.ts'
 export { key } from './ids.ts'
+export { REPAIR_LIMIT, REPROJECT_AFTER_MS, reprojectable, type Liveness, type Reprojection } from './invariants.ts'

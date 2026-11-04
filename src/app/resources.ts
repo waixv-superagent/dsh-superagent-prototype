@@ -12,6 +12,7 @@ import { dayAgo, newestFirst, threadTitle } from './views/records.ts'
 import { transcriptEntry } from './context.ts'
 import { builtInParts, defaultPrompts } from './prompts.ts'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-session-query'
 import type { Commands } from '../infra/commands.ts'
 import type { PromptVersion, Prompts } from './prompts.ts'
 import type { Sessions } from './sessions.ts'
@@ -114,7 +115,10 @@ const THREAD_DECISIONS = 5
 const triggerLine = (trigger: Trigger) => ({ trigger_id: trigger.id, actor: trigger.actor.id, human: trigger.human, at: trigger.at,
   preview: preview(trigger.text), chars: trigger.text.length, read: `trigger/${trigger.id}` })
 async function transcript(host: ResourceHost, ticketId: string) {
-  return (await host.context.sessionController.inspect(workerSessionId(ticketId) as SessionId)).events
+  const query = host.context.get('sessionQuery')
+  if (query === undefined) throw new Error('Reading an Executor Session transcript requires the session query service')
+  await using observation = await query.observeSession(workerSessionId(ticketId) as SessionId)
+  return observation.events
 }
 
 const ROUTES: readonly Route[] = [

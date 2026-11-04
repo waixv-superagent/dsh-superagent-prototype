@@ -63,6 +63,10 @@ const BANNED: [rule: string, where: RegExp, phrase: RegExp][] = [
 const KNOWN_FAILURES: [owner: string, failure: string][] = []
 
 const MEMBER = 'ou_alice', CHAT = 'oc_team'
+/** The DSH preset tools this fake profile registers: the worker capability check reads them, while the host records only the plugin's own registrations. */
+const PROFILE_TOOLS = new Set(['read', 'write', 'edit', 'read_image', 'glob', 'grep', process.platform === 'win32' ? 'pwsh' : 'bash',
+  'job_output', 'job_list', 'job_kill', 'web_search', 'web_fetch', 'skill', 'todo_write', 'subagent', 'list_subagent_models',
+  'send_message', 'list_agents', 'interrupt_agent'])
 const feishu = (id: string, text: string, overrides: Record<string, unknown> = {}) => feishuTrigger({ message_id: `om_${id}`, chat_id: CHAT,
   chat_type: 'group', sender_id: MEMBER, sender_type: 'user', content: text, mentions: [{ id: 'ou_bot' }],
   create_time: String(Date.parse('2026-09-09T00:00:00Z') + Number(id) * 1000), ...overrides }, 'ou_bot', 'cli_bot')!
@@ -109,7 +113,7 @@ async function start() {
     const own = new Map<string, Tool>(), registered: Skill[] = []
     tools.set(sessionId, own); skills.set(sessionId, registered)
     const register = (tool: Tool) => { own.set(tool.name, tool); return () => own.delete(tool.name) }
-    agentCtx.reflect.provide('tools', { register, get: () => undefined, restrict: () => () => {}, guard: () => () => {} })
+    agentCtx.reflect.provide('tools', { register, get: (name: string) => PROFILE_TOOLS.has(name) ? {} as never : undefined, restrict: () => () => {}, guard: () => () => {} })
     agentCtx.reflect.provide('skills', { register: (skill: Skill) => { registered.push(skill); return () => {} } })
     const section = (spec: { text: Section }) => { sections.set(sessionId, spec.text); return () => {} }
     agentCtx.reflect.provide('systemPrompt', { section })
@@ -135,7 +139,8 @@ async function start() {
   const history = { read: async () => ({ events: [] }), [Symbol.asyncDispose]: async () => {} }
   const services = { agents, llm: { resolveCallConfig: async (value: unknown) => value },
     workspaceRegistry: { create: async (cwd: string) => ({ id: cwd }) },
-    sessionController: { create, resolveAgent, selectModel: async () => {}, rename: async () => {}, inspect: async () => ({ events: [] }) },
+    sessionController: { create, resolveAgent, selectModel: async () => {}, rename: async () => {} },
+    sessionQuery: { observeSession: async () => ({ events: [], [Symbol.asyncDispose]: async () => {} }) },
     sessionPersistence: { flush: async () => {}, open: async () => history }, permissionPresets: { set: () => {} }, subprocess,
     webServer: { host: '127.0.0.1', port: 3082, register: () => () => {} } }
   for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service)

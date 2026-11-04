@@ -10,6 +10,8 @@ export interface PassesHost {
   readonly lifetime: AbortSignal
   configured(): boolean
   closing(): boolean
+  /** Repairs provable ticket state inconsistencies after the Engine's due work, throttled by the Executor itself. */
+  reproject(): void
 }
 
 const now = (): string => new Date().toISOString()
@@ -65,5 +67,7 @@ export class Passes {
     if (this.host.closing()) return
     // While processing is paused, the Engine only records the pause on active Evals so they do not expire.
     this.host.engine.evaluateDue()
+    // Then repair state the Engine's own work left provably inconsistent (I4), which is stateless to the Engine.
+    this.host.reproject()
   }
 }

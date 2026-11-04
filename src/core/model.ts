@@ -291,6 +291,18 @@ export type TicketOutcome = 'completed' | 'merged' | 'closed' | 'dropped' | 'sto
 export interface QuestionSection { label: string; text: string; fold?: boolean }
 /** A question for a person; `triggerId` is the human message that raised it, whose conversation it goes back to. */
 export interface Attention { id: string; question: string; /** The worker's choices, when it offers any; a card shows them and a click answers. */ options?: string[]; /** The context the worker adds, in its own order; absent keeps the card's default layout. */ sections?: QuestionSection[]; triggerId?: string }
+/** One state the host found provably inconsistent on an open ticket and repaired on its own, kept as the system's trace. */
+export interface TicketRepair {
+  at: string
+  /** The invariant I4 checked: the Assignment, its launch, or the delivery of waiting Inputs. */
+  invariant: 'assignment' | 'launch' | 'delivery'
+  /** What the host did about it. */
+  action: 'restart' | 'relaunch' | 'deliver'
+  /** The Assignment the repair concerned, so its repeats are countable. */
+  assignment?: string
+  /** What the host found, in words a person can check. */
+  detail: string
+}
 /** Ticket aggregate: an authorized work item with its assignments, channels, thread bindings, and inputs. */
 export interface Ticket {
   id: string
@@ -344,6 +356,11 @@ export interface Ticket {
   phase?: TicketPhase
   /** The latest failed delivery of an Input to its worker, until a delivery succeeds. */
   delivery?: { error: string; at: string }
+  /**
+   * The state inconsistencies the host repaired on its own (I4, see `reprojectable`), latest last; at most the last five.
+   * They are the "system handled it" trace a person reads instead of inspecting the ticket.
+   */
+  repairs?: TicketRepair[]
 }
 /**
  * A Thread a ticket follows, by its key: `own` when the ticket opened it, such as its own pull request, and when and how it

@@ -150,7 +150,9 @@ export function ticketSummary(ticket: Ticket) {
     deliveryError: attribute(ticket.delivery?.error), sessionId: ticket.assignments.some(item => item.startedAt)
       ? workerSessionId(ticket.id) : '',
     directory: attribute(ticket.execution?.directory), summary: currentReport(ticket)?.summary ?? '', createdAt: ticket.createdAt,
-    updatedAt: ticket.updatedAt, ...(ticket.confirmed ? { confirmed: ticket.confirmed } : {}), ...deliveryOf(ticket) }
+    updatedAt: ticket.updatedAt, ...(ticket.confirmed ? { confirmed: ticket.confirmed } : {}), ...deliveryOf(ticket),
+    // What the system repaired on its own (I4): the board shows the trace instead of making a person inspect the ticket.
+    ...(ticket.repairs?.length ? { repairs: ticket.repairs } : {}) }
 }
 /** Whether a person may record local verification: an open ticket waiting for it, or an ended delivered ticket never passed. */
 const canVerify = (ticket: Ticket) => ticket.verification?.state === 'pending'

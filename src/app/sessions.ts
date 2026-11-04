@@ -2,7 +2,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { MessageId } from '@deepseek-ai/dsh-llm'
-import { scopeParentOf } from '@deepseek-ai/dsh-scope'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { dirname } from 'node:path'
 import { z } from 'zod'
@@ -19,6 +18,8 @@ import { SKILL_PREFIX, type PromptVersion, type Prompts } from './prompts.ts'
 import type { Store } from './store.ts'
 import { KV } from '../kv.ts'
 import type { RegisterTool, Tool } from './tools/tool.ts'
+import { MissingWorkerTools, missingWorkerTools, SHELL_TOOLS } from './worker-tools.ts'
+import { reopenDelay, resolveFailure, SESSION_REOPEN_MS, SESSION_REOPEN_RETRIES, SessionUnavailable } from './session-recovery.ts'
 
 /** Host dependencies used by `Sessions`. */
 export interface SessionsHost {
@@ -29,6 +30,8 @@ export interface SessionsHost {
   readonly effects: Pick<Effects, 'enqueue' | 'handle' | 'idle' | 'pending'>
   /** The `models` health entry, which reports managed sessions waiting on a model-budget retry. */
   readonly health: HealthEntry
+  /** The `worker-tools` health entry: whether the last worker Session resolved the tools a worker needs. */
+  readonly toolsHealth: HealthEntry
   readonly masterId: string
   readonly lifetime: AbortSignal
   closing(): boolean
@@ -68,8 +71,6 @@ const WORK_TOOLS = ['read', 'write', 'edit', 'read_image', 'glob', 'grep', 'bash
  * through the plugin's own tools. A deployment that gave its router a shell could not keep the two roles apart by prompt.
  */
 const MASTER_TOOLS = ['skill', 'read', 'read_image', 'job_output', 'job_list', 'job_kill']
-/** The names of the shell tools DSH may register; a profile registers one of them. */
-const SHELL_TOOLS = ['bash', 'pwsh']
 /** The tools the plan phase refuses: each would change the ticket's workspace. */
 const PLAN_BLOCKED = ['write', 'edit']
 /** The plan gate's refusal, worded so a model submits the plan instead of retrying the tool. */
@@ -134,7 +135,14 @@ export class Sessions {
       this.retryHealth.observe(agent.id, event)
       this.updateModelHealth()
     })
-    ctx.on('agent/created', async ({ agent }) => { await this.decorate(agent); return undefined })
+    ctx.on('agent/created', async ({ agent }) => {
+      try { await this.decorate(agent) } catch (error) {
+        // A missing-tool gap reaches the ticket as a blocked Assignment and the worker-tools health entry; any other
+        // decoration failure leaves the Session usable, so record it without failing the event that emitted it.
+        if (!(error instanceof MissingWorkerTools)) this.ctx.logger.warn('dsh-superagent could not decorate a Session: %s', String(error))
+      }
+      return undefined
+    })
     // A message a person types in a worker's Session is the person's own request: the ticket that Session works on takes it,
     // resuming an ended one and starting the next Assignment of one whose turn is over, under its Mandate (see
     // Tickets.wroteInSession), so the worker answers instead of every tool refusing. Plugin-delivered messages carry the
@@ -164,23 +172,43 @@ export class Sessions {
   /** Resolves or creates session `id` in workspace `cwd`, initializes its role model, decorates it with prompts/skills/tools, sets `danger-full-access` permissions, and renames it to `title`. */
   async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker'): Promise<Agent> {
     const ctx = this.ctx
-    let result = await ctx.sessionController.resolveAgent(id as SessionId)
-    if ('error' in result && result.error.code === 'session/not-found') {
-      const workspace = await ctx.workspaceRegistry.create(cwd)
-      // A Session keeps the preset it was created with, one of the bundle's own (cordis.patch.yml).
-      await ctx.sessionController.create({ sessionId: id as SessionId, workspaceId: workspace.id,
-        agentPreset: role === 'worker' ? WORKER_PRESET : ROUTER_PRESET })
-      result = await ctx.sessionController.resolveAgent(id as SessionId)
-    }
-    if ('error' in result) throw result.error
+    const agent = await this.open(id, cwd, role)
     const settings = this.host.store.settings()
-    await initializeRoleModel(ctx, result.agent, role === 'orchestrator' ? settings.eval.model : settings.executor.model)
-    await this.decorate(result.agent)
-    ctx.permissionPresets.set(result.agent.session, 'danger-full-access')
+    await initializeRoleModel(ctx, agent, role === 'orchestrator' ? settings.eval.model : settings.executor.model)
+    await this.decorate(agent)
+    ctx.permissionPresets.set(agent.session, 'danger-full-access')
     // A worker Session shares its workspace with the person's own conversations, so its title must say what it is:
     // a ticket's title alone reads exactly like a chat a person started in that workspace.
     await ctx.sessionController.rename({ sessionId: id as SessionId, title: role === 'worker' ? `🛠️ ${title}` : title })
-    return result.agent
+    return agent
+  }
+  /**
+   * Resolves `id` to its live Agent, creating the Session when the store has none. A store that DSH cannot open is reopened
+   * with backoff up to `SESSION_REOPEN_RETRIES` times: the common `jsonl flush` failure leaves a torn tail that the write path
+   * truncates on its next open, so reopening recovers it while the event log stays intact. A store that still fails is
+   * reported through `SessionUnavailable`, never deleted and never retried without limit.
+   * @throws SessionUnavailable when the Session could not be opened after the bounded attempts.
+   */
+  private async open(id: string, cwd: string, role: 'orchestrator' | 'worker'): Promise<Agent> {
+    const ctx = this.ctx
+    let created = false
+    for (let attempt = 0; ; attempt++) {
+      const result = await ctx.sessionController.resolveAgent(id as SessionId)
+      if ('error' in result) {
+        // The store has no Session under this id: create it once, then reopen through the same retry path.
+        if (result.error.code === 'session/not-found' && !created) {
+          const workspace = await ctx.workspaceRegistry.create(cwd)
+          await ctx.sessionController.create({ sessionId: id as SessionId, workspaceId: workspace.id,
+            agentPreset: role === 'worker' ? WORKER_PRESET : ROUTER_PRESET })
+          created = true
+          continue
+        }
+        if (attempt >= SESSION_REOPEN_RETRIES) throw new SessionUnavailable(id, resolveFailure(result.error))
+        await reopenDelay(SESSION_REOPEN_MS * 2 ** attempt)
+        continue
+      }
+      return result.agent
+    }
   }
   /** Returns whether `sessionId` already holds the message delivered under `requestId`, or `false` if the session does not exist. */
   async holds(sessionId: string, requestId: string): Promise<boolean> {
@@ -290,8 +318,9 @@ export class Sessions {
     for (const tool of host.tools(agent, ticket)) register(tool.name, tool.description, tool.schema, tool.execute)
     if (master) {
       // DSH refuses a restriction that names a tool this profile does not register, so keep only the ones it has:
-      // a Windows profile registers `pwsh`, a POSIX one `bash`.
-      const keep = MASTER_TOOLS.filter(name => agent.ctx.tools.get(name) !== undefined)
+      // a Windows profile registers `pwsh`, a POSIX one `bash`. The Agent is the scope key its tools resolve in, so
+      // asking its own view reads the preset's tools whatever module instance mounted them.
+      const keep = MASTER_TOOLS.filter(name => agent.ctx.tools.get(name, agent) !== undefined)
       binding.disposers.push(agent.ctx.tools.restrict({ allow: keep }),
         agent.ctx.tools.guard(execution => noWait(execution, () => this.routed(agent))))
     } else {
@@ -312,16 +341,43 @@ export class Sessions {
       return (selected ?? agent.session.header.agentPreset) === ROUTER_PRESET
     } catch { return false }
   }
+  /** The tools a worker Session resolves and the required ones it lacks, read through the Agent's own scope. */
+  private workTools(agent: Agent): { allow: string[]; missing: string[] } {
+    const allow = WORK_TOOLS.filter(name => agent.ctx.tools.get(name, agent))
+    return { allow, missing: missingWorkerTools(allow) }
+  }
+  /** Records the worker tool check on the `worker-tools` health entry, red while a required tool is missing. */
+  private reportWorkerTools(allow: readonly string[], missing: readonly string[]): void {
+    this.host.toolsHealth.set(missing.length
+      ? { state: 'error', at: new Date().toISOString(), detail: `The worker Session is missing required tools: ${missing.join(', ')}; `
+        + `it resolves ${allow.length ? allow.join(', ') : 'none'}. The Executor reports such an Assignment blocked instead of starting work` }
+      : { state: 'ready', at: new Date().toISOString(), detail: `Worker tools check passed; the worker resolves ${allow.join(', ')}` })
+  }
+  /**
+   * The required worker tools `agent`'s scope cannot resolve; the Executor re-checks this right after `ensure`, so a
+   * Session another listener decorated first cannot start a worker with an empty tool face either.
+   */
+  workerToolGap(agent: Agent): readonly string[] { return this.workTools(agent).missing }
   /**
    * An Executor Session's tools: only the profile's work tools, which DSH requires to be known, and none once its ticket
    * ended. A failed or blocked worker keeps its tools, so a person may continue it in its Session; only automated input waits
-   * (see the executor). Read inherited tools through the parent scope, which includes the preset's tools. The global view
-   * misses preset tools; the agent's own view also includes local tools such as subagent, which restrict refuses to name.
+   * (see the executor). The Agent is the scope key its tools resolve in, so its own view holds the preset's tools; the
+   * names the plugin registers itself are not in `WORK_TOOLS`, and `restrict` refuses only names outside the preset.
+   * A worker that lacks a required tool throws `MissingWorkerTools` instead of being narrowed to nothing (`required`), and a
+   * subagent of a worker that already passed keeps its preset's tools when a later check fails.
    */
-  private workOnly(agent: Agent, ticketId: string): (() => void)[] {
+  private workOnly(agent: Agent, ticketId: string, required = true): (() => void)[] {
     const store = this.host.store
-    const parent = scopeParentOf(agent)
-    const allow = WORK_TOOLS.filter(name => agent.ctx.tools.get(name, parent))
+    const { allow, missing } = this.workTools(agent)
+    this.reportWorkerTools(allow, missing)
+    if (missing.length && required) {
+      // Release what this decoration registered before failing: the Session must not stay semi-decorated, so a later launch
+      // retries it after the profile is fixed.
+      this.release(agent)
+      throw new MissingWorkerTools(missing)
+    }
+    // A subagent of a worker that already passed this check is left as it is rather than restricted to an empty list.
+    if (missing.length) return []
     return [agent.ctx.tools.restrict({ allow }), agent.ctx.tools.guard(execution => {
       const current = store.tickets.get(ticketId)
       if (!current || !liveTicket(current)) return 'Ticket ended; new work needs a new authorized ticket'
@@ -345,7 +401,7 @@ export class Sessions {
     }
     const ticketId = parent === undefined ? undefined : ticketOfSession(parent)
     if (ticketId === undefined || !this.host.store.tickets.get(ticketId)) return
-    this.bindings.set(agent, { disposers: this.workOnly(agent, ticketId), subagent: true })
+    this.bindings.set(agent, { disposers: this.workOnly(agent, ticketId, false), subagent: true })
   }
   /** Register the skills of a prompt version in the agent's skill scope, in place of an earlier version's. */
   private bindSkills(binding: SessionBinding, version: PromptVersion): void {
