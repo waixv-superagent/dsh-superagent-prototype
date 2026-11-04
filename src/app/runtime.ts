@@ -50,6 +50,7 @@ import { Activity } from './activity.ts'
 import { PipelineChecks } from './pipeline.ts'
 import { PipelineWatch } from './pipeline-watch.ts'
 import { Watchdog } from './watchdog.ts'
+import { StallWatch } from './stall-watch.ts'
 import { Settings } from './settings.ts'
 import { sourceContextOf, sourceState, type SourceContextDeps } from './source-context.ts'
 import type { ResourceHost } from './resources.ts'
@@ -85,6 +86,7 @@ export class Runtime extends Service implements SourceHost {
   /** The idle five-signal judgement the Executor asks before starting `P2`/`P3` work. */
   readonly idlePool: IdleScheduler
   readonly watchdog: Watchdog
+  readonly stallWatch: StallWatch
   readonly assessor: MasterAssessor
   readonly outbox: Outbox
   readonly engine: Engine
@@ -220,6 +222,13 @@ export class Runtime extends Service implements SourceHost {
         master: { id: masterId, title: MASTER_TITLE, directory: () => machine.stateDir }, sessions,
         health: board.claim('watchdog', { state: 'ready', detail: 'No passing model or network failure waits for automatic recovery' }),
         paused: () => this.paused(), warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
+      // The stall alert says once in a Ticket's conversation that it made no progress, instead of waiting for a person to ask.
+      this.stallWatch = new StallWatch({ tickets: store.tickets, settings: () => store.settings(), activity: this.activity,
+        background: id => this.executor.inBackground(id),
+        channel: ticket => ticket.replyChannel ?? store.triggers.get(ticket.origin.triggerId)?.channel ?? ticket.channels[0],
+        request: ticket => store.triggers.get(ticket.origin.triggerId)?.text ?? '', outbox,
+        health: board.claim('stall', { state: 'ready', detail: 'No open ticket is stalled' }),
+        paused: () => this.paused(), warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       const passes = this.passes = new Passes({ engine: { receive: trigger => engine.receive(trigger), evaluateDue }, effects,
         health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing(),
         // The idle judgement reads a slot's free time; recording the load every pass keeps it current after the mainline ends.
@@ -292,6 +301,7 @@ export class Runtime extends Service implements SourceHost {
     if (this.closing()) return
     this.executor.resume()
     this.watchdog.start()
+    this.stallWatch.start()
     this.passes.start()
     this.effects.start()
     this.pipelineWatch.start()
@@ -299,8 +309,8 @@ export class Runtime extends Service implements SourceHost {
   }
   private httpHost(): HttpHost {
     const runtime = this
-    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing } = this
-    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, billing, health, machine, masterId, ready, sourceLinks, watchdog,
+    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing, stallWatch } = this
+    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, billing, health, machine, masterId, ready, sourceLinks, watchdog, stallWatch,
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
@@ -310,6 +320,7 @@ export class Runtime extends Service implements SourceHost {
   stop(): Promise<void> { return this.stopping ??= this.shutdown() }
   private async shutdown(): Promise<void> {
     this.closingFlag = true; const passes = this.passes.stop(); const watch = this.pipelineWatch.stop(); const watchdog = this.watchdog.stop()
+    this.stallWatch.stop()
     this.billing.stop()
     this.stopped.abort()
     try {

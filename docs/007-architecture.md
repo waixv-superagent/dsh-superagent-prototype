@@ -246,6 +246,10 @@ Each model request binds the Session to the current prompt revision. The revisio
 
 `Watchdog` (`src/app/watchdog.ts`) recovers from a passing outage of the model gateway or the network. Its `poll` scans the open Tickets: a latest Report `failed` that `transient` counts as passing, a Ticket that still waits for a person and neither a question nor a failed delivery intervenes, is retried through `Engine.recoverTicket` after 1, 2, 5, 10, 15 and 30 minutes, up to twelve tries, the last delay repeated. The chain keeps its count across the host's own retries and starts again when a person retried; past its last try it waits for a person. `start` also watches the main Session: a turn that ended on such a failure is prompted to go on after the same backoff — a turn that ends as turns do clears the chain — and a main Session that disappeared is created again. The `watchdog` health entry names the pending recoveries, `status()` reports what is being recovered for `/orchestrator/api/state` and the Feishu status card, and `stop` waits for a scan in flight so none reaches a closed Store.
 
+### Stall alert
+
+`StallWatch` (`src/app/stall-watch.ts`) says once in a Ticket's conversation that it stopped making progress, so a person no longer has to ask. Once a minute it reads the open Tickets: a working one whose latest progress — its Assignment starting, a report, a turn ending, Inputs reaching it, or any event of its worker Session that `Activity` saw — is older than `executor.stall.minutes` (default 15), while no tool call of its worker runs (one running longer than an hour counts as hung) and no background work of its ended turn does, is stalled; so is one queued for a worker slot longer than `executor.stall.queuedMinutes` (default 30). Each stall queues one `notice` of at most three lines in the Ticket's reply conversation — how long, the last tool or the wait, and that the panel can retry or stop it — under an id made of the Ticket, its Assignment and the time of its last progress, so the Outbox sends it once and new progress starts a new count. `notify: false` keeps it to the `stall` health entry and `stall` in `GET /orchestrator/api/state` (`tickets`, `items`), which the Feishu status card shows as `N 张工单疑似卡住`. Nothing is announced while processing is paused, and the watch never changes a Ticket.
+
 ### Glue
 
 | Glue | Translates |
@@ -363,6 +367,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/pipeline.ts` | Read-only checks for a delivered change: the review's state and versions, Swarm testruns and review comments, Jenkins console errors, and the changelist state after a submit, summarized for the Ticket's pipeline gate |
 | `src/app/pipeline-watch.ts` | The host's automatic pipeline follow-up: polls every open delivered p4 Ticket, turns a new failure into a worker Input, a green review or an approval into one queued message, and the submit into the Ticket's completion |
 | `src/app/watchdog.ts` | The host's recovery from a passing model or network outage: retries a stopped Ticket on a growing backoff, keeps the main Session alive and retries its failed turn, and mirrors what waits into the `watchdog` health entry |
+| `src/app/stall-watch.ts` | The stall alert: finds working Tickets without progress and queued ones that never started, says each stall once in the Ticket's conversation, and mirrors them into the `stall` health entry and the state API |
 | `src/app/resources.ts` | `RESOURCES` and `readResource`: what `orchestrator_read` reads, for each role |
 | `src/app/tools/tool.ts` | The `Tool` type, `readTool`, the `orchestrator_read` of both roles, and `AcknowledgementSchema` |
 | `src/app/tools/main.ts` | The main Session's tools |
@@ -443,6 +448,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | --- | --- |
 | `tests/core-engine.spec.ts` | Domain rules on in-memory repositories: receiving, Eval, fan-out, resume and stop, interrupted Assignments, the pause, Policy changes, reports and outcomes, attaching, replies, failed deliveries and dismissed problems |
 | `tests/stage.spec.ts` | The Ticket stages, row by row |
+| `tests/stall-watch.spec.ts` | The stall alert: the progress it counts from, the one notice per stall and the new count after progress, a running or hung tool, background work, a queued Ticket, the paused, person-waiting, idle and ended Tickets it leaves alone, `notify: false`, the three-line text and the settings defaults |
 | `tests/policy.spec.ts` | Source scope, the gate, the admission table, Mandate revalidation, the Policy version, settings migrations and assessment outcomes |
 | `tests/registry.spec.ts` | `SourceRegistry`: instances, validation, Policy parts, Channels and Thread context |
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the receipt reactions a reply ends, the pull request rules, health |

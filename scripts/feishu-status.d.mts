@@ -39,6 +39,8 @@ export interface Snapshot {
   runtime: string
   setupProblem: boolean
   problems: number
+  /** Open Tickets the host's stall alert counts as stalled; absent or 0 when none, or from a host without it. */
+  stalled?: number
   watchdog: SnapshotWatchdog | null
   counts: SnapshotCounts | null
   tickets: SnapshotTickets | null
