@@ -728,6 +728,8 @@ const TEXT = {
   executionDirectoryDefault: ['留空时用 {root}', 'Empty uses {root}'],
   executionDirectoryEmpty: ['留空：默认目录', 'Empty: the default directory'],
   openThread: ['打开 {source} 原文', 'Open on {source}'],
+  // The conversation whole, next to a Thread's topic: a Feishu topic chat holds many topics, so "latest" means the chat's end.
+  openFeishuChat: ['打开飞书会话（跳到最新）', 'Open Feishu chat (latest)'],
   // A filtered Trigger never becomes work, but where it came from is still worth opening: a TAPD bug, an Issue, a message.
   openSource: ['打开原单', 'Open source'],
   executionDirectoryHint: ['每个工单在这里有自己的目录，以工单短名命名；执行器 Session 在其中工作。这只按目录分开工单，不是安全边界。', 'Each Ticket gets its own directory here, named by its short name, where its Executor Session works. This separates Tickets by directory only; it is not a security boundary.'],

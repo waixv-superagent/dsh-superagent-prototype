@@ -49,6 +49,17 @@ it('filters the Thread list by activity, and unsubscribes from a Thread page aft
   expect(server.requests.some(request => request.path === 'threads/feishu:oc_1:om_root/unsubscribe')).toBe(true)
 })
 
+it('offers the Feishu conversation next to the topic link in the Thread page head', async () => {
+  const topic = 'feishu://applink/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1'
+  const chat = 'feishu://applink/client/chat/open?openChatId=oc_1'
+  server.threadPages = () => ({ ...threadSummary({ url: topic, chatUrl: chat }), tickets: [], correlated: [], decisions: [],
+    earlier: null, context: [], timeline: [] })
+  at({ page: 'trigger', id: 'feishu:oc_1:om_root' })
+  await mount()
+  expect(all('.dt-page-head a').map(link => [link.textContent, link.getAttribute('href')])).toEqual([
+    [zh.openOriginal, topic], [zh.openFeishuChat, chat]])
+})
+
 it('folds consecutive automated messages from one sender on a Thread, showing the newest with its text', async () => {
   const bot = (id: string, at: string) => trigger(id, at, { actor: { source: 'github', id: '' }, human: false,
     text: `CI of PR #42 at abc1234: 3 checks, 0 failed, ${id === 'b3' ? 0 : 1} running.`, preview: `CI ${id}` })

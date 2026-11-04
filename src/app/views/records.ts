@@ -5,7 +5,7 @@ import { canRetry, currentReport, followupOwners, latestReport, liveTicket, ownP
 import { allowedSender, listedBot } from '../../policy.ts'
 import type { ChannelLink, Localized } from '../../sources/kind.ts'
 import type { SourceRegistry } from '../../sources/registry.ts'
-import { feishuClientLink, feishuTopicLink, isMessageLink } from '../../sources/feishu-channel.ts'
+import { feishuChatLink, feishuClientLink, feishuTopicLink, isMessageLink } from '../../sources/feishu-channel.ts'
 import { workerSessionId } from '../../executor/dsh.ts'
 import type { Store } from '../store.ts'
 import { attribute, markdown, plain, preview, readable } from './text.ts'
@@ -194,9 +194,23 @@ function threadUrl(store: Store, thread: Thread): string | undefined {
   const opened = thread.ref.source === 'feishu' ? feishuTopicLink({ ...feishuTopic(store, thread), url }) : url
   return opened ? feishuClientLink(opened) : undefined
 }
+/**
+ * The Feishu chat a Thread lives in, opened at its newest message: the conversation itself, which is a different entry
+ * from the Thread's topic (a topic chat holds many topics and a person may want the whole conversation).
+ */
+function threadChatUrl(store: Store, thread: Thread): string | undefined {
+  if (thread.ref.source !== 'feishu') return undefined
+  const colon = thread.ref.id.indexOf(':')
+  const chatId = colon > 0 ? thread.ref.id.slice(0, colon) : undefined
+  if (!chatId) return undefined
+  const known = attribute(thread.meta.url) ?? store.read.firstTrigger(thread.key)?.url
+  return feishuClientLink(feishuChatLink(/larksuite\.com/i.test(known ?? '') ? 'lark' : 'feishu', chatId))
+}
 export function threadFacts(store: Store, thread: Thread) {
   const url = threadUrl(store, thread)
-  return { key: thread.key, source: thread.ref.source, title: threadTitle(store, thread), ...url ? { url } : {}, facts: (thread.meta.facts ?? {}) as ThreadFacts }
+  const chatUrl = threadChatUrl(store, thread)
+  return { key: thread.key, source: thread.ref.source, title: threadTitle(store, thread), ...url ? { url } : {},
+    ...chatUrl ? { chatUrl } : {}, facts: (thread.meta.facts ?? {}) as ThreadFacts }
 }
 export type ThreadFactsView = ReturnType<typeof threadFacts>
 export const ticketLine = (view: Snapshot, ticket: Ticket) => {
@@ -235,11 +249,12 @@ export function threadSummary(view: Snapshot, thread: Thread) {
     return { id, title: ticket?.title ?? id, state: !ticket ? 'unknown' : liveTicket(ticket) ? 'open' : 'ended' }
   })
   const pending = awaitingEval(view, thread).length
+  const chatUrl = threadChatUrl(view.store, thread)
   return { key: thread.key, source: thread.ref.source, title: threadTitle(store, thread), stage: threadStage(thread, pending, tickets),
     latest: latestOnThread(view, thread), lastAt: thread.lastAt ?? thread.createdAt, createdAt: thread.createdAt,
     subscriptions: thread.subscriptions.length, tickets,
     evaluating: thread.evaluating ? { id: thread.evaluating.id, strength: thread.evaluating.strength, triggers: thread.evaluating.triggerIds.length, startedAt: thread.evaluating.startedAt, deadline: thread.evaluating.deadline } : undefined,
-    pending, pollError: attribute(thread.meta.pollError), url: threadUrl(store, thread),
+    pending, pollError: attribute(thread.meta.pollError), url: threadUrl(store, thread), ...chatUrl ? { chatUrl } : {},
     facts: (thread.meta.facts ?? {}) as ThreadFacts }
 }
 export type ThreadSummaryView = ReturnType<typeof threadSummary>

@@ -496,6 +496,8 @@ export function TicketPage({ id }: { id: string }) {
   const failedText = /^(?:\w+Error|Error)\b[:：]/.test(data.summary)
   const failed = data.stage === 'person' && data.action === 'failed'
   const opening = data.threads.find(thread => thread.url)
+  // The conversation itself, next to the topic link: Feishu's chat holds many topics, and a person may want it whole.
+  const conversation = data.threads.find(thread => thread.chatUrl)?.chatUrl
   const ended = data.ended && (() => {
     const outcome = valueLabel(t, 'outcome', data.ended.outcome), reason = reasonLabel(t, data.ended.reason), time = when(data.ended.at,
       t('lang'))
@@ -504,6 +506,7 @@ export function TicketPage({ id }: { id: string }) {
   return <>
     <PageHead title={data.title}>
       {opening?.url && <ActionLink href={opening.url}>{t('openThread', { source: valueLabel(t, 'source', opening.source) })}</ActionLink>}
+      {conversation && <ActionLink href={conversation} icon="message">{t('openFeishuChat')}</ActionLink>}
       {data.actions.retry && <ConfirmButton variant="outline" icon="refresh" label={t('retry')} title={t('retryTitle')}
         message={t('retryConfirm', { title: data.title })}
         onConfirm={() => after(call('POST tickets/:id/retry', { id }))} />}
