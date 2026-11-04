@@ -186,7 +186,7 @@ it('keeps an unreadable editor on the safe side and says when nothing is working
 })
 
 it('reads the editor as loading before the first probe, and as free while an agent builds', async () => {
-  server.editorPage = () => ({ editor: null, build: null, working: [], person: [], verification: [],
+  server.editorPage = () => ({ editor: null, build: null, working: [], person: [], verification: [], schedule: null,
     executor: { running: 0, queued: 0, maxWorkers: 3 },
     timeline: { from: new Date(Date.now() - 3_600_000).toISOString(), to: new Date().toISOString(), editor: [],
       workers: [], hidden: 0 },
@@ -242,4 +242,48 @@ it('shows the running build time beside a person who is also using the editor', 
   expect(facts).toMatch(/编译 \d{2}:\d{2} 起/)
   expect(facts).toContain('编译前已交付 1 张待验单')
   expect(facts).not.toContain('构建中')
+})
+
+it('shows who holds the editor for what, ue-mcp\'s reading, the queue and the jobs, and sends a person\'s actions', async () => {
+  const at = new Date(Date.now() - 5 * 60_000).toISOString()
+  const named = (id: string, title: string) => ({ id, title })
+  server.schedule = {
+    holder: { kind: 'agent', purpose: 'test', note: 'Game.Smoke.Jump', since: at, expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      tickets: [named('t5aaaaaaaaaa', '补跳跃测试')], draining: null },
+    queue: [
+      { id: 'q1', position: 1, purpose: 'build', note: '', at, person: false, front: false, tickets: [named('t6', '冲刺停止动画')], jobId: 'j1' },
+      { id: 'q2', position: 2, purpose: 'use', note: 'PIE 看落地', at, person: false, front: false, tickets: [named('t7', '落地动画')] },
+    ],
+    jobs: [{ id: 'j1', kind: 'build', ticketIds: ['t6', 't8'], directory: 'E:/sun', state: 'queued', createdAt: at,
+      tickets: [named('t6', '冲刺停止动画'), named('t8', '闪避停止')] }],
+    events: [], blocked: null, yielded: false,
+    engine: { source: 'status.json', phase: 'ready', pid: 1, ticking: true, stalledSeconds: 0, slowTask: null, modal: null,
+      compiling: { shaders: 0, assets: 0 }, handler: { method: 'run_automation_tests', elapsedSeconds: 42 }, writtenAt: at, stale: false,
+      bridges: [{ pid: 1, port: 51240, state: 'listening', startedAt: at }], summary: { tone: 'busy', text: 'run_automation_tests 42s' } },
+  }
+  await mount()
+  await openEditor()
+  const card = document.querySelector('.dt-editor-schedule')!
+  expect(card.getAttribute('data-holder')).toBe('agent')
+  expect(card.querySelector('.dt-editor-schedule-holder')?.textContent).toMatch(/^补跳跃测试 正在跑测试 · \d\d:\d\d 起$/)
+  expect(card.querySelector('.dt-editor-engine')?.textContent).toContain('run_automation_tests 42s')
+  expect(card.querySelector('.dt-editor-engine')?.textContent).toContain('1 个桥在线')
+  expect(all('.dt-editor-queue-item').map(item => item.querySelector('.dt-editor-run-head')?.textContent))
+    .toEqual(['冲刺停止动画编译', '落地动画用编辑器'])
+  expect(document.querySelector('.dt-editor-job')?.textContent).toContain('合并 2 单')
+  await click('插到最前')
+  await click('请它让出')
+  await click('我要用')
+  expect(server.requests.filter(request => request.path === 'editor/act').map(request => request.body)).toEqual([
+    { action: 'front', id: 'q2' }, { action: 'preempt', reason: '人在概览上要求让出' }, { action: 'claim' }])
+  expect(document.querySelector('.dt-editor-foot')?.textContent).toContain('不会关掉任何编辑器')
+})
+
+it('offers to let agents use an open editor while a person\'s editor holds the queue back', async () => {
+  server.schedule = { holder: null, queue: [], jobs: [], events: [], blocked: 'editor', yielded: false, engine: null }
+  await mount()
+  await openEditor()
+  expect(document.querySelector('.dt-editor-schedule-holder')?.textContent).toBe('你开着编辑器，agent 不会动它')
+  await click('让 agent 用')
+  expect(server.requests.filter(request => request.path === 'editor/act').map(request => request.body)).toEqual([{ action: 'yield' }])
 })

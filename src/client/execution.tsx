@@ -170,6 +170,14 @@ export function ExecutionSettings() {
             </Field>
           </>}
           <EnvironmentVariables groups={environment.variables} sources={sources} onPick={insert} />
+          <Field label={t('editorProject')} hint={t('editorProjectHint')}>
+            <Input className="dt-mono" value={value.editor.project} placeholder={t('editorCommandEmpty')} spellCheck={false}
+              onChange={event => edit({ editor: { ...value.editor, project: event.target.value } })} />
+          </Field>
+          {(['build', 'restart', 'test'] as const).map(kind => <Field key={kind} label={t(`editorCommand.${kind}`)} hint={t('editorCommandHint')}>
+            <Input className="dt-mono" value={value.editor[kind]} placeholder={t('editorCommandEmpty')} spellCheck={false}
+              onChange={event => edit({ editor: { ...value.editor, [kind]: event.target.value } })} />
+          </Field>)}
           <Field label={t('blockedCommands')} hint={t('blockedCommandsHint')}>
             <Input className="dt-mono" value={value.blockedCommands} placeholder={t('blockedCommandsNone')} spellCheck={false}
               onChange={event => edit({ blockedCommands: event.target.value })} />

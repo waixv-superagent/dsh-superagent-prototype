@@ -11,6 +11,7 @@ import { PromptConflict, SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, b
 import type { Activity } from './activity.ts'
 import type { Billing } from './billing.ts'
 import type { Editor } from './editor.ts'
+import type { EditorScheduler } from './editor-scheduler.ts'
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
@@ -54,6 +55,8 @@ export interface HttpHost {
   readonly activity: Pick<Activity, 'read'>
   /** Cached editor occupancy the overview reads; null until the first process probe finishes. */
   readonly editor: Pick<Editor, 'read'>
+  /** The shared editor's lease, queue and jobs; absent on a host built before it. */
+  readonly editorScheduler?: Pick<EditorScheduler, 'tick' | 'engine' | 'act' | 'cancelJob'>
   /** Rolling model spend the overview's billing strip reads; absent on a host built before it. */
   readonly billing?: Pick<Billing, 'view'>
   readonly health: Record<string, Health>
@@ -172,6 +175,12 @@ const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().no
 const PlanRequest = z.object({ decision: z.enum(['approve', 'revise', 'stop']), note: z.string().trim().max(2000).optional() })
 /** A person moves a ticket's work to another delivery environment, such as when it was accepted under the wrong one. */
 const RedispatchRequest = z.object({ backend: z.enum(['git', 'p4']), target: z.string().trim().min(1).max(300).optional() }).strict()
+/** A person's action on the shared editor from the overview. */
+const EditorActRequest = z.discriminatedUnion('action', [
+  z.object({ action: z.enum(['claim', 'release', 'yield']) }).strict(),
+  z.object({ action: z.literal('preempt'), reason: z.string().trim().max(300).optional() }).strict(),
+  z.object({ action: z.enum(['front', 'cancel', 'cancel-job']), id: z.string().trim().min(1).max(64) }).strict(),
+])
 const VerificationRequest = z.object({ note: z.string().trim().max(2000).optional() })
 /** A follow-up observation: `merged` completes, `blocked` needs a person, `running` records a check still in flight. */
 const PipelineRequest = z.object({ state: z.enum(['running', 'blocked', 'merged']),
@@ -193,7 +202,22 @@ function routes(runtime: HttpHost): Routes {
       const billing = runtime.billing ? await runtime.billing.view() : undefined
       return billing ? { ...page, billing } : page
     },
-    'GET editor': () => editorPage(views(runtime), runtime.activity, runtime.editor.read(), executor()),
+    'GET editor': () => editorPage(views(runtime), runtime.activity, runtime.editor.read(), executor(),
+      runtime.editorScheduler ? { schedule: runtime.editorScheduler.tick(), engine: runtime.editorScheduler.engine() } : undefined),
+    // A person's hand on the shared editor: claim it, let agents use the editor they have open, ask the holder to yield,
+    // move a wait to the front or drop it, or stop a host-run job. Nothing here kills a person's editor.
+    'POST editor/act': async ({ body }) => {
+      const scheduler = runtime.editorScheduler
+      if (!scheduler) throw new RouteError(404, 'This host has no editor scheduler')
+      const request = EditorActRequest.parse(await body(2_048))
+      try {
+        if (request.action === 'cancel-job') { scheduler.cancelJob(request.id); return { done: true as const } }
+        scheduler.act(request.action === 'preempt' ? { kind: 'preempt', reason: request.reason ?? '' }
+          : request.action === 'front' || request.action === 'cancel' ? { kind: request.action, requestId: request.id }
+          : { kind: request.action })
+      } catch (error) { throw new RouteError(400, error instanceof Error ? error.message : String(error)) }
+      return { done: true as const }
+    },
     'GET search': ({ query }) => search(views(runtime), query.q ?? '', runtime.sourceLinks),
     'GET sources': () => sourcesStatus(views(runtime), runtime.health, setupState(runtime)),
     'GET settings': () => settingsView(store, runtime.sources, runtime.health, setupState(runtime), runtime.machine.stateDir),

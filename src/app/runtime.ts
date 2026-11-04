@@ -39,6 +39,7 @@ import { Outbox } from './outbox.ts'
 import { Passes } from './passes.ts'
 import { Setup } from './setup.ts'
 import { Editor } from './editor.ts'
+import { EditorScheduler } from './editor-scheduler.ts'
 import { notifyPlan as sendPlanCard } from './plan.ts'
 import { notifyPriority as sendPriorityCard } from './priority.ts'
 import { IdleScheduler } from './idle.ts'
@@ -80,6 +81,7 @@ export class Runtime extends Service implements SourceHost {
   readonly executor: DshExecutor
   readonly activity: Activity
   readonly editor: Editor
+  readonly editorScheduler: EditorScheduler
   readonly billing: Billing
   readonly pipeline: PipelineChecks
   readonly pipelineWatch: PipelineWatch
@@ -155,6 +157,12 @@ export class Runtime extends Service implements SourceHost {
         repliedTo: trigger => repliedTo({ store, sources }, trigger) })
       this.activity = new Activity(ctx)
       this.editor = new Editor({ warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
+      // The shared editor's lease and queue live in the ticket database; a grant or a job's end reaches the worker as a
+      // steering message, and a Ticket that ended loses its place (docs/021).
+      this.editorScheduler = new EditorScheduler({ store, live: id => { const value = store.tickets.get(id); return !!value && !value.ended },
+        editor: () => this.editor.read(), commands: () => store.settings().executor.editor, logDir: join(machine.stateDir, 'editor-jobs'),
+        notify: (ticketId, id, text) => sessions.prompt(workerSessionId(ticketId), id, text, 'steer'),
+        warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       // The board's billing strip reads actual Session usage; the host only fetches the routes' published price lists.
       this.billing = new Billing({ store, catalog: () => ctx.sessionController.modelCatalog(),
         prices: provider => publishedPrices(ctx, provider), warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
@@ -243,7 +251,7 @@ export class Runtime extends Service implements SourceHost {
         pauseProcessing: paused => this.settings.pause(paused, 'command').then(result => result.paused) }
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
         get repository() { return setup.deployment.repository },
-        pipeline: this.pipeline,
+        pipeline: this.pipeline, editor: this.editorScheduler, workspaceOf: ticket => this.executor.workspaceOf(ticket),
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
         notifyPlan: ticket => sendPlanCard({ store, sources, commands, warn: message => ctx.logger.warn('dsh-superagent: %s', message) }, ticket),
@@ -305,12 +313,13 @@ export class Runtime extends Service implements SourceHost {
     this.passes.start()
     this.effects.start()
     this.pipelineWatch.start()
+    this.editorScheduler.start()
     this.runtimeHealth.set({ state: 'ready', detail: 'Orchestrator is ready', at: now() })
   }
   private httpHost(): HttpHost {
     const runtime = this
-    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing, stallWatch } = this
-    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, billing, health, machine, masterId, ready, sourceLinks, watchdog, stallWatch,
+    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing, stallWatch } = this
+    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, billing, health, machine, masterId, ready, sourceLinks, watchdog, stallWatch,
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
@@ -335,6 +344,7 @@ export class Runtime extends Service implements SourceHost {
       this.sessions.dispose()
       this.activity.dispose()
       this.editor.dispose()
+      this.editorScheduler.dispose()
       for (const dispose of this.disposers.reverse()) dispose()
       // A flush failure must not keep the host from stopping and starting again: the event log is durable for the next open,
       // whose write path truncates a torn tail, and the failure is logged instead of rejecting the stop.
