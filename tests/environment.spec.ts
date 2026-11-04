@@ -85,6 +85,31 @@ describe('worker shims', () => {
     expect(blocked.code).toBe(1)
     expect(blocked.stderr).toContain('p4 submit is blocked')
   })
+  it('refuse lark-cli identity-policy changes without blocking ordinary bot commands', async () => {
+    const base = testDeployment()
+    const lark = program(join(dir, 'lark-bot'), "console.log('lark ' + process.argv.slice(2).join(' '))")
+    await writeEnvironment(testDeployment({ stateDir: dir, feishu: { ...base.feishu!, cli: lark } }), [])
+    expect((await runShim('lark-cli', ['im', '+chat-list', '--as', 'bot'])).stdout.trim()).toBe('lark im +chat-list --as bot')
+    for (const args of [['config', 'show'], ['auth', 'status'], ['profile', 'list']]) {
+      expect((await runShim('lark-cli', args)).stdout.trim()).toBe(`lark ${args.join(' ')}`)
+    }
+    const policy = [
+      ['config', 'strict-mode'],
+      ['config', 'strict-mode', 'user'],
+      // `strict-mode` is refused even when a global flag puts the subcommand later.
+      ['--profile', 'cli_test', 'config', 'strict-mode', 'user'],
+      ['config', 'bind', '--identity', 'user-default'],
+      ['config', 'default-as', 'user'],
+      ['profile', 'use', 'other'],
+      ['auth', 'login', '--domain', 'docs'],
+      ['auth', 'logout'],
+    ]
+    for (const args of policy) {
+      const refused = await runShim('lark-cli', args).catch((error: unknown) => error) as { code: number; stderr: string }
+      expect(refused.code).toBe(1)
+      expect(refused.stderr).toContain('bot lark-cli is fixed to the bot identity')
+    }
+  })
   it('keep `gh` and `lark-cli` working, and shim no `git`, when the blocked commands name the commands workers need', async () => {
     const base = testDeployment()
     const gh = program(join(dir, 'gh-agent'), "console.log('gh ' + process.argv.slice(2).join(' '))")

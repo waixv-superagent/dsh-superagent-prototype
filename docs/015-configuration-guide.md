@@ -126,7 +126,7 @@ Click a variable in the panel to insert it. **Check:** accept a Ticket and open 
 - **Communication** (沟通方式): the GitHub disclosure line, review bots, and how messages read.
 - **Ticket scope** (工单范围): when a Ticket continues by itself and when it stops with an unfinished draft.
 - **Delivery requirements** (交付要求): pull-request evidence, the commit author and the auto-merge condition.
-- A team skill such as `identities` that tells the agents which Feishu user is which GitHub account and which user-identity `lark-cli` creates that person's documents.
+- A team skill such as `identities` that tells the agents which Feishu user is which GitHub account and which user-identity `lark-cli` creates that person's documents. The bot `lark-cli` stays restricted to the bot identity: user-identity document commands go through that per-person CLI, never through a strict-mode switch of the bot configuration ([006 Deployment](006-deployment.md#keeping-the-bot-identity-working)); the worker shim refuses such a switch.
 
 **Check:** **Full prompt** (完整提示词) shows the assembled text, and **History** (历史) lists versions. A save applies to the next model request without restarting; a Session that is mid-turn reads it on its next step. [004 Prompts](004-prompts.md) covers overrides and upgrades.
 
