@@ -104,6 +104,24 @@ it('pins a blocked pipeline at the top of its lane and offers the review and a n
   expect(server.requests.some(request => request.path === 'tickets/p1/pipeline/check' && request.method === 'POST')).toBe(true)
 })
 
+it('labels the pipeline lane by fine stage, with check counts and the smoke build link', async () => {
+  server.pipeline = [
+    ticketSummary({ id: 's1', title: '冒烟中的单', pipeline: { state: 'running', at: '2026-09-23T00:00:00Z', step: 'smoke',
+      check: '已审核通过 · Jenkins 冒烟中（#21674）', url: 'https://swarm.example/reviews/585334',
+      stageUrl: 'https://ci.example/job/PostApproval-Entry/21674/' }, delivery: { lease: [], changelist: 585327 } },
+    { stage: 'pipeline', action: 'running' }),
+    ticketSummary({ id: 's2', title: '测试中的单', pipeline: { state: 'running', at: '2026-09-23T00:00:00Z', step: 'tests',
+      progress: { pass: 8, running: 3, fail: 0, total: 11 }, check: '审核前测试中' }, delivery: { lease: [], changelist: 585328 } },
+    { stage: 'pipeline', action: 'running' }),
+  ]
+  await mount()
+  const cards = all('.dt-pipeline-card')
+  expect(cards.map(card => card.querySelector('.dt-tag')?.textContent)).toEqual([zh['pipelineStage.smoke'], zh['pipelineStage.tests']])
+  expect(cards[0]!.querySelector('.dt-pipeline-link')?.textContent).toBe(zh.pipelineOpenStage)
+  expect(cards[0]!.querySelectorAll('.dt-pipeline-track span[data-state="current"]')).toHaveLength(1)
+  expect(cards[1]!.querySelector('.dt-pipeline-chip')?.textContent).toBe('8/11 通过 · 3 项进行中')
+})
+
 it('shows a pipeline that only awaits a person as a gold wait, not a red block', async () => {
   server.pipeline = [
     ticketSummary({ id: 'w1', title: '只差你确认', pipeline: { state: 'blocked', at: '2026-09-23T00:00:00Z',

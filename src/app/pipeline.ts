@@ -61,6 +61,18 @@ export interface PipelineReview {
   commits: number[]
 }
 
+/**
+ * The Jenkins build of a review's pre-submit smoke. Swarm owns the review and its pre-approval checks, but the smoke run
+ * after approval is a separate Jenkins job, so its build is read from Jenkins rather than from the review's testruns.
+ */
+export interface PipelineApprovalBuild {
+  number: number
+  url: string
+  state: 'running' | 'passed' | 'failed'
+  /** When the build started, in seconds since the epoch. */
+  at: number | null
+}
+
 /** What a changelist looks like on the server: still pending, or gone because a submit renumbered it. */
 export type ChangeState = 'pending' | 'submitted' | 'missing'
 
@@ -191,6 +203,26 @@ export function jenkinsTarget (input: string): { job: string; build: string } {
   return { job: decodeURIComponent(match[1]!), build: match[2]! }
 }
 
+/** The build parameters Jenkins reports for one build, flattened across its actions. */
+function buildParameters (build: unknown): { name: string; value: string }[] {
+  const actions = (build as { actions?: unknown } | null)?.actions
+  if (!Array.isArray(actions)) return []
+  const params: { name: string; value: string }[] = []
+  for (const action of actions) {
+    const values = (action as { parameters?: unknown } | null)?.parameters
+    if (!Array.isArray(values)) continue
+    for (const value of values) {
+      const name = (value as { name?: unknown } | null)?.name
+      if (typeof name !== 'string') continue
+      params.push({ name, value: String((value as { value?: unknown }).value ?? '') })
+    }
+  }
+  return params
+}
+
+/** A parameter name normalized to the words Jenkins jobs use for the review and its changelist. */
+const paramKey = (name: string): string => name.toLowerCase().replace(/[^a-z]/g, '')
+
 function redact (text: string, secret: string): string {
   return secret ? text.split(secret).join('***') : text
 }
@@ -318,6 +350,53 @@ export class PipelineChecks {
       change: typeof last?.change === 'number' ? last.change : null,
       changedAt: typeof last?.time === 'number' ? last.time : null,
       commits
+    }
+  }
+
+  /**
+   * The Jenkins build of the review's pre-submit smoke, once the review is approved. Swarm triggers this job after an
+   * approval but does not report it as a testrun, so the host reads the configured job and matches the build by its
+   * `ReviewId` parameter (the job's `Changelist` is the archive change, not the delivered changelist). Null when the step is
+   * disabled, unreadable, has no build for this review yet, or the job does not exist.
+   */
+  async approvalBuild (input: string, changelist?: number): Promise<PipelineApprovalBuild | null> {
+    const job = this.p4.postApprovalJob.trim()
+    const base = this.p4.jenkinsUrl.trim()
+    const token = this.p4.jenkinsToken.trim()
+    if (!job || !base || !token) return null
+    const id = reviewIdOf(input)
+    const user = this.p4.jenkinsUser.trim() || this.p4.user.trim() || this.env.P4USER?.trim()
+    if (!user) throw new Error('Jenkins user is not configured; set executor.p4.jenkinsUser or executor.p4.user')
+    const url = `${base.replace(/\/$/, '')}/job/${encodeURIComponent(job)}/api/json?tree=builds[number,url,timestamp,result,actions[parameters[name,value]]]{0,30}&depth=1`
+    const response = await this.fetchImpl(url, {
+      headers: { authorization: `Basic ${Buffer.from(`${user}:${token}`).toString('base64')}` },
+      signal: AbortSignal.timeout(TIMEOUT)
+    })
+    if (response.status === 404) return null
+    if (response.status === 401 || response.status === 403) throw new Error(`Jenkins rejected the credentials (HTTP ${response.status})`)
+    if (!response.ok) throw new Error(`Jenkins returned HTTP ${response.status} for ${url}`)
+    const body = await response.json() as { builds?: unknown }
+    const builds = Array.isArray(body.builds) ? body.builds : []
+    const reviewed = builds.filter(build => buildParameters(build).some(param => ['review', 'reviewid'].includes(paramKey(param.name))))
+    const pool = reviewed.length
+      ? reviewed.filter(build => buildParameters(build).some(param => ['review', 'reviewid'].includes(paramKey(param.name))
+        && param.value.trim() === id))
+      : changelist === undefined ? [] : builds.filter(build => buildParameters(build).some(param =>
+        ['changelist', 'change', 'cl'].includes(paramKey(param.name)) && param.value.trim() === String(changelist)))
+    const chosen = pool.sort((left, right) => {
+      const a = left as { number?: unknown; timestamp?: unknown }
+      const b = right as { number?: unknown; timestamp?: unknown }
+      return (typeof b.number === 'number' ? b.number : 0) - (typeof a.number === 'number' ? a.number : 0)
+        || (typeof b.timestamp === 'number' ? b.timestamp : 0) - (typeof a.timestamp === 'number' ? a.timestamp : 0)
+    })[0] as { number?: unknown; url?: unknown; timestamp?: unknown; result?: unknown } | undefined
+    if (!chosen || typeof chosen.number !== 'number') return null
+    const result = typeof chosen.result === 'string' ? chosen.result : null
+    return {
+      number: chosen.number,
+      url: typeof chosen.url === 'string' && chosen.url
+        ? chosen.url : `${base.replace(/\/$/, '')}/job/${encodeURIComponent(job)}/${chosen.number}/`,
+      state: result === null ? 'running' : result === 'SUCCESS' ? 'passed' : 'failed',
+      at: typeof chosen.timestamp === 'number' ? Math.floor(chosen.timestamp / 1000) : null
     }
   }
 

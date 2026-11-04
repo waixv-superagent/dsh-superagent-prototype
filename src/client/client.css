@@ -578,6 +578,13 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-pipeline-link:hover { text-decoration: underline; }
 .dt-pipeline-review { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt-pipeline-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding-top: 7px; border-top: .5px solid var(--dsw-alias-border-l2); }
+/* The card's four-step track: a thin read of where a change is without widening the card. */
+.dt-pipeline-track { display: flex; gap: 3px; padding: 1px 0; }
+.dt-pipeline-track span { flex: 1; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent); }
+.dt-pipeline-track span[data-state='done'] { background: color-mix(in srgb, #7c5cff 45%, transparent); }
+.dt-pipeline-track span[data-state='current'] { background: #7c5cff; }
+.dt-pipeline-card[data-waiting] .dt-pipeline-track span[data-state='current'] { background: var(--dsw-alias-state-warn-primary); }
+.dt-pipeline-card[data-blocked] .dt-pipeline-track span[data-state='current'] { background: var(--dsw-alias-state-error-primary); }
 .dt-ended2-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .dt-ended2 { display: flex; flex-direction: column; gap: 3px; padding: 7px 6px; border-bottom: .5px solid var(--dsw-alias-border-l2); border-radius: 7px; }
 .dt-ended2:hover { background: var(--dsw-alias-interactive-bg-hover); }
@@ -644,6 +651,20 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-pipeline-gate-reason { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
 .dt-pipeline-gate[data-blocked] .dt-pipeline-gate-reason { color: var(--dsw-alias-state-error-primary); }
 .dt-pipeline-gate-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding-top: 9px; border-top: .5px solid var(--dsw-alias-border-l2); }
+/* The ticket's stage strip: one node per step, joined by a line so the flow reads left to right. */
+.dt-pipe-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; list-style: none; margin: 0; padding: 0; }
+.dt-pipe-step { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); }
+.dt-pipe-step:not(:last-child)::after { content: ''; position: absolute; top: 6px; left: 14px; right: 4px; height: 1px; background: var(--dsw-alias-border-l2); }
+.dt-pipe-step[data-state='done']::after, .dt-pipe-step[data-state='current']::after { background: color-mix(in srgb, #7c5cff 42%, var(--dsw-alias-border-l2)); }
+.dt-pipe-step-dot { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary-foreground); }
+.dt-pipe-step[data-state='done'] .dt-pipe-step-dot { border-color: #7c5cff; background: #7c5cff; }
+.dt-pipe-step[data-state='current'] .dt-pipe-step-dot { border-color: #7c5cff; background: color-mix(in srgb, #7c5cff 18%, var(--dsw-alias-bg-layer-1)); }
+.dt-pipe-step[data-tone='warning'] .dt-pipe-step-dot { border-color: var(--dsw-alias-state-warn-primary); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 18%, var(--dsw-alias-bg-layer-1)); }
+.dt-pipe-step[data-tone='danger'] .dt-pipe-step-dot { border-color: var(--dsw-alias-state-error-primary); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 18%, var(--dsw-alias-bg-layer-1)); }
+.dt-pipe-step[data-state='current'] .dt-pipe-step-label { color: var(--dsw-alias-label-primary); font-weight: 500; }
+.dt-pipe-step[data-tone='warning'] .dt-pipe-step-label { color: var(--dsw-alias-state-warn-primary); }
+.dt-pipe-step[data-tone='danger'] .dt-pipe-step-label { color: var(--dsw-alias-state-error-primary); }
+.dt-pipe-progress { margin: -2px 0 0; font-size: 11.5px; line-height: 17px; color: var(--dsw-alias-label-secondary); }
 .dt-verified-strip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 7%, transparent); }
 .dt-verified-strip svg { flex: none; color: var(--dsw-alias-state-success-primary); }
 .dt-verified-note { margin-left: auto; font-size: 11px; line-height: 17px; color: var(--dsw-alias-label-caption); }

@@ -4,6 +4,7 @@ import { TicketNow } from './activity.tsx'
 import { ApiError, usePoll, type TicketPageView } from './api.ts'
 import { Button, DisclosureRow, Dot, Icon, Tag, type IconName } from './controls.tsx'
 import { decisionMark, reportDot, ticketMark } from './marks.ts'
+import { PIPELINE_TRACK, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackLabel, pipelineTrackState, type PipelineView } from './pipeline.ts'
 import { usePanel } from './provider.tsx'
 import { settingsRoute } from './route.ts'
 import { Earlier, ThreadLine, automatedRuns } from './rows.tsx'
@@ -405,6 +406,28 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
   </section>
 }
 /**
+ * The four steps of the Swarm submitter flow, with the one this pipeline is on: a person reads "it is in the pre-submit
+ * smoke" without parsing the last check sentence. A blocked pipeline marks its current step in the danger tone.
+ */
+function PipelineTrack ({ pipeline }: { pipeline: PipelineView }) {
+  const { t } = usePanel()
+  const step = pipelineStep(pipeline)
+  const blocked = pipeline.state === 'blocked' && !pipeline.manual
+  const waiting = pipeline.state === 'blocked' && !!pipeline.manual
+  return <ol className="dt-pipe-steps" aria-label={t('pipelineSteps')}>
+    {PIPELINE_TRACK.map((key, index) => {
+      const state = pipelineTrackState(step, index)
+      return <li key={key} className="dt-pipe-step" data-state={state} data-tone={state === 'current'
+        ? blocked ? 'danger' : waiting ? 'warning' : 'info' : undefined}
+        aria-current={state === 'current' ? 'step' : undefined}>
+        <span className="dt-pipe-step-dot" aria-hidden="true">{state === 'done' && <Icon name="check" size={9} />}</span>
+        <span className="dt-pipe-step-label">{t(pipelineTrackLabel(key))}</span>
+      </li>
+    })}
+  </ol>
+}
+
+/**
  * The follow-up after local verification: a delivered change is tracked through its review and pipeline until it is in the
  * mainline. A blocked pipeline says what a person must do; a waiting-only pipeline (manual) is a person's approval or
  * submit, not a failure, so it reads as a gold wait. An already merged one completes the Ticket instead of asking for
@@ -414,10 +437,14 @@ function PipelineGate({ ticket, onChanged }: { ticket: TicketPageView; onChanged
   const { t, call, notify } = usePanel()
   const pipeline = ticket.pipeline
   if (!pipeline || ticket.state === 'ended') return null
-  const blocked = pipeline.state === 'blocked' && !pipeline.manual
-  const waiting = pipeline.state === 'blocked' && !!pipeline.manual
+  const failedSmoke = pipelineSmokeFailed(pipeline)
+  const blocked = pipeline.state === 'blocked' && (!pipeline.manual || failedSmoke)
+  const waiting = pipeline.state === 'blocked' && !!pipeline.manual && !failedSmoke
   const review = pipeline.url ?? ticket.delivery?.review
   const reviewHref = review && /^https?:\/\//i.test(review) ? review : undefined
+  const stageUrl = pipeline.stageUrl && /^https?:\/\//i.test(pipeline.stageUrl) ? pipeline.stageUrl : undefined
+  const progress = pipelineStep(pipeline) === 'tests' || pipelineStep(pipeline) === 'review'
+    ? pipelineProgressText(t, pipeline.progress) : undefined
   return <section className="dt-pipeline-gate" data-blocked={blocked || undefined} data-waiting={waiting || undefined}
     aria-labelledby="dt-pipeline-gate-title">
     <header className="dt-pipeline-gate-head">
@@ -428,11 +455,12 @@ function PipelineGate({ ticket, onChanged }: { ticket: TicketPageView; onChanged
         <p className="dt-pipeline-gate-sub">{t(waiting ? 'pipelineGateWaitingSub'
           : blocked ? 'pipelineGateBlockedSub' : 'pipelineGateSub')}</p>
       </div>
-      <Tag tone={waiting ? 'warning' : blocked ? 'danger' : 'info'}>{t(waiting ? 'pipelineWaiting'
-        : blocked ? 'pipelineBlocked' : 'pipelineRunning')}</Tag>
+      <Tag tone={waiting ? 'warning' : blocked ? 'danger' : 'info'}>{pipelineStageLabel(t, pipeline)}</Tag>
     </header>
+    {review && <PipelineTrack pipeline={pipeline} />}
+    {progress && <p className="dt-pipe-progress">{progress}</p>}
     <dl className="dt-pipeline-gate-facts">
-      <div><dt>{t('pipelineState')}</dt><dd>{waiting ? t('pipelineWaiting') : valueLabel(t, 'pipelineState', pipeline.state)}</dd></div>
+      <div><dt>{t('pipelineState')}</dt><dd>{pipelineStageLabel(t, pipeline)}</dd></div>
       <div><dt>{t('pipelineLastCheck')}</dt><dd>{pipeline.check || t('pipelineNoCheck')}</dd></div>
       <div><dt>CL</dt><dd>{ticket.delivery?.changelist !== undefined ? ticket.delivery.changelist : t('empty')}</dd></div>
       <div><dt>review</dt><dd>{reviewHref ? <a href={reviewHref} target="_blank" rel="noreferrer">{reviewLabel(review!)}</a>
@@ -448,6 +476,7 @@ function PipelineGate({ ticket, onChanged }: { ticket: TicketPageView; onChanged
         await call('POST tickets/:id/pipeline/check', { id: ticket.id })
         notify(t('pipelineResumedNotice')); await onChanged()
       }}>{t('pipelineResume')}</Button>}
+      {stageUrl && <ActionLink href={stageUrl}>{t('pipelineOpenStage')}</ActionLink>}
       {reviewHref && <ActionLink href={reviewHref}>{t('pipelineOpenReview')}</ActionLink>}
     </footer>
   </section>

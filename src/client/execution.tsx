@@ -155,6 +155,10 @@ export function ExecutionSettings() {
                 placeholder={t('jenkinsTokenEmpty')} spellCheck={false}
                 onChange={event => edit({ p4: { ...value.p4, jenkinsToken: event.target.value } })} />
             </Field>
+            <Field label={t('postApprovalJob')} hint={t('postApprovalJobHint')}>
+              <Input className="dt-mono" value={value.p4.postApprovalJob} placeholder={t('postApprovalJobEmpty')} spellCheck={false}
+                onChange={event => edit({ p4: { ...value.p4, postApprovalJob: event.target.value } })} />
+            </Field>
           </>}
           <EnvironmentVariables groups={environment.variables} sources={sources} onPick={insert} />
           <Field label={t('blockedCommands')} hint={t('blockedCommandsHint')}>

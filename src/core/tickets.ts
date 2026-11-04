@@ -268,7 +268,7 @@ export class Tickets extends EnginePart {
     if (ticket.pipeline?.state === 'merged') return
     if (ticket.pipeline && !restart) return
     const url = this.pipelineUrl(ticket)
-    ticket.pipeline = { state: 'running', at, check: '等待 Swarm 流水线结果', ...(url ? { url } : {}),
+    ticket.pipeline = { state: 'running', at, step: 'tests', check: '等待 Swarm 流水线结果', ...(url ? { url } : {}),
       ...(ticket.pipeline?.fixes ? { fixes: ticket.pipeline.fixes } : {}) }
     ticket.updatedAt = at
   }
@@ -284,14 +284,24 @@ export class Tickets extends EnginePart {
     const at = this.now()
     if (observation.kind === 'merged') {
       const url = observation.url ?? this.pipelineUrl(ticket)
-      return this.recordPipeline(ticketId, { state: 'merged', ...(observation.check ? { check: observation.check } : {}), ...(url ? { url } : {}) })
+      return this.recordPipeline(ticketId, { state: 'merged', step: 'merged', ...(observation.check ? { check: observation.check } : {}), ...(url ? { url } : {}) })
     }
     // A merged pipeline is history; a later round of the ticket is not pipeline work again.
     if (ticket.pipeline?.state === 'merged') return ticket
     const previous = ticket.pipeline
     const url = observation.url ?? previous?.url ?? this.pipelineUrl(ticket)
     const signature = 'signature' in observation ? observation.signature : undefined
-    const base = { ...previous, seenAt: at, ...(url ? { url } : {}), ...(signature ? { observed: signature } : {}) }
+    // The fine stage is what the panel draws; an observation without one falls back to the coarse kind so an older caller
+    // still records a usable step.
+    const step = observation.step ?? (observation.kind === 'review' ? 'review'
+      : observation.kind === 'approved' ? 'ready' : undefined)
+    const base = { ...previous, seenAt: at, ...(step ? { step } : {}),
+      ...(observation.progress ? { progress: observation.progress } : {}),
+      ...(observation.stageUrl ? { stageUrl: observation.stageUrl } : {}),
+      ...(url ? { url } : {}), ...(signature ? { observed: signature } : {}) }
+    // A moved stage is no longer the person's blocker: each branch below sets these again only when it still is one.
+    delete base.manual
+    delete base.reason
     // A green review or an approval means the rerun question is settled; a failure keeps `rerunAt` so its grace window works.
     if (observation.kind === 'review' || observation.kind === 'approved') delete base.rerunAt
     const reviewId = (text?: string): string | undefined => {
@@ -314,8 +324,9 @@ export class Tickets extends EnginePart {
         `${reviewLink} 已通过，待人工审核。`)
     } else if (observation.kind === 'approved') {
       ticket.pipeline = { ...base, state: 'running', at, check: observation.check }
-      this.replies.pipelineNotice(ticket, `approved:${signature ?? 'approved'}`,
-        `${reviewLink} 已审核通过，等待提交。`)
+      const notice = observation.step === 'smoke' ? `${reviewLink} 已审核通过，Jenkins 冒烟中。`
+        : `${reviewLink} 已审核通过，等待提交。`
+      this.replies.pipelineNotice(ticket, `approved:${signature ?? 'approved'}`, notice)
     } else if (observation.kind === 'failure') {
       // A person's blocker stays theirs, but a green review is not a decision yet: an AI verdict that posts after the
       // testruns passed still wakes the worker.
@@ -354,7 +365,7 @@ export class Tickets extends EnginePart {
     const at = this.now()
     const rest = { ...ticket.pipeline }
     delete rest.observed
-    ticket.pipeline = { ...rest, at, rerunAt: at, check: '已请求重跑检查，等待新结果' }
+    ticket.pipeline = { ...rest, step: 'tests', at, rerunAt: at, check: '已请求重跑检查，等待新结果' }
     ticket.updatedAt = at
     this.repo.tickets.save(ticket)
     return this.require(ticketId)
@@ -369,7 +380,7 @@ export class Tickets extends EnginePart {
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     const at = this.now()
     const url = this.pipelineUrl(ticket)
-    ticket.pipeline = { state: 'running', at, check: '等待 Swarm 流水线结果', ...(url ? { url } : {}) }
+    ticket.pipeline = { state: 'running', at, step: 'tests', check: '等待 Swarm 流水线结果', ...(url ? { url } : {}) }
     ticket.updatedAt = at
     this.repo.tickets.save(ticket)
     return this.require(ticketId)
