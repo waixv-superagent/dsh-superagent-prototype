@@ -146,6 +146,7 @@ Copy [examples/profile.cordis.patch.yml](../examples/profile.cordis.patch.yml) t
 | `stateDir` | yes | Absolute path: the database, the lock, the command shims in `worker-bin`, the agent's git configuration and, by default, the Ticket directories in `work`. Back it up before upgrades |
 | `promptMaxChars`, `admissionContextMaxPages`, `admissionContextTimeoutMs` | no | The largest saved prompt configuration, and how many Thread pages one assessment reads within what time |
 | `pipelineSkill` | no | Absolute path to a local pipeline-follow-up skill or its `SKILL.md`; empty uses the built-in follow-up instructions. The worker reads it when a failing check wakes it for a fix |
+| `upgrade` | no | The one-click update from the fork (see [One-click update from the fork](#one-click-update-from-the-fork)): `checkout` (absolute path of a git checkout; empty turns it off), `remote` (`origin`), `branch` (`main`), `install` (the installed package directory; empty uses the one the plugin runs from), `startCommand` (empty restarts the same command line), `holdFile`, `pnpm` (`pnpm`), `intervalMin` (10) and `idleTimeoutMin` (30) |
 
 After the first start, edit machine limits in **Settings → Deployment** or the DeepSeek Harness Plugin Manager. Changes apply without restart. `stateDir` cannot be changed there. Invalid values or unknown configuration keys prevent startup; the log identifies the key.
 
@@ -335,6 +336,25 @@ From an allowed GitHub account, open an Issue or post a comment containing `@<ag
 A restart ends running Assignments and starts replacements with recovery notes. Team text and overridden prompt parts are retained; parts without overrides follow the new defaults. Review parts marked **Default updated** after upgrading.
 
 A database migrated by a newer version cannot be opened by an older one. Rollback therefore requires the pre-upgrade backup. After upgrading DeepSeek Harness itself, restart the running instance so the panel loads matching artifacts.
+
+### One-click update from the fork
+
+Set `upgrade.checkout` in the `dsh-superagent` entry to a git checkout of this repository. The plugin then fetches `upgrade.remote`/`upgrade.branch` (default `origin/main`) every `upgrade.intervalMin` minutes. It compares the branch head with the commit the installed package records in `build-info.json`. When they differ, a **有新版本** (Update available) badge appears at the sidebar foot beside Settings. Its dialog lists the new commits and offers **Update**.
+
+An update runs these steps, which the dialog shows as they happen:
+
+1. Fetch the commit and add a detached worktree of it under `<stateDir>/upgrade/build`. The checkout's own working tree and branch stay as they are.
+2. Run `pnpm install --frozen-lockfile`, `typecheck`, `test` and `build` there. If any step fails, the update stops and the running service is untouched.
+3. Pause dispatch, unless it was already paused. Wait until no worker is in a turn or has jobs running, for at most `upgrade.idleTimeoutMin` minutes. **Update now** skips the wait, and interrupted workers restart with a recovery note.
+4. Hand off to the new build's `scripts/upgrade-switch.mjs`, then stop this process. On Windows the switch starts through WMI, so it outlives the process it replaces.
+5. The switch backs up the installed package entries and `orchestrator.sqlite` to `<stateDir>/upgrade/backup`. It copies the new build over the installed package (`upgrade.install`, by default the directory the plugin runs from). It then starts the service with `upgrade.startCommand`, by default the same command line, and waits for `/orchestrator/api/state` to report a running runtime.
+6. If the new version does not come up, the switch restores the package and the database and starts the previous version. Finally it resumes dispatch, unless dispatch was paused before the update.
+
+`<stateDir>/upgrade/status.json` keeps the outcome, and `switch.log` keeps the output. The next host shows them in the dialog. If neither version comes up, the badge turns amber and the backup stays in place for a person.
+
+The switch replaces only the plugin's own files and keeps the profile's `node_modules`. The dialog therefore refuses an update that changes dependencies (`pnpm-lock.yaml`, or the dependency fields of `package.json`): run the manual steps above for those.
+
+If an external watchdog restarts the service while it is down, point `upgrade.holdFile` at the file that holds the watchdog off. The switch creates that file for the duration of the update and removes it afterwards, unless it already existed.
 
 ### Agent presets
 

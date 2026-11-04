@@ -17,6 +17,7 @@ import { PluginConfig, usePageForm } from './deployment.tsx'
 import { en, zh } from './locales.ts'
 import type { T } from './text.ts'
 import TICKET_LINK_STYLES from './ticket-link.css?raw'
+import { UpgradeBadge } from './upgrade.tsx'
 
 type ClientContext = Context & { sessions: ISessions }
 const NS = 'dshSuperagent'
@@ -142,6 +143,9 @@ export function apply(ctx: ClientContext): void {
   slots.inject('conversation.session.header.actions', () => slots.register({
     name: 'conversation.session.header.actions', id: `${ENTRY}:copy-session`, order: 41, locale: NS,
   }, (props: { sessionId: SessionId; t: T }) => <CopySessionId sessionId={props.sessionId} t={props.t} />))
+  // The update badge sits at the sidebar foot beside Settings; it renders nothing until an update is available.
+  slots.inject('sidebar.footer.action', () => slots.register({ name: 'sidebar.footer.action', id: `${ENTRY}:upgrade`, order: 10, locale: NS },
+    ((props: { wide: boolean; t: T }) => <UpgradeBadge t={props.t} wide={props.wide} />) as never))
   ctx.slots.inject('plugins.row.config', () => ctx.slots.register({ name: 'plugins.row.config', key: `${ENTRY}#${ENTRY}`, locale: NS },
     (props: PluginConfigViewProps & { t: T }) => <PluginConfig t={props.t} view={props.view} form={props.form} />))
 }

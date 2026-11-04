@@ -17,7 +17,7 @@ import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, ty
 import { allowedSender, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
 import { Commands } from '../infra/commands.ts'
-import type { Deployment, Machine } from '../deployment.ts'
+import { NO_UPGRADE, type Deployment, type Machine } from '../deployment.ts'
 import { environmentOf, ticketEnvironment, type Variable } from './execution-environment.ts'
 import type { SetupProblem } from '../setup.ts'
 import { DshExecutor, sourceTrigger, triggerMessage, workerSessionId } from '../executor/dsh.ts'
@@ -51,6 +51,7 @@ import { Activity } from './activity.ts'
 import { PipelineChecks, pipelineChoices } from './pipeline.ts'
 import { PipelineWatch } from './pipeline-watch.ts'
 import { Watchdog } from './watchdog.ts'
+import { Upgrade } from './upgrade.ts'
 import { StallWatch } from './stall-watch.ts'
 import { Settings } from './settings.ts'
 import { sourceContextOf, sourceState, type SourceContextDeps } from './source-context.ts'
@@ -88,6 +89,8 @@ export class Runtime extends Service implements SourceHost {
   /** The idle five-signal judgement the Executor asks before starting `P2`/`P3` work. */
   readonly idlePool: IdleScheduler
   readonly watchdog: Watchdog
+  /** Checks the fork for a newer build and runs the one-click update the sidebar badge offers. */
+  readonly upgrade: Upgrade
   readonly stallWatch: StallWatch
   readonly assessor: MasterAssessor
   readonly outbox: Outbox
@@ -240,6 +243,13 @@ export class Runtime extends Service implements SourceHost {
         request: ticket => store.triggers.get(ticket.origin.triggerId)?.text ?? '', outbox,
         health: board.claim('stall', { state: 'ready', detail: 'No open ticket is stalled' }),
         paused: () => this.paused(), warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
+      this.upgrade = new Upgrade({ config: machine.upgrade ?? NO_UPGRADE, stateDir: machine.stateDir,
+        activeCount: () => this.executor.activeCount(), paused: () => store.settings().paused,
+        pause: paused => this.settings.pause(paused, 'panel'),
+        url: () => ctx.webServer.port === undefined ? undefined : `http://127.0.0.1:${ctx.webServer.port}`,
+        // The launcher's bounded shutdown stops every plugin as a signal would; without it, the process ends itself.
+        exit: () => { const exit = ctx.get('appExit') as ((code: number) => void) | undefined; if (exit) exit(0); else process.kill(process.pid, 'SIGTERM') },
+        warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       const passes = this.passes = new Passes({ engine: { receive: trigger => engine.receive(trigger), evaluateDue }, effects,
         health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing(),
         // The idle judgement reads a slot's free time; recording the load every pass keeps it current after the mainline ends.
@@ -298,6 +308,8 @@ export class Runtime extends Service implements SourceHost {
   private async initialize(): Promise<void> {
     // Register management HTTP routes before setup completes so operators can fix setup problems in the UI.
     this.disposers.push(registerHttp(this.ctx, this.httpHost()))
+    // Update checks run even while setup waits: an update may be what fixes setup.
+    this.upgrade.start()
     if (!await this.setup.run(this.store.settings())) {
       this.runtimeHealth.set({ ...health('paused', 'setupPending'), at: now() })
       return
@@ -322,8 +334,8 @@ export class Runtime extends Service implements SourceHost {
   }
   private httpHost(): HttpHost {
     const runtime = this
-    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing, stallWatch } = this
-    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, billing, health, machine, masterId, ready, sourceLinks, watchdog, stallWatch,
+    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing, stallWatch, upgrade } = this
+    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, billing, upgrade, health, machine, masterId, ready, sourceLinks, watchdog, stallWatch,
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
@@ -335,6 +347,7 @@ export class Runtime extends Service implements SourceHost {
     this.closingFlag = true; const passes = this.passes.stop(); const watch = this.pipelineWatch.stop(); const watchdog = this.watchdog.stop()
     this.stallWatch.stop()
     this.billing.stop()
+    this.upgrade.stop()
     this.stopped.abort()
     try {
       this.assessor.stop()

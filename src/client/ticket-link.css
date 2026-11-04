@@ -7,3 +7,11 @@
 .dt-header-copy:hover, .dt-header-copy:focus-visible { background: var(--dsw-alias-fill-l1); color: var(--dsw-alias-label-secondary); }
 .dt-header-copy[data-outcome='copied'] { color: var(--dsw-alias-state-success-primary); }
 .dt-header-copy[data-outcome='failed'] { color: var(--dsw-alias-state-error-primary); }
+
+/* Update badge at the sidebar foot beside Settings: a dot and, in the wide sidebar, a short label. */
+.dt-upgrade-badge { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 8px; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); font-family: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+.dt-upgrade-badge:hover, .dt-upgrade-badge:focus-visible { background: var(--dsw-alias-fill-l1); color: var(--dsw-alias-label-primary); }
+.dt-upgrade-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-state-error-primary); }
+.dt-upgrade-badge[data-tone='running'] .dt-upgrade-dot { background: var(--dsw-alias-state-business-primary); animation: dt-upgrade-pulse 1.2s ease-in-out infinite; }
+.dt-upgrade-badge[data-tone='problem'] .dt-upgrade-dot { background: var(--dsw-alias-state-warn-primary); }
+@keyframes dt-upgrade-pulse { 50% { opacity: 0.35; } }

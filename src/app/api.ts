@@ -13,6 +13,7 @@ import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
 import type { TicketGraphView } from './views/graph.ts'
 import type { TicketListView, TicketSearchView } from './views/tickets.ts'
+import type { UpgradeRun, UpgradeView } from './upgrade.ts'
 
 export const TICKET_FILTERS = ['open', 'person', 'verify', 'unverified', 'working', 'idle', 'pipeline', 'ended'] as const
 export const THREAD_FILTERS = ['subscribed', 'evaluating', 'recent', 'all'] as const
@@ -74,6 +75,14 @@ export interface Api {
   'GET policy/history': { response: HistoryView }
   'POST policy-sync/:id': { response: { policy: unknown } }
   'POST setup/check': { response: { restarting: true } }
+  /** The installed build against the fork's branch, and the steps of a running or the last update. */
+  'GET upgrade': { response: UpgradeView }
+  /** Fetch the branch now instead of at the next interval. */
+  'POST upgrade/check': { response: UpgradeView }
+  /** Start the one-click update; `force` does not wait for running workers. */
+  'POST upgrade': { body: { force?: boolean }; response: UpgradeRun }
+  /** Give up an update that has not reached the switch. */
+  'POST upgrade/cancel': { response: { cancelled: boolean } }
   'GET models': { response: ModelCatalog }
   'GET prompts': { query?: { revision?: number; offset?: number }; response: PromptsView }
   'PUT prompts': { body: { config: PromptConfig; baseRevision: number }; response: { revision: number; context_delivery: Delivery } }
