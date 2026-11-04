@@ -2,7 +2,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { MessageId } from '@deepseek-ai/dsh-llm'
-import { scopeParentOf } from '@deepseek-ai/dsh-scope'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { dirname } from 'node:path'
 import { z } from 'zod'
@@ -290,8 +289,9 @@ export class Sessions {
     for (const tool of host.tools(agent, ticket)) register(tool.name, tool.description, tool.schema, tool.execute)
     if (master) {
       // DSH refuses a restriction that names a tool this profile does not register, so keep only the ones it has:
-      // a Windows profile registers `pwsh`, a POSIX one `bash`.
-      const keep = MASTER_TOOLS.filter(name => agent.ctx.tools.get(name) !== undefined)
+      // a Windows profile registers `pwsh`, a POSIX one `bash`. The Agent is the scope key its tools resolve in, so
+      // asking its own view reads the preset's tools whatever module instance mounted them.
+      const keep = MASTER_TOOLS.filter(name => agent.ctx.tools.get(name, agent) !== undefined)
       binding.disposers.push(agent.ctx.tools.restrict({ allow: keep }),
         agent.ctx.tools.guard(execution => noWait(execution, () => this.routed(agent))))
     } else {
@@ -315,13 +315,12 @@ export class Sessions {
   /**
    * An Executor Session's tools: only the profile's work tools, which DSH requires to be known, and none once its ticket
    * ended. A failed or blocked worker keeps its tools, so a person may continue it in its Session; only automated input waits
-   * (see the executor). Read inherited tools through the parent scope, which includes the preset's tools. The global view
-   * misses preset tools; the agent's own view also includes local tools such as subagent, which restrict refuses to name.
+   * (see the executor). The Agent is the scope key its tools resolve in, so its own view holds the preset's tools; the
+   * names the plugin registers itself are not in `WORK_TOOLS`, and `restrict` refuses only names outside the preset.
    */
   private workOnly(agent: Agent, ticketId: string): (() => void)[] {
     const store = this.host.store
-    const parent = scopeParentOf(agent)
-    const allow = WORK_TOOLS.filter(name => agent.ctx.tools.get(name, parent))
+    const allow = WORK_TOOLS.filter(name => agent.ctx.tools.get(name, agent))
     return [agent.ctx.tools.restrict({ allow }), agent.ctx.tools.guard(execution => {
       const current = store.tickets.get(ticketId)
       if (!current || !liveTicket(current)) return 'Ticket ended; new work needs a new authorized ticket'
