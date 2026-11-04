@@ -49,31 +49,33 @@ function tokensText(value: number): string {
 }
 
 /**
- * The billing strip: which route charged last and what the rolling hour cost. It sits directly above the board so the
- * provider that would burn a personal balance is visible before a person reads the lanes.
+ * The billing strip: which route charged last, how many tokens the rolling hour consumed, and what that costs at the
+ * routes' published prices. Tokens lead because they are the provider's actual usage; the money is a labelled estimate.
  */
 function BillingStrip({ billing }: { billing: BillingView }) {
   const { t } = usePanel()
   const base = billing.configured.find(role => role.role === 'default')
-  const overrides = billing.configured.filter(role => role.role !== 'default' && base
-    && (role.provider !== base.provider || role.model !== base.model))
+  // A role on another provider is the incident this strip exists for; a different model on the same provider is ordinary.
+  const overrides = billing.configured.filter(role => role.role !== 'default' && base && role.provider !== base.provider)
   const current = billing.current
   const recent = current.at !== null && Date.now() - current.at < 10 * 60_000
-  const extra = Math.max(0, billing.providers.length - 1)
+  const extra = Math.max(0, billing.routes.length - 1)
   const settled = billing.settled
   const quota = billing.quota
   // The gateway's settled bill is the figure a person pays; the local estimate only stands in when it cannot be read.
   const bars = settled
     ? settled.buckets.map(bucket => ({ at: bucket.at, value: bucket.cost, label: moneyText(bucket.cost) }))
-    : billing.buckets.map(bucket => billing.priced
-      ? { at: bucket.at, value: bucket.cost, label: moneyText(bucket.cost) }
-      : { at: bucket.at, value: bucket.tokens, label: `${tokensText(bucket.tokens)} tokens` })
+    : billing.buckets.map(bucket => ({ at: bucket.at, value: bucket.tokens, label: `${tokensText(bucket.tokens)} tokens` }))
   const max = Math.max(0, ...bars.map(bar => bar.value))
   const latest = bars.findLastIndex(bar => bar.value > 0)
-  const currentUsage = billing.providers.find(row => row.provider === current.provider)
+  const currentUsage = billing.routes.find(row => row.provider === current.provider && row.model === current.model)
   const currentUnpriced = !settled && !!currentUsage && currentUsage.tokens > 0 && currentUsage.cost === null
   const estimate = billing.total.cost !== null ? moneyText(billing.total.cost) : undefined
   const requests = settled ? settled.requests : billing.total.requests
+  const top = billing.top
+  const topDiffers = !!top && (top.provider !== current.provider || top.model !== current.model)
+  const routesTitle = billing.routes.map(route => `${route.name} ${route.model}: ${tokensText(route.tokens)} tokens`
+    + `${route.cost !== null ? ` ≈${moneyText(route.cost)}` : ''}`).join(' · ')
   const quotaTone = quota ? quota.remainingPercent < 10 ? 'danger' : quota.remainingPercent < 25 ? 'warn' : 'ok' : undefined
   return <section className="dt-billing" aria-label={t('billingTitle')} data-priced={billing.priced || !!settled || undefined}
     title={settled ? t('billingSettledNote') : t('billingSourceNote')}>
@@ -83,7 +85,11 @@ function BillingStrip({ billing }: { billing: BillingView }) {
         {current.name || current.provider || t('billingUnknown')}
       </span>
       {current.model && <span className="dt-billing-model">{current.model}</span>}
-      {extra > 0 && <span className="dt-billing-more" title={t('billingMoreProviders', { count: extra })}>+{extra}</span>}
+      {topDiffers && <span className="dt-billing-top" title={routesTitle}>
+        {t('billingTop')} {top!.name} {top!.model}
+        <span className="dt-billing-top-cost">{top!.cost !== null ? `≈${moneyText(top!.cost)}` : `${tokensText(top!.tokens)} tokens`}</span>
+      </span>}
+      {extra > 0 && <span className="dt-billing-more" title={routesTitle}>{t('billingMoreRoutes', { count: extra })}</span>}
       {overrides.map(role => <Tag key={role.role} tone="warning">
         {t('billingRoleOverride', { role: t(role.role === 'orchestrator' ? 'billingRoleEval' : 'billingRoleWorker'),
           provider: role.name || role.provider })}
@@ -91,13 +97,14 @@ function BillingStrip({ billing }: { billing: BillingView }) {
     </div>
     <div className="dt-billing-window">
       <span className="dt-billing-window-label">{t('billingWindow')}</span>
+      <span className="dt-billing-tokens">{t('billingTokens', { tokens: tokensText(billing.total.tokens) })}</span>
       {settled
         ? <span className="dt-billing-money" data-source="gateway"
           title={settled.complete ? t('billingSettledNote') : t('billingSettledPartial')}>
           {moneyText(settled.cost)}{!settled.complete && '+'}
         </span>
         : estimate !== undefined
-          ? <span className="dt-billing-money" data-source="estimate" title={t('billingSourceNote')}>{estimate}</span>
+          ? <span className="dt-billing-money" data-source="estimate" title={t('billingEstimateNote')}>≈{estimate}</span>
           : <span className="dt-billing-money" data-unpriced>{t('billingUnpriced')}</span>}
       <span className="dt-billing-source" data-source={settled ? 'gateway' : 'estimate'}>
         {settled ? t('billingSettled') : t('billingEstimate')}
@@ -105,7 +112,7 @@ function BillingStrip({ billing }: { billing: BillingView }) {
       {!settled && billing.total.unpricedTokens > 0 && <span className="dt-billing-unpriced"
         title={t('billingUnpricedTokens', { tokens: tokensText(billing.total.unpricedTokens) })}>+</span>}
       <span className="dt-billing-spark" role="img"
-        aria-label={t('billingSpark', { metric: t(settled || billing.priced ? 'billingCostMetric' : 'billingTokenMetric') })}>
+        aria-label={t('billingSpark', { metric: t(settled ? 'billingCostMetric' : 'billingTokenMetric') })}>
         {bars.map((bar, index) => <span key={bar.at} className="dt-billing-bar" data-zero={bar.value === 0 || undefined}
           data-latest={index === latest || undefined} title={`${minuteText(bar.at)} · ${bar.label}`}
           style={{ height: `${max > 0 ? Math.max(8, Math.round(bar.value / max * 100)) : 8}%` }} />)}
@@ -121,7 +128,6 @@ function BillingStrip({ billing }: { billing: BillingView }) {
         </span>
         <span className="dt-billing-quota-value">{Math.round(quota.remainingPercent)}%</span>
       </span>}
-      {!quota && <span className="dt-billing-total">{tokensText(billing.total.tokens)} tokens</span>}
     </div>
   </section>
 }

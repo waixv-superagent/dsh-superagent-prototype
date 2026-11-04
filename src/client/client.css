@@ -528,8 +528,11 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-billing-provider[data-unpriced] { color: var(--dsw-alias-state-warn-primary); }
 .dt-billing-model { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
 .dt-billing-more { padding: 0 5px; border-radius: 4px; font-size: 11px; line-height: 17px; color: var(--dsw-alias-label-caption); background: var(--dsw-alias-bg-skeleton); cursor: default; }
+.dt-billing-top { display: inline-flex; align-items: baseline; gap: 4px; padding: 0 6px; border-radius: 5px; font-size: 11px; line-height: 17px; color: var(--dsw-alias-label-secondary); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 8%, transparent); cursor: default; }
+.dt-billing-top-cost { color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }
 .dt-billing-window { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.dt-billing-money { font-size: 15px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-primary); font-variant-numeric: tabular-nums; }
+.dt-billing-tokens { font-size: 15px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-primary); font-variant-numeric: tabular-nums; }
+.dt-billing-money { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; cursor: default; }
 .dt-billing-money[data-unpriced] { color: var(--dsw-alias-state-warn-primary); font-weight: 500; }
 .dt-billing-unpriced { margin-left: -5px; font-size: 12px; color: var(--dsw-alias-state-warn-primary); cursor: default; }
 .dt-billing-window-label { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); white-space: nowrap; }
@@ -555,7 +558,6 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
   .dt-billing-bar, .dt-billing-quota-fill { transition: none; }
 }
 .dt-billing-requests { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
-.dt-billing-total { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dt-board-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
 /* Fade the edge that still has hidden lanes, so a narrow page shows the board scrolls sideways (same cue as the tab bar). */
 .dt-board-scroll[data-more='end'] { mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent); }
