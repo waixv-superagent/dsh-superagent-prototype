@@ -42,12 +42,25 @@ export function realProgram(name: string, shimDir: string): string {
   return `${name}.exe`
 }
 /**
- * A `.cmd` shim for Windows, where the extensionless `sh` scripts POSIX uses cannot run: PowerShell refuses a document in a pipeline
- * and cmd resolves neither. `blocked` names the subcommands that fail instead of reaching the real program. Like the POSIX
- * shims, it drops its own directory from PATH first, so a wrapper the program runs by name reaches the real program, not the shim.
+ * The `lark-cli` commands that change which identities the bot configuration allows, its profile, or its credentials. A worker
+ * must never run them: the deployment serves every Feishu message, read and file through this one bot configuration, and a
+ * worker that switched it to the user identity disabled all of them until a person switched it back.
  */
-export function batchShim(program: string, blocked: string[], message: string, shimDir: string): string {
-  const guard = blocked.length
+const LARK_IDENTITY_POLICY: readonly (readonly [string, readonly string[]])[] = [
+  ['config', ['strict-mode', 'bind', 'init', 'remove', 'default-as', 'keychain-downgrade', 'risk-control']],
+  ['profile', ['add', 'use', 'remove', 'rename']],
+  ['auth', ['login', 'logout']],
+]
+/** What a shim answers instead of running one of those commands; the operator runs them outside the worker's PATH. */
+export const LARK_IDENTITY_POLICY_MESSAGE = 'The bot lark-cli is fixed to the bot identity; only the operator changes its identity policy, see docs/006-deployment.md. User-identity operations use the CLI the identities skill names; ask the requester to set one up when it names none.'
+/**
+ * A `.cmd` shim for Windows, where the extensionless `sh` scripts POSIX uses cannot run: PowerShell refuses a document in a pipeline
+ * and cmd resolves neither. `blocked` names the subcommands that fail instead of reaching the real program, and `guard` adds
+ * lines that refuse a command shape, such as a subcommand of a named command. Like the POSIX shims, it drops its own
+ * directory from PATH first, so a wrapper the program runs by name reaches the real program, not the shim.
+ */
+export function batchShim(program: string, blocked: string[], message: string, shimDir: string, guard: string[] = []): string {
+  const blockedGuard = blocked.length
     ? [
         'for %%A in (%*) do (',
         ...blocked.map(word => `  if /I "%%~A"=="${word}" (`),
@@ -67,7 +80,23 @@ export function batchShim(program: string, blocked: string[], message: string, s
     'if defined dsh_rest goto dsh_next',
     'if defined dsh_path set "dsh_path=!dsh_path:~0,-1!"',
     'set "PATH=!dsh_path!"',
-    ...guard, `"${program}" %*`, 'exit /b %errorlevel%', ''].join('\r\n')
+    ...blockedGuard, ...guard, `"${program}" %*`, 'exit /b %errorlevel%', ''].join('\r\n')
+}
+/** Batch lines that refuse the identity-policy subcommands before the bot CLI sees them. */
+function batchLarkGuard(): string[] {
+  return LARK_IDENTITY_POLICY.flatMap(([command, subcommands]) => subcommands.map(subcommand =>
+    `if /I "%~1"=="${command}" if /I "%~2"=="${subcommand}" (echo ${LARK_IDENTITY_POLICY_MESSAGE} 1>&2 & exit /b 1)`))
+}
+/** The same refusal as POSIX sh lines, including `strict-mode` wherever it appears in the arguments. */
+function shellLarkGuard(): string {
+  const subcommandCases = LARK_IDENTITY_POLICY.map(([command, subcommands]) => [
+    `if [ "$1" = ${shellQuote(command)} ]; then`,
+    `  case "$2" in ${subcommands.join('|')}) echo ${shellQuote(LARK_IDENTITY_POLICY_MESSAGE)} >&2; exit 1 ;; esac`,
+    'fi',
+  ].join('\n'))
+  return [...subcommandCases,
+    `for argument in "$@"; do case "$argument" in strict-mode) echo ${shellQuote(LARK_IDENTITY_POLICY_MESSAGE)} >&2; exit 1 ;; esac; done`,
+  ].join('\n')
 }
 export function withoutDirectory(path: string, dir: string): string {
   return path.split(delimiter).filter(entry => !sameDirectory(entry, dir)).join(delimiter)
@@ -149,6 +178,7 @@ export async function writeEnvironment(deployment: Pick<Deployment, 'stateDir' |
     'set +f', 'unset IFS', 'PATH=$rest', 'export PATH',
   ].join('\n')
   const run = (program: string): string => `${withoutShims}\nexec ${shellQuote(program)} "$@"`
+  const runGuarded = (program: string, guard: string): string => `${withoutShims}\n${guard}\nexec ${shellQuote(program)} "$@"`
   const fail = (message: string): string => `echo ${shellQuote(message)} >&2\nexit 1`
   // Submitting a changelist is a person's decision, so every other p4 subcommand passes through and `submit` does not.
   const submitFree = (program: string, message: string): string => `${withoutShims}
@@ -180,12 +210,14 @@ exec ${shellQuote(program)} "$@"`
     const real = (cli: string, name: string): string => isAbsolute(cli) ? cli : realProgram(name, dir)
     if (github.cli) await batch('gh', batchShim(real(github.cli, 'gh'), [], '', dir))
     await batch('p4', batchShim(realProgram('p4', dir), ['submit'], p4Blocked, dir))
-    await batch('lark-cli', feishu ? batchShim(real(feishu.cli, 'lark-cli'), [], '', dir) : batchRefuse(larkBlocked))
+    await batch('lark-cli', feishu
+      ? batchShim(real(feishu.cli, 'lark-cli'), ['strict-mode'], LARK_IDENTITY_POLICY_MESSAGE, dir, batchLarkGuard())
+      : batchRefuse(larkBlocked))
     for (const name of blockedNames) await batch(name, batchRefuse(blockedText(name)))
   } else {
     if (github.cli) await shim('gh', run(github.cli))
     await shim('p4', submitFree('p4', p4Blocked))
-    await shim('lark-cli', feishu ? run(feishu.cli) : refuse(larkBlocked))
+    await shim('lark-cli', feishu ? runGuarded(feishu.cli, shellLarkGuard()) : refuse(larkBlocked))
     for (const name of blockedNames) await shim(name, refuse(blockedText(name)))
   }
   for (const name of before) if (!kept.has(name)) await unlink(join(dir, name))

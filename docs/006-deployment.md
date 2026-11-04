@@ -81,6 +81,44 @@ Both presets run with `danger-full-access` as the operator's OS user and read me
 
    Use the configuration that holds that person's user login for the app; if the personal configuration is not for this app, create another configuration directory and log in as that person. The bot configuration above stays restricted to the bot identity. A worker creates and edits a document with the requester's identity, so the document is owned by that person, and uses the bot for everything else. The host does not check this second CLI; the `identities` skill is what tells the agents to use it and for what, and the built-in Feishu skill states the rule. In the skill, name the person's `open_id` and the command, for example: `Alice (ou_…): her documents use ~/.local/bin/lark-user, which logs in as her.`
 
+   On Windows the wrappers are `.cmd` files with the same split; the personal configuration and the bot configuration are still separate directories:
+
+   ```bat
+   rem %USERPROFILE%\bin\lark-user.cmd: the requester's user identity for their own documents
+   @echo off
+   set "LARKSUITE_CLI_CONFIG_DIR=%USERPROFILE%\.lark-cli"
+   set "LARKSUITE_CLI_NO_UPDATE_NOTIFIER=1"
+   "%APPDATA%\npm\node_modules\@larksuite\cli\bin\lark-cli.exe" %*
+   ```
+
+#### Keeping the bot identity working
+
+The bot configuration is the deployment's only Feishu access: the Feishu Source polls and replies with it, and every worker runs `lark-cli` through it. Strict mode is a stored policy, not a per-command switch: with `strict-mode: user` every bot command is hidden, so the Source cannot read history or send replies, a worker cannot upload a file to a chat, and Source health says `strict mode is "user", only user-identity commands are available`. A worker that needed the user identity for one document once switched the bot configuration to `user` and did not switch it back; messages, reads and file uploads stayed broken for every ticket until a person switched it back.
+
+An existing deployment that switched the bot configuration to `user` for a document should add the wrapper and the `identities` skill before upgrading: after the upgrade the worker shim refuses the switch.
+
+Keep three rules:
+
+- **The bot configuration stays `strict-mode: bot`.** A worker must not change it: worker `lark-cli` shims refuse `config strict-mode`, `config bind`, `config default-as`, `config init`, `config remove`, `profile` changes and `auth login`/`auth logout` with a message pointing here. Only the operator runs those, outside the worker `PATH`, for example `~/.local/bin/lark-bot config strict-mode bot`; the host also refuses to start on any other mode.
+- **User-identity work uses the separate wrapper from step 3, one invocation at a time.** `lark-user docs +create …` acts as the requester while the bot keeps serving messages; nothing global changes and no restart is needed.
+- **When the requester has no recorded user wrapper, ask them to set one up** (step 3 plus an `identities` team skill). Do not create or edit their document as the bot, and do not switch the bot configuration to borrow their login.
+
+Use the user identity only where ownership or the API requires it:
+
+| Operation | Identity |
+| --- | --- |
+| Reading chats, consuming events, sending messages, cards and files to a chat the bot belongs to | bot |
+| Creating or editing a document owned by the requester, including one the Ticket created earlier | user, through that person's wrapper |
+| Reading or changing the requester's personal drive, wiki, mail, calendar, tasks, OKR, attendance, minutes or message search | user, through that person's wrapper |
+| A wiki node or document the bot cannot read because its owner did not grant the bot access | user, through that person's wrapper |
+
+Check both wrappers once, and again after a repair:
+
+```sh
+lark-bot whoami    # "identity": "bot"
+lark-user whoami   # "identity": "user", "onBehalfOf" the requester
+```
+
 ## Install
 
 Run this block once, on a machine that has no `superagent` profile yet:
@@ -306,6 +344,8 @@ Setup problems appear on the overview with a link to the fix, in the panel's lan
 | A Ticket fails with `The git configuration of the repository in … sets …` | Remove the named credential or `http.*.extraheader` settings from the clone's `.git/config` |
 | `… was not written by dsh-superagent` | Move the named file out of `<stateDir>/worker-bin` or `<stateDir>/worker-gitconfig`, or choose another `stateDir` |
 | `The bot lark-cli allows user identities` | Point the Feishu Source at a bot-only configuration, as in Feishu bot above |
+| `The bot lark-cli is fixed to the bot identity` | A worker tried to change the bot configuration's identity policy. User-identity work goes through the requester's wrapper from Feishu bot step 3; only the operator changes the bot configuration, outside the worker `PATH` |
+| Source health says `strict mode is "user", only user-identity commands are available` | The bot configuration was switched to the user identity. As the operator run `lark-bot config strict-mode bot` and check `lark-bot whoami` reports `bot`; the next polling round clears the history entry, and replies held in the overview can then be retried |
 | `The bot lark-cli does not work.` or `The bot identity of app … is …` | Check the configuration's app id and secret |
 | `The Feishu bot is not a member of the chat.` | Add the bot to the chat in the chat's settings; the next attempt succeeds |
 | Feishu refused the arguments of a reply; automatic retries stopped | The CLI rejected the message before calling Feishu, so retrying the same text cannot succeed. Fix the cause and restart, which sends it once more, or withdraw it from the overview |
