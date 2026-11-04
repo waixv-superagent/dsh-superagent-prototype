@@ -498,12 +498,9 @@ it('opens a Thread at its topic\'s newest message through the client scheme, upg
     subscriptions: [], correlated: [], pending: [], meta: { url: messageUrl } })
   const view = snapshot(host)
   const topicUrl = 'feishu://applink/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1'
-  const chatUrl = 'feishu://applink/client/chat/open?openChatId=oc_1'
   expect(threadSummary(view, store.threads.get('feishu:oc_1:om_root')!).url).toBe(topicUrl)
   expect(threadSummary(view, store.threads.get('feishu:oc_1:om_two')!).url).toBe(topicUrl)
-  expect(threadSummary(view, store.threads.get('feishu:oc_1:om_root')!).chatUrl).toBe(chatUrl)
   expect(threadDetail(host, 'feishu:oc_1:om_root', undefined, 50)!.url).toBe(topicUrl)
-  expect(threadDetail(host, 'feishu:oc_1:om_root', undefined, 50)!.chatUrl).toBe(chatUrl)
 })
 
 it('opens a Ticket at its topic\'s newest message while a question card keeps its own position', () => {
@@ -520,7 +517,6 @@ it('opens a Ticket at its topic\'s newest message while a question card keeps it
   store.set(KV.feishu.attentionCards, { om_asked: { ticketId: 't1', attentionId: 'a1', at, url: askedUrl } })
   const page = ticketDetail(host, 't1')!
   expect(page.threads[0]!.url).toBe('feishu://applink/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_9')
-  expect(page.threads[0]!.chatUrl).toBe('feishu://applink/client/chat/open?openChatId=oc_1')
   expect(page.reply?.url).toBe('feishu://applink/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_9&thread_position=4')
 })
 

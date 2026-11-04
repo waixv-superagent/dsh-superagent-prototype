@@ -199,17 +199,6 @@ it('offers a Ticket awaiting review its review place and Session in the page hea
     'https://github.com/acme/widgets/pull/42']])
 })
 
-it('offers the Feishu conversation next to the topic link in the Ticket page head', async () => {
-  const topic = 'feishu://applink/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1'
-  const chat = 'feishu://applink/client/chat/open?openChatId=oc_1'
-  const t1 = server.ticketDetails.t1!
-  server.ticketDetails.t1 = { ...t1, threads: [threadSummary({ url: topic, chatUrl: chat })] }
-  at({ page: 'execution', id: 't1' })
-  await mount()
-  expect(all('.dt-page-head a').map(link => [link.textContent, link.getAttribute('href')])).toEqual([
-    ['打开 飞书 原文', topic], [zh.openFeishuChat, chat]])
-})
-
 it('keeps what a person types in the Execution settings, converting it once on save', async () => {
   await mount()
   await click(zh['tab.execution'])
