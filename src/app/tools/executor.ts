@@ -301,12 +301,13 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
             if (!kind) throw new Error('run needs purpose build, restart or test')
             const directory = host.workspaceOf(current)
             const { job, merged } = scheduler.submit(ticketId, kind, directory, args.filter)
+            // A build folded into another reports that build's result, which is this change's too.
             const ended = await scheduler.waitFor(() => {
-              const value = scheduler.job(job.id)
+              const value = scheduler.resolved(job.id)
               return value && value.state !== 'queued' && value.state !== 'running' ? value : undefined
             }, waitMs, signal)
-            const value = ended ?? scheduler.job(job.id) ?? job
-            return { job: value, merged, ...ended ? { log_tail: scheduler.logTail(job.id, 3000) } : {},
+            const value = ended ?? scheduler.resolved(job.id) ?? job
+            return { job: value, merged: merged || value.id !== job.id, ...ended ? { log_tail: scheduler.logTail(value.id, 3000) } : {},
               ...ended ? {} : { note: 'The job is not done yet; its end reaches you as a message.' } }
           }
           case 'status': return shown()

@@ -383,7 +383,7 @@ function ScheduleCard({ schedule, reload }: { schedule: Schedule; reload: () => 
       </div>
       <div className="dt-editor-schedule-actions">
         {personHolds || personWaits
-          ? <Button variant="outline" size="sm" disabled={act.busy} onClick={() => { void act.run({ action: 'yield' }) }}>{t('editorActRelease')}</Button>
+          ? <Button variant="outline" size="sm" disabled={act.busy} onClick={() => { void act.run({ action: 'release' }) }}>{t('editorActRelease')}</Button>
           : schedule.blocked === 'editor'
             ? <Button variant="outline" size="sm" disabled={act.busy} onClick={() => { void act.run({ action: 'yield' }) }}
               title={t('editorActYieldHint')}>{t('editorActYield')}</Button>

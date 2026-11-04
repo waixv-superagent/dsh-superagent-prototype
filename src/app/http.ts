@@ -177,7 +177,7 @@ const PlanRequest = z.object({ decision: z.enum(['approve', 'revise', 'stop']), 
 const RedispatchRequest = z.object({ backend: z.enum(['git', 'p4']), target: z.string().trim().min(1).max(300).optional() }).strict()
 /** A person's action on the shared editor from the overview. */
 const EditorActRequest = z.discriminatedUnion('action', [
-  z.object({ action: z.enum(['claim', 'yield']) }).strict(),
+  z.object({ action: z.enum(['claim', 'release', 'yield']) }).strict(),
   z.object({ action: z.literal('preempt'), reason: z.string().trim().max(300).optional() }).strict(),
   z.object({ action: z.enum(['front', 'cancel', 'cancel-job']), id: z.string().trim().min(1).max(64) }).strict(),
 ])
@@ -210,8 +210,8 @@ function routes(runtime: HttpHost): Routes {
       const scheduler = runtime.editorScheduler
       if (!scheduler) throw new RouteError(404, 'This host has no editor scheduler')
       const request = EditorActRequest.parse(await body(2_048))
-      if (request.action === 'cancel-job') { scheduler.cancelJob(request.id); return { done: true as const } }
       try {
+        if (request.action === 'cancel-job') { scheduler.cancelJob(request.id); return { done: true as const } }
         scheduler.act(request.action === 'preempt' ? { kind: 'preempt', reason: request.reason ?? '' }
           : request.action === 'front' || request.action === 'cancel' ? { kind: request.action, requestId: request.id }
           : { kind: request.action })

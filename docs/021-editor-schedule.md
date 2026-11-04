@@ -12,11 +12,11 @@ All state is one record, `KV.editor.schedule` (`src/app/editor-schedule.ts`), ch
 
 | Part | Meaning |
 | --- | --- |
-| `lease` | Who holds the editor now: an agent (one Ticket), a host job (one or more Tickets), or a person. It carries a purpose (`build` / `restart` / `test` / `use`), a note, the grant time and an expiry renewed by heartbeats. A person's claim does not expire. |
+| `lease` | Who holds the editor now: an agent (one Ticket), a host job (one or more Tickets), or a person. It carries a purpose (`build` / `restart` / `test` / `use`), a note, the grant time and an expiry renewed by heartbeats. A person's claim does not expire, and neither does a host job's lease: it ends with the job's process. |
 | `queue` | Waits in grant order: a person's claim first, then waits a person moved to the front, then first come first served. A wait is a worker's own request or a host job's. |
 | `jobs` | Builds, restarts and tests the host runs, with their Tickets, state, exit code, one-line summary and log path. |
 | `events` | The last 200 grants, releases, expiries, preemptions, claims and job ends; the overview's timeline draws lease and wait spans from them. |
-| `agentPids` / `yielded` | Interactive editors an agent started under its lease, and those a person said agents may use. Any other interactive `UnrealEditor` reads as a person using it. |
+| `agentPids` / `yielded` | Interactive editors an agent started under its lease, and those a person said agents may use. Any other interactive `UnrealEditor` reads as a person using it. An editor counts as the agent's only when the lease was taken to open one (`restart` or `use`, or a restart job) and it is the only editor that started since the grant. When two appear, either may be a person's, so neither counts. |
 
 `advance` runs on every change, on the overview's poll and on a 15-second timer. It drops the leases and waits of ended Tickets, expires a lease without a heartbeat, forgets editors that have exited, and grants the head of the queue once nothing holds the editor and no person is using it.
 
@@ -25,13 +25,13 @@ All state is one record, `KV.editor.schedule` (`src/app/editor-schedule.ts`), ch
 1. **A person.** An interactive editor that no agent started, an unreadable probe, or a claim from the overview holds every agent back. The overview's buttons are the person's controls:
    - **我要用 (claim)**: take the editor, ask the agent holding it to save and yield, and make the queue wait.
    - **让 agent 用 (yield)**: the open editor stops counting as the person's, so the queue moves.
-   - **我用完了 (release)**: end a claim.
+   - **我用完了 (release)**: end a claim. An editor the person still has open stays theirs.
    - **请它让出 (preempt)**: ask the holder to yield.
    - **插到最前 (front)** and **移出队列 (remove)**: reorder or drop a wait.
-2. **Waits a person moved forward**, in the order they were moved.
+2. **Waits a person moved forward**, the latest move first, so "move to front" always puts that wait first.
 3. **Everyone else**, first come first served.
 
-Nothing is killed. A preempted agent gets a steering message and releases. Five minutes later the overview marks the yield overdue. A host job the person preempts is stopped, because the host owns that process.
+Nothing of a person's is killed. A preempted agent gets a steering message and releases. Its heartbeats cannot push the lease past the five-minute grace, and once the grace runs out the lease lapses. A host job the person preempts or stops is killed, because the host owns that process. Its lease stays until the process has exited, so the next build never starts over a compile still writing, and it reports `cancelled`, never its exit code.
 
 ## Worker tool
 
@@ -39,10 +39,10 @@ Workers get `orchestrator_editor` (`src/app/tools/executor.ts`):
 
 | Action | Behaviour |
 | --- | --- |
-| `acquire purpose note minutes wait_seconds` | Granted at once when free; otherwise queued with a position. It waits up to `wait_seconds`, and a later grant arrives as a message. |
-| `heartbeat minutes note` | Keeps the lease alive through a long step. |
+| `acquire purpose note min wait` | Granted at once when free; otherwise queued with a position. It waits up to `wait_seconds`, and a later grant arrives as a message. |
+| `heartbeat min note` | Keeps the lease alive through a long step. |
 | `release note` | Ends the lease or leaves the queue. |
-| `run job filter wait_seconds` | Queues a host job. A build waiting in the same workspace absorbs this Ticket instead of starting a second compile. The result, including a log tail, comes back when the job ends within the wait or as a message later. |
+| `run purpose filter wait` | Queues a host job. A build waiting in the same workspace absorbs this Ticket instead of starting a second compile, and the worker gets that build's result. A Ticket that holds the editor hands its lease to its own job instead of waiting behind itself. The result, including a log tail, comes back when the job ends within the wait or as a message later. |
 | `status` | Shows the holder, the queue, this Ticket's jobs and ue-mcp's reading. |
 
 The worker prompt asks for a lease before a worker opens, builds, restarts or tests, and prefers `run` so builds batch. This phase does not intercept commands that bypass the lease (see Limits).
@@ -56,7 +56,7 @@ The worker prompt asks for a lease before a worker opens, builds, restarts or te
 | `project` | The `.uproject` path. ue-mcp's bridge files are read beside it, and `<project>` in a command is replaced with it. |
 | `build`, `restart`, `test` | Shell commands. `<dir>` is replaced with the Ticket's workspace and `<filter>` with the automation filter. An empty command makes that job kind unavailable, and workers fall back to a lease plus their own command. |
 
-When a build is granted, every other build waiting for the same workspace is folded into it. One compile then serves every delivered change waiting to be verified, and each Ticket receives the same result. Output goes to `<stateDir>/editor-jobs/<job>.log`. The summary is UBT's `Result:` line, the automation pass/fail count, or the exit code with the last line. A job still running when the host stops reads as `interrupted` after restart.
+When a build is granted, every other build waiting for the same workspace is folded into it. One compile then serves every delivered change waiting to be verified, and each Ticket receives the same result. Output goes to `<stateDir>/editor-jobs/<job>.log`. The summary is UBT's `Result:` line, the automation pass/fail count, or the exit code with the last line. The host records each job's pid. After a restart, a job whose process still runs is stopped and keeps the editor until it has exited. A job whose process is gone reads as `interrupted`. A worker's test filter may only hold letters, digits, spaces and `. _ + - : /`, and a workspace path with command-line syntax characters is refused, so neither can break out of the configured command.
 
 ## ue-mcp as a second source
 

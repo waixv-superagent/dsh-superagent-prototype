@@ -27,7 +27,7 @@ export interface Api {
   /** Who holds the editor and for what, the queue and the host-run jobs, ue-mcp's view, the working Tickets, and what waits on a person. */
   'GET editor': { response: EditorPageView }
   /** A person claims or yields the shared editor, asks its holder to yield, reorders or drops a wait, or stops a job. */
-  'POST editor/act': { body: { action: 'claim' | 'yield' } | { action: 'preempt'; reason?: string }
+  'POST editor/act': { body: { action: 'claim' | 'release' | 'yield' } | { action: 'preempt'; reason?: string }
     | { action: 'front' | 'cancel' | 'cancel-job'; id: string }; response: { done: true } }
   'GET search': { query: { q: string }; response: SearchView }
   'GET sources': { response: SourceStatusView[] }

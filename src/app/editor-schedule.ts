@@ -32,7 +32,7 @@ export interface EditorLease {
   note: string
   acquiredAt: string
   heartbeatAt: string
-  /** When the lease lapses without a heartbeat; a person's claim has none. */
+  /** When the lease lapses without a heartbeat; a person's claim and a host job, which ends with its process, have none. */
   expiresAt: string | null
   /** A person asked the holder to yield; the holder saves and releases, nothing is killed. */
   draining?: { at: string; reason: string }
@@ -77,6 +77,12 @@ export interface EditorJob {
   log?: string
   /** The command line as configured, after placeholders; shown on hover. */
   command?: string
+  /** The process the host started, so a job left running across a host restart still holds the editor until it exits. */
+  pid?: number
+  /** A person stopped it: the lease stays until the process has exited, so the next job never overlaps it. */
+  stopping?: true
+  /** A build folded into another waiting build of the same workspace; that job's result is this one's. */
+  mergedInto?: string
 }
 
 export type EditorEventKind = 'queued' | 'granted' | 'released' | 'expired' | 'ended' | 'preempted' | 'claimed' | 'yielded'
@@ -145,11 +151,14 @@ export function personBlock(schedule: EditorSchedule, editor: EditorView | null)
   return interactivePids(editor).some(pid => !free.has(pid)) ? 'editor' : null
 }
 
-/** The queue in the order it is granted: a person's claim, then what a person moved forward, then first come first served. */
+/**
+ * The queue in the order it is granted: a person's claim, then what a person moved forward (the latest move first, so
+ * "move to front" always puts that wait first), then first come first served.
+ */
 export function ordered(queue: readonly EditorRequest[]): EditorRequest[] {
   const rank = (request: EditorRequest) => request.person ? 0 : request.front ? 1 : 2
   return queue.slice().sort((left, right) => rank(left) - rank(right)
-    || (left.front ?? '').localeCompare(right.front ?? '') || left.at.localeCompare(right.at) || left.id.localeCompare(right.id))
+    || (right.front ?? '').localeCompare(left.front ?? '') || left.at.localeCompare(right.at) || left.id.localeCompare(right.id))
 }
 
 /** Where a Ticket stands: holding, waiting at a position (1-based), or neither. */
@@ -177,6 +186,7 @@ function grant(schedule: EditorSchedule, request: EditorRequest, context: Schedu
         other.state = 'cancelled'
         other.endedAt = at
         other.summary = `merged into ${job.id}`
+        other.mergedInto = job.id
         ticketIds = [...new Set([...ticketIds, ...item.ticketIds])]
       }
       schedule.queue = schedule.queue.filter(item => !merged.includes(item))
@@ -186,7 +196,7 @@ function grant(schedule: EditorSchedule, request: EditorRequest, context: Schedu
   const holder: LeaseHolder = request.person ? { kind: 'person' } : request.jobId ? { kind: 'job', jobId: request.jobId, ticketIds }
     : { kind: 'agent', ticketId: request.ticketIds[0]! }
   const lease: EditorLease = { id: context.id(), holder, purpose: request.purpose, note: request.note, acquiredAt: at, heartbeatAt: at,
-    expiresAt: request.person ? null : iso(context.now + request.ttlMs) }
+    expiresAt: request.person || request.jobId ? null : iso(context.now + request.ttlMs) }
   schedule.lease = lease
   event(schedule, { at, kind: request.person ? 'claimed' : 'granted', by: request.person ? 'person' : 'host',
     ...request.person ? {} : { ticketIds }, purpose: request.purpose, ...request.note ? { detail: request.note } : {} })
@@ -214,13 +224,19 @@ export function advance(input: EditorSchedule, context: ScheduleContext): { sche
   const lease = schedule.lease
   if (lease?.holder.kind === 'agent' && !context.live(lease.holder.ticketId)) endLease(schedule, 'ended', 'host', at)
   else if (lease?.expiresAt && Date.parse(lease.expiresAt) <= context.now) endLease(schedule, 'expired', 'host', at)
-  // An editor that started while an agent held the lease is that agent's, so it does not lock the next agent out.
-  if (schedule.lease && schedule.lease.holder.kind !== 'person' && context.editor?.editors) {
-    const since = Date.parse(schedule.lease.acquiredAt)
-    for (const process of context.editor.editors) {
-      if (process.name === 'unrealeditor' && process.started && Date.parse(process.started) >= since - 5_000
-        && !schedule.agentPids.includes(process.pid)) schedule.agentPids.push(process.pid)
-    }
+  // An editor that started under a lease meant to open one (a restart job, or an agent restarting or using the editor) is
+  // that holder's, so it does not lock the next agent out. Only a single new editor counts: when two appear, one may be a
+  // person's, and an editor that cannot be told apart stays a person's.
+  const opener = schedule.lease && (schedule.lease.holder.kind === 'job' ? schedule.lease.purpose === 'restart'
+    : schedule.lease.holder.kind === 'agent' && (schedule.lease.purpose === 'restart' || schedule.lease.purpose === 'use'))
+  if (opener && context.editor?.editors) {
+    const since = Date.parse(schedule.lease!.acquiredAt)
+    const fresh = context.editor.editors.filter(process => process.name === 'unrealeditor' && process.started
+      && Date.parse(process.started) >= since - 5_000 && !schedule.agentPids.includes(process.pid)
+      && !schedule.yielded?.pids.includes(process.pid))
+    const others = context.editor.editors.filter(process => process.name === 'unrealeditor' && !fresh.includes(process)
+      && !schedule.agentPids.includes(process.pid) && !schedule.yielded?.pids.includes(process.pid))
+    if (fresh.length === 1 && !others.some(process => !process.started || Date.parse(process.started) >= since - 5_000)) schedule.agentPids.push(fresh[0]!.pid)
   }
   if (context.editor && context.editor.holder !== 'unknown') {
     schedule.agentPids = schedule.agentPids.filter(pid => running.has(pid))
@@ -264,7 +280,7 @@ export function acquire(input: EditorSchedule, request: AcquireRequest, context:
     lease.purpose = request.purpose
     if (note) lease.note = note
     lease.heartbeatAt = at
-    lease.expiresAt = iso(context.now + ttlMs)
+    lease.expiresAt = renewed(lease, context.now, ttlMs)
     return { schedule, result: { state: 'granted', lease } }
   }
   if (current.state === 'queued') {
@@ -285,13 +301,19 @@ export function acquire(input: EditorSchedule, request: AcquireRequest, context:
   throw new Error('the editor request was dropped because its Ticket ended')
 }
 
+/** A renewed expiry; a lease a person asked to yield cannot be pushed past the grace it was given to save and release. */
+function renewed(lease: EditorLease, now: number, ttlMs: number): string {
+  const until = now + ttlMs
+  return iso(lease.draining ? Math.min(until, Date.parse(lease.draining.at) + DRAIN_GRACE_MS) : until)
+}
+
 /** The holder keeps its lease alive, optionally for a longer step. */
 export function heartbeat(input: EditorSchedule, ticketId: string, context: ScheduleContext, ttlMs?: number, note?: string): EditorSchedule {
   const schedule = clone(input)
   const lease = schedule.lease
   if (!lease || lease.holder.kind !== 'agent' || lease.holder.ticketId !== ticketId) throw new Error('this Ticket does not hold the editor')
   lease.heartbeatAt = iso(context.now)
-  lease.expiresAt = iso(context.now + clampTtl(ttlMs))
+  lease.expiresAt = renewed(lease, context.now, clampTtl(ttlMs))
   if (note?.trim()) lease.note = note.trim().slice(0, 300)
   return schedule
 }
@@ -310,12 +332,19 @@ export function release(input: EditorSchedule, ticketId: string, context: Schedu
   return schedule
 }
 
-/** Queues a job the host will run once it holds the editor; a build already waiting absorbs this Ticket instead. */
+/**
+ * Queues a job the host will run once it holds the editor; a build already waiting absorbs this Ticket instead. A Ticket
+ * that holds the editor itself hands it to its job, so its own lease never makes its job wait behind it; a lease a person
+ * asked to yield is released instead, and the job waits its turn.
+ */
 export function submitJob(input: EditorSchedule, job: { kind: EditorJobKind; ticketId: string; directory: string; filter?: string },
   context: ScheduleContext):
-  { schedule: EditorSchedule; job: EditorJob; merged: boolean } {
+  { schedule: EditorSchedule; job: EditorJob; merged: boolean; granted?: EditorLease } {
   const schedule = clone(input)
   const at = iso(context.now)
+  const held = schedule.lease?.holder.kind === 'agent' && schedule.lease.holder.ticketId === job.ticketId ? schedule.lease : null
+  const handover = held && !held.draining
+  if (held) endLease(schedule, 'released', 'agent', at, handover ? `handed to its ${job.kind} job` : undefined)
   if (job.kind === 'build') {
     const waiting = schedule.jobs.find(item => item.kind === 'build' && item.state === 'queued' && item.directory === job.directory)
     if (waiting) {
@@ -330,8 +359,10 @@ export function submitJob(input: EditorSchedule, job: { kind: EditorJobKind; tic
     directory: job.directory, state: 'queued', createdAt: at }
   schedule.jobs.push(value)
   const purpose: EditorPurpose = job.kind
-  schedule.queue.push({ id: context.id(), ticketIds: [job.ticketId], purpose, note: job.filter ?? '', at, jobId: value.id, ttlMs: MAX_LEASE_MS })
+  const request: EditorRequest = { id: context.id(), ticketIds: [job.ticketId], purpose, note: job.filter ?? '', at, jobId: value.id, ttlMs: MAX_LEASE_MS }
+  schedule.queue.push(request)
   event(schedule, { at, kind: 'queued', by: 'agent', ticketIds: [job.ticketId], purpose, ...job.filter ? { detail: job.filter } : {} })
+  if (handover) return { schedule, job: value, merged: false, granted: grant(schedule, request, context) }
   return { schedule, job: value, merged: false }
 }
 
@@ -357,7 +388,7 @@ export function updateJob(input: EditorSchedule, jobId: string, patch: Partial<E
 }
 
 /** A person's actions on the overview; each is recorded as a person's event. */
-export type PersonAction = { kind: 'claim' } | { kind: 'yield' } | { kind: 'preempt'; reason: string }
+export type PersonAction = { kind: 'claim' } | { kind: 'release' } | { kind: 'yield' } | { kind: 'preempt'; reason: string }
   | { kind: 'front'; requestId: string } | { kind: 'cancel'; requestId: string }
 
 /**
@@ -384,6 +415,12 @@ export function personAct(input: EditorSchedule, action: PersonAction, context: 
           ...drained.holder.kind === 'job' ? { cancelledJob: drained.holder.jobId } : {} }
       }
       return { schedule: advance(schedule, context).schedule }
+    }
+    case 'release': {
+      // Done with a claim: the claim ends, but an editor the person still has open stays theirs.
+      if (schedule.lease?.holder.kind === 'person') endLease(schedule, 'released', 'person', at)
+      schedule.queue = schedule.queue.filter(request => !request.person)
+      return { schedule }
     }
     case 'yield': {
       if (schedule.lease?.holder.kind === 'person') endLease(schedule, 'released', 'person', at)

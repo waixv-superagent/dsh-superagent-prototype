@@ -9,7 +9,7 @@ import type { EditorView } from '../src/app/editor.ts'
 import { engineSummary, parseEngineSnapshot, readEngineState } from '../src/app/editor-mcp.ts'
 import { acquire, advance, emptySchedule, heartbeat, ordered, personAct, personBlock, release, standing, submitJob, updateJob,
   type EditorSchedule, type ScheduleContext } from '../src/app/editor-schedule.ts'
-import { EditorScheduler, fillCommand, jobSummary } from '../src/app/editor-scheduler.ts'
+import { EditorScheduler, SAFE_FILTER, fillCommand, jobSummary } from '../src/app/editor-scheduler.ts'
 import { KV } from '../src/kv.ts'
 
 const T0 = Date.parse('2026-11-05T01:00:00.000Z')
@@ -148,10 +148,12 @@ describe('host-run jobs', () => {
 })
 
 describe('commands and summaries', () => {
-  it('fills placeholders with quoted values', () => {
+  it('fills placeholders, quoting the project, and admits only a filter that cannot leave the command\'s quoting', () => {
     expect(fillCommand('ue.cmd <project> -ExecCmds="Automation RunTests <filter>" -cwd <dir>',
       { project: 'E:/a b/Game.uproject', dir: 'E:/sun', filter: 'Game.Smoke' }))
-      .toBe('ue.cmd "E:/a b/Game.uproject" -ExecCmds="Automation RunTests "Game.Smoke"" -cwd E:/sun')
+      .toBe('ue.cmd "E:/a b/Game.uproject" -ExecCmds="Automation RunTests Game.Smoke" -cwd E:/sun')
+    expect(SAFE_FILTER.test('Project.Functional Tests.Game+Jump')).toBe(true)
+    for (const bad of ['Game"&calc', 'A|B', 'A;Quit', '%PATH%', 'A>out']) expect(SAFE_FILTER.test(bad)).toBe(false)
   })
   it('reads UBT\'s verdict and the automation counts, never a passing summary without evidence', () => {
     expect(jobSummary('build', 'warning X\nResult: Succeeded\nTotal time 3s', 0)).toBe('Result: Succeeded')
@@ -212,6 +214,7 @@ describe('EditorScheduler', () => {
     scheduler.submit('a', 'build', 'E:/sun')
     expect(scheduler.submit('b', 'build', 'E:/sun').merged).toBe(true)
     expect(() => scheduler.submit('a', 'restart', 'E:/sun')).toThrow(/no restart command/)
+    expect(() => scheduler.submit('a', 'build', 'E:/sun', 'x" & calc')).toThrow(/filter may hold only/)
     scheduler.release('x')
     expect(children).toHaveLength(1)
     const running = scheduler.read().jobs[0]!
@@ -245,5 +248,110 @@ describe('EditorScheduler', () => {
     expect(after.read().lease?.draining?.reason).toBe('need PIE')
     expect(notices.some(id => id.startsWith('editor-drain:'))).toBe(true)
     after.dispose()
+  })
+})
+
+describe('review fixes', () => {
+  it('keeps a person\'s editor theirs: a build lease claims no editor, and two new editors under a lease stay unclaimed', () => {
+    const started = new Date(T0 + 30_000).toISOString()
+    const build = acquire(emptySchedule(), { ticketId: 'a', purpose: 'build' }, context()).schedule
+    expect(advance(build, context({ now: T0 + 40_000, editor: personEditor(88, started) })).schedule.agentPids).toEqual([])
+    const use = acquire(emptySchedule(), { ticketId: 'a', purpose: 'use' }, context()).schedule
+    const two: EditorView = { ...personEditor(88, started), editors: [{ pid: 88, name: 'unrealeditor', started }, { pid: 89, name: 'unrealeditor', started }] }
+    expect(advance(use, context({ now: T0 + 40_000, editor: two })).schedule.agentPids).toEqual([])
+  })
+
+  it('caps a draining lease at its grace, whatever the holder heartbeats', () => {
+    const held = acquire(emptySchedule(), { ticketId: 'a', purpose: 'use' }, context()).schedule
+    const drained = personAct(held, { kind: 'preempt', reason: 'need it' }, context()).schedule
+    const beat = heartbeat(drained, 'a', context({ now: T0 + 60_000 }), 120 * 60_000)
+    expect(beat.lease?.expiresAt).toBe(new Date(T0 + 5 * 60_000).toISOString())
+    const again = acquire(beat, { ticketId: 'a', purpose: 'test', ttlMs: 120 * 60_000 }, context({ now: T0 + 90_000 })).schedule
+    expect(again.lease?.expiresAt).toBe(new Date(T0 + 5 * 60_000).toISOString())
+  })
+
+  it('hands a holder\'s lease to its own job, so the job does not wait behind it, but not a lease a person asked back', () => {
+    const held = acquire(emptySchedule(), { ticketId: 'a', purpose: 'use' }, context()).schedule
+    const handed = submitJob(held, { kind: 'build', ticketId: 'a', directory: 'E:/sun' }, context({ id: () => 'hj' }))
+    expect(handed.granted?.holder).toMatchObject({ kind: 'job', ticketIds: ['a'] })
+    expect(handed.schedule.lease?.expiresAt).toBeNull()
+    const drained = personAct(held, { kind: 'claim' }, context()).schedule
+    const waited = submitJob(drained, { kind: 'build', ticketId: 'a', directory: 'E:/sun' }, context())
+    expect(waited.granted).toBeUndefined()
+    expect(advance(waited.schedule, context()).granted?.holder).toEqual({ kind: 'person' })
+  })
+
+  it('puts the latest wait a person moved forward first, and ends a claim without yielding an open editor', () => {
+    let schedule: EditorSchedule = acquire(emptySchedule(), { ticketId: 'a', purpose: 'use' }, context()).schedule
+    for (const id of ['b', 'c']) schedule = acquire(schedule, { ticketId: id, purpose: 'use' }, context({ id: () => `q-${id}` })).schedule
+    schedule = personAct(schedule, { kind: 'front', requestId: 'q-b' }, context({ now: T0 + 1 })).schedule
+    schedule = personAct(schedule, { kind: 'front', requestId: 'q-c' }, context({ now: T0 + 2 })).schedule
+    expect(ordered(schedule.queue).map(request => request.ticketIds[0])).toEqual(['c', 'b'])
+    const editor = personEditor()
+    const claimed = advance(personAct(emptySchedule(), { kind: 'claim' }, context({ editor })).schedule, context({ editor })).schedule
+    const released = personAct(claimed, { kind: 'release' }, context({ editor })).schedule
+    expect(released.lease).toBeNull()
+    expect(released.yielded).toBeUndefined()
+    expect(personBlock(released, editor)).toBe('editor')
+  })
+})
+
+describe('EditorScheduler review fixes', () => {
+  const memory = () => {
+    const values = new Map<string, unknown>()
+    return { get: <V>(key: string) => values.get(key) as V | undefined, set: (key: string, value: unknown) => { values.set(key, structuredClone(value)) },
+      atomic: <T>(operation: () => T) => operation() }
+  }
+  const fakeChild = (pid: number) => Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), pid }) as unknown as ChildProcess
+
+  it('holds the editor while a stopped build exits, reports it cancelled, and gives a merged build the run it joined', async () => {
+    const notices: [string, string][] = []
+    const children: ChildProcess[] = []
+    const killed: number[] = []
+    const scheduler = new EditorScheduler({ store: memory(), live: () => true, editor: () => free, logDir: tmpdir(), warn: () => {},
+      commands: () => ({ project: '', build: 'build.bat', restart: '', test: '' }), kill: pid => { killed.push(pid) },
+      notify: async (ticketId, _id, text) => { notices.push([ticketId, text]) },
+      spawn: () => { const child = fakeChild(100 + children.length); children.push(child); return child } })
+    const first = scheduler.submit('a', 'build', 'E:/sun').job
+    expect(children).toHaveLength(1)
+    const second = scheduler.submit('b', 'build', 'E:/sun').job
+    expect(() => scheduler.submit('c', 'build', '')).toThrow(/no workspace/)
+    expect(() => scheduler.submit('c', 'build', 'E:/a&b')).toThrow(/syntax/)
+    scheduler.cancelJob(first.id)
+    expect(killed).toEqual([100])
+    // The stopped build still holds the editor, so the next build has not started over it.
+    expect(scheduler.read().lease?.holder).toMatchObject({ kind: 'job', jobId: first.id })
+    expect(children).toHaveLength(1)
+    children[0]!.emit('close', 0)
+    expect(scheduler.job(first.id)).toMatchObject({ state: 'cancelled', summary: 'stopped by a person' })
+    expect(children).toHaveLength(2)
+    expect(() => scheduler.cancelJob(first.id)).toThrow(/already ended/)
+    ;(children[1]!.stdout as EventEmitter).emit('data', 'Result: Succeeded\n')
+    children[1]!.emit('close', 0)
+    expect(scheduler.resolved(second.id)).toMatchObject({ state: 'succeeded' })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(notices.find(([id, text]) => id === 'a' && text.includes('cancelled'))).toBeTruthy()
+    scheduler.dispose()
+  })
+
+  it('stops a job left running across a restart and keeps the editor until its process is gone', () => {
+    const store = memory()
+    let running = true
+    const killed: number[] = []
+    const host = { store, live: () => true, editor: () => free, logDir: tmpdir(), warn: () => {}, notify: async () => {},
+      commands: () => ({ project: '', build: 'b', restart: '', test: '' }), alive: () => running, kill: (pid: number) => { killed.push(pid) } }
+    const schedule = emptySchedule()
+    schedule.jobs.push({ id: 'j', kind: 'build', ticketIds: ['a'], directory: 'E:/sun', state: 'running', createdAt: new Date(T0).toISOString(), pid: 4242 })
+    schedule.lease = { id: 'l', holder: { kind: 'job', jobId: 'j', ticketIds: ['a'] }, purpose: 'build', note: '', acquiredAt: new Date(T0).toISOString(),
+      heartbeatAt: new Date(T0).toISOString(), expiresAt: null }
+    store.set(KV.editor.schedule, schedule)
+    const scheduler = new EditorScheduler(host)
+    scheduler.start()
+    expect(killed).toEqual([4242])
+    expect(scheduler.tick().lease?.holder).toMatchObject({ jobId: 'j' })
+    running = false
+    expect(scheduler.tick().lease).toBeNull()
+    expect(scheduler.job('j')).toMatchObject({ state: 'cancelled' })
+    scheduler.dispose()
   })
 })

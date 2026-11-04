@@ -40,13 +40,26 @@ export interface EditorSchedulerHost {
   spawn?: (command: string, cwd: string) => ChildProcess
   /** Replaces the ue-mcp file read in tests. */
   engine?: (project: string) => EditorEngineState
+  /** Whether a process still runs; replaced in tests. */
+  alive?: (pid: number) => boolean
+  /** Stops a process tree; replaced in tests. */
+  kill?: (pid: number) => void
 }
 
-/** Placeholders a configured command may use; values are quoted, so a path with spaces stays one argument. */
+/**
+ * An automation filter a worker may hand the host: test names are words, dots, spaces, `+`, `-`, `:` and `/`. Anything
+ * else, such as a quote, `&`, `|` or `%`, could end the command's own quoting and run what the configured command never named.
+ */
+export const SAFE_FILTER = /^[\w .+\-:/]{1,300}$/
+
+/**
+ * Placeholders a configured command may use. The project is quoted so a path with spaces stays one argument; the filter
+ * goes in as is, usually inside the template's own quotes, which is why `submit` only lets a `SAFE_FILTER` through.
+ */
 export function fillCommand(template: string, values: { project: string; dir: string; filter?: string }): string {
   const quote = (value: string) => `"${value.replaceAll('"', '')}"`
   return template.replaceAll('<project>', quote(values.project)).replaceAll('<dir>', values.dir.replaceAll('"', ''))
-    .replaceAll('<filter>', quote(values.filter ?? ''))
+    .replaceAll('<filter>', values.filter ?? '')
 }
 
 /** The one line a person and the worker read from a job's output: UBT's verdict, the automation counts, or the last line. */
@@ -93,22 +106,43 @@ export class EditorScheduler {
     return result
   }
 
-  /** Recovers after a restart: a job that was running when the host stopped did not report, so it reads as interrupted. */
+  private alive(pid: number): boolean {
+    if (this.host.alive) return this.host.alive(pid)
+    try { process.kill(pid, 0); return true } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM' }
+  }
+  private kill(pid: number): void { (this.host.kill ?? killTree)(pid) }
+
+  /**
+   * Recovers after a restart. A job that was running when the host stopped lost its output and its report, so its process
+   * is stopped; it keeps the editor until that process has exited, so the next job never builds over it.
+   */
   start(): void {
-    this.change(schedule => {
+    const orphans: number[] = []
+    this.change((schedule, context) => {
       let next = schedule
       for (const job of schedule.jobs.filter(item => item.state === 'running')) {
-        next = updateJob(next, job.id, { state: 'interrupted', summary: 'the host restarted while it ran' }, this.context())
+        if (job.pid && this.alive(job.pid)) {
+          orphans.push(job.pid)
+          next = updateJob(next, job.id, { stopping: true, summary: 'the host restarted while it ran; stopping it' }, context)
+        } else next = updateJob(next, job.id, { state: 'interrupted', summary: 'the host restarted while it ran' }, context)
       }
       return { schedule: next }
     })
+    for (const pid of orphans) this.kill(pid)
     this.timer = setInterval(() => { this.tick() }, TICK_MS)
     this.timer.unref?.()
   }
   /** Lapses leases, drops ended Tickets and grants the editor once it is free; the overview's poll and a timer both call it. */
   tick(): EditorSchedule {
     if (this.disposed) return this.read()
-    try { return this.change(schedule => ({ schedule })).schedule } catch (error) {
+    try {
+      // A job this host no longer has a handle to (left from before a restart) ends once its process is gone.
+      const gone = this.read().jobs.filter(job => job.state === 'running' && !this.children.has(job.id) && (!job.pid || !this.alive(job.pid)))
+      for (const job of gone) {
+        this.end(job.id, job.stopping ? 'cancelled' : 'interrupted', null, job.stopping ? 'stopped after the host restarted' : 'the host restarted while it ran')
+      }
+      return this.change(schedule => ({ schedule })).schedule
+    } catch (error) {
       this.host.warn(`editor schedule tick failed: ${error instanceof Error ? error.message : String(error)}`)
       return this.read()
     }
@@ -129,19 +163,30 @@ export class EditorScheduler {
 
   /** Queues a host-run job; a build already waiting absorbs this Ticket so one compile serves every waiting change. */
   submit(ticketId: string, kind: EditorJobKind, directory: string, filter?: string): { job: EditorJob; merged: boolean } {
+    if (!directory.trim()) throw new Error('this Ticket has no workspace directory for a host job to run in')
+    if (/[&|<>^%"\r\n]/.test(directory)) throw new Error('the workspace path holds a character the command line would read as syntax')
     const command = this.host.commands()[kind]
     if (!command) throw new Error(`no ${kind} command is configured for the editor; take the editor with op=acquire purpose=${kind} and run it yourself`)
     if (kind === 'test' && !filter?.trim()) throw new Error('a test job needs the automation filter to run')
+    if (filter?.trim() && !SAFE_FILTER.test(filter.trim())) throw new Error('the filter may hold only letters, digits, spaces and . _ + - : /')
     const result = this.change((schedule, context) => submitJob(schedule, { kind, ticketId, directory, ...filter ? { filter: filter.trim() } : {} }, context))
     return { job: result.schedule.jobs.find(job => job.id === result.job.id) ?? result.job, merged: result.merged }
   }
   job(id: string): EditorJob | undefined { return this.read().jobs.find(job => job.id === id) }
+  /** The job whose result is this one's: itself, or the build it was folded into. */
+  resolved(id: string): EditorJob | undefined {
+    const jobs = this.read().jobs
+    let job = jobs.find(item => item.id === id)
+    for (let hops = 0; job?.mergedInto && hops < 10; hops++) job = jobs.find(item => item.id === job!.mergedInto) ?? job
+    return job
+  }
 
   /** A person's action from the overview: claim, yield, preempt, move a wait forward or cancel it. */
   act(action: PersonAction): EditorSchedule {
     const result = this.change((schedule, context) => personAct(schedule, action, context))
     const drained = result.drained
-    if (result.cancelledJob) this.cancelJob(result.cancelledJob)
+    // The wait is gone already when a person removed it, so its job may have ended with it.
+    if (result.cancelledJob && ['queued', 'running'].includes(this.job(result.cancelledJob)?.state ?? '')) this.cancelJob(result.cancelledJob)
     if (drained?.holder.kind === 'agent') {
       const reason = drained.draining?.reason ?? '人要求让出'
       void this.host.notify(drained.holder.ticketId, `editor-drain:${drained.id}`, `A person asked you to yield the shared editor: ${reason}. `
@@ -199,7 +244,7 @@ export class EditorScheduler {
     }
     this.children.set(job.id, child)
     this.change((schedule, context) => ({ schedule: updateJob(schedule, job.id, { state: 'running', startedAt: new Date(context.now).toISOString(),
-      log, command }, context) }))
+      log, command, ...child.pid ? { pid: child.pid } : {} }, context) }))
     const collect = (chunk: Buffer | string) => {
       out.write(chunk)
       tail = (tail + chunk.toString()).slice(-OUTPUT_TAIL)
@@ -210,27 +255,42 @@ export class EditorScheduler {
     child.on('close', code => {
       out.end()
       this.children.delete(job.id)
-      const current = this.job(job.id)
-      if (current?.state === 'cancelled') return
-      this.finish(job, code === 0 ? 'succeeded' : 'failed', code, jobSummary(job.kind, tail, code), log, command)
+      // A stopped job reads as cancelled, never as its exit code: a killed build is no verdict on the change.
+      if (this.job(job.id)?.stopping) this.end(job.id, 'cancelled', code, 'stopped by a person')
+      else this.end(job.id, code === 0 ? 'succeeded' : 'failed', code, jobSummary(job.kind, tail, code), log, command)
     })
   }
 
-  private finish(job: EditorJob, state: 'succeeded' | 'failed', code: number | null, summary: string, log: string, command: string): void {
-    const schedule = this.change((value, context) => ({ schedule: updateJob(value, job.id, { state, exitCode: code, summary, log, command }, context) })).schedule
-    const ended = schedule.jobs.find(item => item.id === job.id) ?? job
+  private finish(job: EditorJob, state: 'failed', code: number | null, summary: string, log: string, command: string): void {
+    this.end(job.id, state, code, summary, log, command)
+  }
+
+  /** Records a job's end, which frees the editor, and tells every Ticket it covered. */
+  private end(id: string, state: 'succeeded' | 'failed' | 'cancelled' | 'interrupted', code: number | null, summary: string, log?: string,
+    command?: string): void {
+    const schedule = this.change((value, context) => ({ schedule: updateJob(value, id, { state, exitCode: code, summary,
+      ...log ? { log } : {}, ...command ? { command } : {} }, context) })).schedule
+    const ended = schedule.jobs.find(item => item.id === id)
+    if (!ended) return
     for (const ticketId of ended.ticketIds) {
-      void this.host.notify(ticketId, `editor-job:${job.id}`, `The ${job.kind} job ${job.id} you queued ${state}: ${summary}. Log: ${log}`
-        + `${ended.ticketIds.length > 1 ? ` (one run for ${ended.ticketIds.length} Tickets)` : ''}`)
+      void this.host.notify(ticketId, `editor-job:${id}`, `The ${ended.kind} job ${id} you queued ${state}: ${summary}.`
+        + `${ended.log ? ` Log: ${ended.log}` : ''}${ended.ticketIds.length > 1 ? ` (one run for ${ended.ticketIds.length} Tickets)` : ''}`)
         .catch(error => { this.host.warn(`editor job notice failed: ${String(error)}`) })
     }
   }
 
-  /** Stops a running job's process tree, or marks a queued one cancelled. */
+  /**
+   * A person stops a job. A queued one is dropped at once; a running one is marked stopping and its process tree killed,
+   * and it keeps the editor until the process has exited, so the next build never starts over a compile still writing.
+   */
   cancelJob(id: string): void {
-    const child = this.children.get(id)
-    this.change((schedule, context) => ({ schedule: updateJob(schedule, id, { state: 'cancelled', summary: 'cancelled by a person' }, context) }))
-    if (child?.pid) killTree(child.pid)
+    const job = this.job(id)
+    if (!job || (job.state !== 'queued' && job.state !== 'running')) throw new Error('that job has already ended')
+    if (job.state === 'queued') { this.end(id, 'cancelled', null, 'cancelled by a person'); return }
+    if (job.stopping) return
+    this.change((schedule, context) => ({ schedule: updateJob(schedule, id, { stopping: true, summary: 'stopping…' }, context) }))
+    const pid = this.children.get(id)?.pid ?? job.pid
+    if (pid) this.kill(pid)
   }
 
   /** The text of a job's log tail, for a worker that wants the error lines. */
@@ -250,7 +310,8 @@ export class EditorScheduler {
 function defaultSpawn(command: string, cwd: string): ChildProcess {
   return process.platform === 'win32'
     ? spawn(process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe', ['/d', '/s', '/c', `"${command}"`], { cwd, windowsHide: true, windowsVerbatimArguments: true })
-    : spawn('/bin/sh', ['-c', command], { cwd })
+    // Its own process group, so stopping it reaches every process the command started.
+    : spawn('/bin/sh', ['-c', command], { cwd, detached: true })
 }
 
 function killTree(pid: number): void {
