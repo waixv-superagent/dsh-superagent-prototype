@@ -72,12 +72,15 @@ pnpm build
 
 ### Step 3 · S2 隔离实例冒烟（端口 3099，独立 state）
 
-复制 profile 到 `superagent-smoke`，把 `dsh-superagent` 指到本仓库（或发布 worktree），在 `cordis.patch.yml` 里把 `stateDir` 指到独立目录，然后：
+复制 profile 到 `superagent-smoke`（可只复制 `package.json`、两个 lock/workspace 文件、`cordis.yml`、`cordis.patch.yml`、`patches`，`node_modules` 用 junction 或重新安装），把 `dsh-superagent` 指到本仓库（或发布 worktree），在 `cordis.patch.yml` 里把 `stateDir` 指到独立目录、端口改成 3099，并**删掉 remote-gateway 的 `insert` 块**（否则第二个实例会抢 3090/9443）。然后：
 
 ```powershell
-$env:DSH_HOME = "$env:USERPROFILE\.dsh"
+cd "$env:USERPROFILE\.dsh\profiles\superagent-smoke"
+pnpm install   # file: 依赖会复制进 .pnpm；不装会跑旧构建
 node "$env:USERPROFILE\.dsh\profiles\superagent-smoke\node_modules\@deepseek-ai\dsh\lib\bin.js" --profile superagent-smoke --no-open --host 127.0.0.1 --port 3099
 ```
+
+独立的 state 目录建议从线上库做一次一致性快照（`VACUUM INTO`），但删掉业务表与 `runtime/masterId`，并把 settings 设为 `paused: true`、所有 Source `enabled: false`：这样第二实例只验证构建，不与线上抢 master Session、不消费也不回复任何真实消息。
 
 通过标准：
 
@@ -96,9 +99,22 @@ $smoke.health
 ```powershell
 $ts = Get-Date -Format 'yyyyMMdd-HHmmss'
 Copy-Item "$env:USERPROFILE\.dsh\profiles\superagent" "$env:USERPROFILE\.dsh\profiles\superagent-backup-$ts" -Recurse -Force
-# 线上 profile 已用 file: 链接本仓库，pnpm build 后同一路径下的 lib 就是干净构建；若换过链接，则在此重新指向发布目录并 pnpm install
-Get-Item "$env:USERPROFILE\.dsh\profiles\superagent\node_modules\dsh-superagent\lib\index.js" | Select-Object LastWriteTime
+```
 
+**关键**：profile 的 `package.json` 虽然写的是 `file:D:/Projects/Agent-PlayGround/dsh-superagent`，但 pnpm 会把该目录**复制**进 profile 的 `node_modules\.pnpm\dsh-superagent@file+...\node_modules\dsh-superagent`。因此只在本仓库 `pnpm build` **不会**更新线上构建，必须在 profile 里重装：
+
+```powershell
+cd "$env:USERPROFILE\.dsh\profiles\superagent"
+pnpm install --force
+# 核验装进去的是本次构建（mtime 应等于仓库 lib、且含 017 的新符号）
+Get-Item "$env:USERPROFILE\.dsh\profiles\superagent\node_modules\.pnpm\dsh-superagent@file+*\node_modules\dsh-superagent\lib\index.js" |
+  Select-Object FullName,Length,LastWriteTime
+Select-String -Path "$env:USERPROFILE\.dsh\profiles\superagent\node_modules\dsh-superagent\lib\index.js" -Pattern 'worker-tools' -Quiet
+```
+
+若 `--force` 仍没刷新（lockfile 认为 file: 依赖未变），就删掉 `node_modules\.pnpm\dsh-superagent@file+*` 后再 `pnpm install`，或直接把仓库 `lib\` 复制到该安装目录，然后重新核验。
+
+```powershell
 # 停旧进程（记录 PID）后按当前线上同款命令启动：显式 DSH_HOME=.dsh、--profile superagent、--no-open
 Stop-Process -Id <旧 PID>
 node "$env:USERPROFILE\.dsh\profiles\superagent\node_modules\@deepseek-ai\dsh\lib\bin.js" --profile superagent --no-open
