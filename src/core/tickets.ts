@@ -864,11 +864,19 @@ export class Tickets extends EnginePart {
     const later = ticket.inputs.some(input => input.kind !== 'policy-changed' && Date.parse(input.at) > Date.parse(report?.at ?? ''))
     return report?.state !== 'ready' || ticket.undelivered.length > 0 || later
   }
-  /** Add a pending Assignment; a failed delivery to the one before it no longer concerns the ticket. */
+  /**
+   * Add a pending Assignment; a failed delivery to the one before it no longer concerns the ticket, and neither does a
+   * question an earlier round asked a person. Every path that starts one does so on a person's act (a retry, a re-dispatch,
+   * a resume, a message written in the Session) or on the host's own recovery of the ticket, and each of those acts answers
+   * what the ticket asked that person, as a message of theirs does. Keeping the question would leave the board saying it
+   * awaits an answer while the new Assignment works, which is the state a person retried precisely to leave. A P1 plan's
+   * question is not answered by any of those acts, so it stays until a person decides the plan.
+   */
   private newAssignment(ticket: Ticket): Assignment {
     const assignment: Assignment = { id: key('assignment', ticket.id, String(ticket.assignments.length)), state: 'pending', createdAt: this.now() }
     ticket.assignments.push(assignment)
     delete ticket.delivery
+    if (ticket.attention && ticket.attention.question !== PLAN_QUESTION) { this.replies.withdrawAttention(ticket.attention.id); delete ticket.attention }
     return assignment
   }
   private endAssignment(ticket: Ticket, assignment: Assignment, reason: string): void {

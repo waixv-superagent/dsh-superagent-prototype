@@ -1013,6 +1013,19 @@ describe('interrupted assignments', () => {
     expect(note.text).toContain('The host restarted')
     expect(note.text).toContain('Its last report was "progress": the first half is in place')
   })
+  it('keeps a P1 plan\'s question when the host restarts the Assignment that asked it', () => {
+    const h = harness()
+    const ticketId = accepted(h, '3').ticketId!
+    h.tick(1)
+    h.engine.report(ticketId, { state: 'progress', summary: 'read-only look for the plan' })
+    h.engine.submitPlan(ticketId, PLAN)
+    const asked = h.repo.tickets.get(ticketId)!.attention
+    expect(asked?.question).toContain('方案待确认')
+    // The plan gate outlives the round: a restart starts a new Assignment but keeps the question a person must answer.
+    h.engine.assignmentInterrupted(ticketId, runningAssignment(h.repo.tickets.get(ticketId)!)!.id)
+    expect(h.repo.tickets.get(ticketId)!.assignments.map(item => item.state)).toEqual(['ended', 'pending'])
+    expect(h.repo.tickets.get(ticketId)!.attention).toEqual(asked)
+  })
   it('starts again a worker that reported but then got a person\'s message, which it was working on', () => {
     const h = harness()
     const other = accepted(h, '2', 't2').ticketId!
@@ -1478,6 +1491,18 @@ describe('ticket commands', () => {
     expect(retried.assignments).toEqual([expect.objectContaining({ state: 'ended', endedReason: 'retried' }), expect.objectContaining({ state: 'pending' })])
     expect(h.executor.stop).toHaveBeenCalledOnce()
     expect(h.executor.start).toHaveBeenLastCalledWith(expect.objectContaining({ id: ticketId }), retried.assignments[1])
+  })
+
+  it('lifts the question a person\'s retry answers, so the board does not keep asking it while the new Assignment runs', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    const asked = h.engine.report(ticketId, { state: 'blocked', summary: 'the worker Session has no shell tools', question: 'Rebuild the worker Session?' })
+    expect(ticketStage(h.repo.tickets.get(ticketId)!)).toEqual({ stage: 'person', action: 'answer' })
+    const retried = h.engine.retryTicket(ticketId)
+    // The retry is the act that answers the question: it and its unsent reply go, and the board shows the new Assignment.
+    expect(retried).not.toHaveProperty('attention')
+    expect(h.withdrawn).toEqual([key('attention-reply', asked.attention!.id)])
+    expect(ticketStage(retried)).toEqual({ stage: 'working', action: 'queued' })
   })
 
   it('recovers a ticket its worker stopped on a passing failure with a new Assignment that records the host retried it', () => {
