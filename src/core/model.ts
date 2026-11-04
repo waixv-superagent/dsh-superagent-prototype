@@ -395,6 +395,14 @@ export interface TicketVerification {
 /** What the follow-up stage observed about a delivered change. */
 export type PipelineState = 'running' | 'blocked' | 'merged'
 /**
+ * Where a delivered change stands in the Swarm submitter flow: its pre-approval checks, the person's review, the
+ * pre-submit smoke Jenkins runs after approval, and the submit itself. The panel draws these as one four-step track, so a
+ * person reads a ticket by stage rather than by parsing the last check sentence.
+ */
+export type PipelineStep = 'tests' | 'review' | 'smoke' | 'ready' | 'merged'
+/** How many pre-approval checks a running review reports, so the panel can show `8/11` instead of just "running". */
+export interface PipelineProgress { pass: number; running: number; fail: number; total: number }
+/**
  * A delivered change's follow-up: the review and pipeline checks after delivery, and the submit that ends it. `blocked`
  * with `manual: true` is the case the agent must not paper over: a person has to act before it can proceed. `merged`
  * means the change is already in the mainline, so the ticket completes without waiting for another check.
@@ -403,6 +411,12 @@ export interface TicketPipeline {
   state: PipelineState
   /** When this state was recorded. */
   at: string
+  /** The fine stage of the Swarm submitter flow; absent on a pipeline recorded before the stage existed. */
+  step?: PipelineStep
+  /** The pre-approval checks' counts, when the review reports them. */
+  progress?: PipelineProgress
+  /** Where the current step itself runs, such as the Jenkins smoke build; `url` stays the review. */
+  stageUrl?: string
   /** Where a person follows it, such as the review or CI URL. */
   url?: string
   /** Why it is blocked, in words a person can act on. */
@@ -424,15 +438,17 @@ export interface TicketPipeline {
 }
 /**
  * One fact the host observed about a delivered change. A `failure` carries the detail a worker needs to fix it; `review`
- * is a green pipeline that waits for a person, `approved` is a review a person approved, and `merged` is the submit.
+ * is a green pipeline that waits for a person, `approved` is a review a person approved, and `merged` is the submit. The
+ * optional `step`, `progress` and `stageUrl` are what the panel shows: the fine stage, how many checks passed, and where
+ * the current step runs (a Jenkins smoke build, for instance).
  */
 export type PipelineObservation =
-  | { kind: 'running'; check: string; url?: string; signature?: string }
-  | { kind: 'review'; check: string; url?: string; signature?: string }
-  | { kind: 'approved'; check: string; url?: string; signature?: string }
-  | { kind: 'failure'; check: string; url?: string; signature: string; detail: string }
-  | { kind: 'blocked'; check: string; reason: string; url?: string; signature?: string }
-  | { kind: 'merged'; check?: string; url?: string }
+  | { kind: 'running'; check: string; url?: string; signature?: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string }
+  | { kind: 'review'; check: string; url?: string; signature?: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string }
+  | { kind: 'approved'; check: string; url?: string; signature?: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string }
+  | { kind: 'failure'; check: string; url?: string; signature: string; detail: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string }
+  | { kind: 'blocked'; check: string; reason: string; url?: string; signature?: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string }
+  | { kind: 'merged'; check?: string; url?: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string }
 /** How many days a completed ticket stays on the board before it is archived. */
 export const COMPLETED_RETENTION_DAYS = 7
 /** Whether a completed ticket is past its board retention and should be treated as archived. */

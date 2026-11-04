@@ -32,6 +32,7 @@ function harness (tickets: Ticket[], checks: Partial<PipelineWatchHost['checks']
       status: vi.fn(async () => status()),
       changeState: vi.fn(async () => 'pending' as const),
       jenkins: vi.fn(async () => ({ job: 'ClientBuild', build: '1', url: 'https://ci/1', errors: ['a.cpp:1:1: error: boom'], tail: [], truncated: false })),
+      approvalBuild: vi.fn(async () => null),
       ...checks
     },
     ...(extra.paused ? { paused: extra.paused } : {}),
@@ -106,11 +107,47 @@ describe('PipelineWatch', () => {
   it('moves an approved review to the submit stage and completes on commits', async () => {
     const approved = harness([ticket()], { review: vi.fn(async () => review({ state: 'approved' })) })
     await approved.watch.poll()
-    expect(approved.observations[0]![1]).toMatchObject({ kind: 'approved' })
+    expect(approved.observations[0]![1]).toMatchObject({ kind: 'approved', step: 'ready' })
 
     const submitted = harness([ticket()], { review: vi.fn(async () => review({ state: 'approved', commits: [124] })) })
     await submitted.watch.poll()
-    expect(submitted.observations[0]![1]).toMatchObject({ kind: 'merged' })
+    expect(submitted.observations[0]![1]).toMatchObject({ kind: 'merged', step: 'merged' })
+  })
+  it('shows the pre-submit smoke from the Jenkins job, and asks a person when it fails', async () => {
+    const config = { jenkinsUrl: 'https://ci.example.com', jenkinsToken: 'secret', postApprovalJob: 'PostApproval-Entry' }
+    const build = (state: 'running' | 'passed' | 'failed') => ({ number: 7,
+      url: 'https://ci.example.com/job/PostApproval-Entry/7/', state, at: 1793000000 })
+    const running = harness([ticket()], { review: vi.fn(async () => review({ state: 'approved' })),
+      approvalBuild: vi.fn(async () => build('running')) }, config)
+    await running.watch.poll()
+    expect(running.observations[0]![1]).toMatchObject({ kind: 'approved', step: 'smoke',
+      check: '已审核通过 · Jenkins 冒烟中（#7）', stageUrl: 'https://ci.example.com/job/PostApproval-Entry/7/' })
+
+    const passed = harness([ticket()], { review: vi.fn(async () => review({ state: 'approved' })),
+      approvalBuild: vi.fn(async () => build('passed')) }, config)
+    await passed.watch.poll()
+    expect(passed.observations[0]![1]).toMatchObject({ kind: 'approved', step: 'ready', check: 'Jenkins 冒烟已通过，等待提交' })
+
+    const failed = harness([ticket()], { review: vi.fn(async () => review({ state: 'approved' })),
+      approvalBuild: vi.fn(async () => build('failed')) }, config)
+    await failed.watch.poll()
+    expect(failed.observations[0]![1]).toMatchObject({ kind: 'blocked', step: 'smoke', check: '提交前冒烟失败（#7）' })
+    expect((failed.observations[0]![1] as Extract<PipelineObservation, { kind: 'blocked' }>).reason).toContain('构建日志')
+  })
+  it('counts running pre-approval checks instead of saying only "running"', async () => {
+    const h = harness([ticket()], { review: vi.fn(async () => review({ testStatus: 'running' })),
+      status: vi.fn(async () => status({ verdict: 'running', pass: 2, running: 3, fail: 0, total: 5 })) })
+    await h.watch.poll()
+    expect(h.observations[0]![1]).toMatchObject({ kind: 'running', step: 'tests', check: '审核前测试中',
+      progress: { pass: 2, running: 3, fail: 0, total: 5 } })
+  })
+  it('keeps checking the stage when Jenkins cannot be read, and reports the approval without a smoke', async () => {
+    const h = harness([ticket()], { review: vi.fn(async () => review({ state: 'approved' })),
+      approvalBuild: vi.fn(async () => { throw new Error('Jenkins 401') }) },
+    { jenkinsUrl: 'https://ci.example.com', jenkinsToken: 'secret' })
+    await h.watch.poll()
+    expect(h.observations[0]![1]).toMatchObject({ kind: 'approved', step: 'ready' })
+    expect(h.warnings[0]).toContain('pre-submit smoke')
   })
   it('treats a review that disappeared with its changelist as submitted', async () => {
     const h = harness([ticket()], { review: vi.fn(async () => null), changeState: vi.fn(async () => 'missing' as const) })

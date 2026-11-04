@@ -22,6 +22,22 @@ it('marks each Ticket stage by whom it waits for, and an ended Ticket by its out
     'ongoing', 'ongoing'])
 })
 
+it('names the fine pipeline stage where the lane only says "pipeline"', () => {
+  const marks = [
+    [{ state: 'running', at: '', step: 'tests' }, '审核前测试', 'info', 'ongoing'],
+    [{ state: 'blocked', at: '', manual: true, step: 'review' }, '待人工审核', 'warning', 'warning'],
+    [{ state: 'running', at: '', step: 'smoke' }, '冒烟中', 'info', 'ongoing'],
+    [{ state: 'running', at: '', step: 'ready' }, '待提交', 'info', 'ongoing'],
+    [{ state: 'blocked', at: '', step: 'smoke', reason: 'smoke failed' }, '流水线阻塞', 'danger', 'error'],
+    [{ state: 'blocked', at: '', manual: true, step: 'smoke', reason: 'smoke failed' }, '冒烟失败', 'danger', 'error']
+  ] as const
+  expect(marks.map(([pipeline, label, tone, dot]) => {
+    const mark = ticketMark(t, { stage: 'pipeline', action: pipeline.state === 'blocked' ? 'blocked' : 'running',
+      ended: undefined, pipeline })
+    return [mark.label, mark.tone, mark.dot]
+  })).toEqual(marks.map(([, label, tone, dot]) => [label, tone, dot]))
+})
+
 it('marks each Thread stage, Source state and Decision outcome', () => {
   const threads = (['error', 'evaluating', 'queued', 'subscribed', 'dormant', 'unsubscribed'] as const).map(stage => threadMark(t,
     { stage, pending: 2 }))

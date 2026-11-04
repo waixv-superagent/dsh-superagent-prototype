@@ -359,6 +359,26 @@ it('shows the pipeline gate with the last check and clears a blocker on the tick
   expect(server.requests.some(request => request.path === 'tickets/t11/pipeline/check' && request.method === 'POST')).toBe(true)
 })
 
+it('shows the pre-submit smoke stage and its Jenkins build on the ticket page', async () => {
+  const base = server.ticketDetails.t1!
+  server.ticketDetails.t13 = { ...base, id: 't13', title: '冒烟中的流水线单', stage: 'pipeline' as const, action: 'running' as const,
+    actions: { retry: false, stop: false, confirm: false, verify: false, rework: false },
+    verification: { at: '2026-09-23T00:00:00Z', state: 'passed' as const, by: 'person' as const },
+    pipeline: { state: 'running' as const, at: '2026-09-23T00:00:00Z', step: 'smoke' as const,
+      check: '已审核通过 · Jenkins 冒烟中（#21674）', url: 'https://swarm.example/reviews/585334',
+      stageUrl: 'https://ci.example/job/PostApproval-Entry/21674/' },
+    delivery: { lease: [], changelist: 585327, review: '585334' } }
+  at({ page: 'execution', id: 't13' })
+  await mount()
+  expect(document.querySelector('.dt-pipeline-gate .dt-tag')?.textContent).toBe(zh['pipelineStage.smoke'])
+  expect(text()).toContain('已审核通过 · Jenkins 冒烟中（#21674）')
+  expect(all('.dt-pipe-step')).toHaveLength(4)
+  expect(document.querySelector('.dt-pipe-step[aria-current="step"] .dt-pipe-step-label')?.textContent)
+    .toBe(zh['pipelineTrack.smoke'])
+  expect(document.querySelector('.dt-pipeline-gate-foot a[href="https://ci.example/job/PostApproval-Entry/21674/"]')?.textContent)
+    .toBe(zh.pipelineOpenStage)
+})
+
 it('shows a historical delivery as a backfill with concrete checks, not a generic pass template', async () => {
   const base = server.ticketDetails.t1!
   server.ticketDetails.t9 = { ...base, id: 't9', title: '历史交付单', state: 'ended' as const, stage: 'ended' as const,

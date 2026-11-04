@@ -112,6 +112,39 @@ it('reads the review state and version, and a changelist submitted away', async 
   await expect(checks.changeState(1)).resolves.toBe('missing')
 })
 
+it('reads the pre-submit smoke build by review id and reports its state', async () => {
+  const calls: string[] = []
+  const checks = new PipelineChecks({ settings: () => settings({ jenkinsUrl: 'https://ci.example.com', jenkinsToken: 'secret',
+    postApprovalJob: 'PostApproval-Entry' }), env: { P4USER: 'u' },
+  fetchImpl: async (url, init) => {
+    calls.push(String(url))
+    expect((init?.headers as Record<string, string>).authorization).toMatch(/^Basic /)
+    return response({ builds: [
+      { number: 6, url: 'https://ci.example.com/job/PostApproval-Entry/6/', timestamp: 1793000000, result: 'SUCCESS',
+        actions: [{ parameters: [{ name: 'ReviewId', value: '999' }] }] },
+      { number: 7, url: 'https://ci.example.com/job/PostApproval-Entry/7/', timestamp: 1793000600, result: null,
+        actions: [{ parameters: [{ name: 'ReviewId', value: '416666' }, { name: 'Changelist', value: '416000' }] }] },
+      { number: 8, url: 'https://ci.example.com/job/PostApproval-Entry/8/', timestamp: 1793001000, result: 'FAILURE',
+        actions: [{ parameters: [{ name: 'ReviewId', value: '416666' }] }] }
+    ] })
+  } })
+  expect(await checks.approvalBuild('https://swarm.example.com/reviews/416666', 416000))
+    .toEqual({ number: 8, url: 'https://ci.example.com/job/PostApproval-Entry/8/', state: 'failed', at: 1793001 })
+  expect(calls[0]).toBe('https://ci.example.com/job/PostApproval-Entry/api/json?tree=builds[number,url,timestamp,result,actions[parameters[name,value]]]{0,30}&depth=1')
+  // A build with no result is still running; no matching build, no job, or no Jenkins is null, never a guessed pass.
+  const running = new PipelineChecks({ settings: () => settings({ jenkinsUrl: 'https://ci.example.com', jenkinsToken: 'secret',
+    postApprovalJob: 'PostApproval-Entry' }), env: { P4USER: 'u' },
+  fetchImpl: async () => response({ builds: [{ number: 7, url: 'https://ci/7', timestamp: 1, result: null,
+    actions: [{ parameters: [{ name: 'ReviewId', value: '416666' }] }] }] }) })
+  expect(await running.approvalBuild('416666')).toMatchObject({ number: 7, state: 'running' })
+  const none = new PipelineChecks({ settings: () => settings({ jenkinsUrl: 'https://ci.example.com', jenkinsToken: 'secret',
+    postApprovalJob: 'PostApproval-Entry' }), env: { P4USER: 'u' }, fetchImpl: async () => response({}, { ok: false, status: 404 }) })
+  expect(await none.approvalBuild('416666')).toBeNull()
+  const disabled = new PipelineChecks({ settings: () => settings(), env: { P4USER: 'u' },
+    fetchImpl: async () => { throw new Error('must not call Jenkins') } })
+  expect(await disabled.approvalBuild('416666')).toBeNull()
+})
+
 it('filters the AI verdict to the review version that asked for it', () => {
   const comments = [
     { body: '【AI】\n- **结果**: 审核通过✅\n- **建议**: 无任何建议修改或优化', context: { version: 1 } },

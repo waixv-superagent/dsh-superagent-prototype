@@ -1,6 +1,7 @@
 /** Pure mappers from domain states (Tickets, Threads, Sources, Decisions) to UI status indicators. */
 import type { DecisionRow, SourceStatusRow, ThreadRow, TicketStage, TicketSummary } from './api.ts'
 import type { DshSuperagentKey } from './locales.ts'
+import { pipelineSmokeFailed, pipelineStageLabel } from './pipeline.ts'
 import { valueLabel, type T } from './text.ts'
 import type { DotState, IconName, TagTone } from './controls.tsx'
 
@@ -18,11 +19,14 @@ export function ticketMark(t: T, ticket: TicketStage & Pick<TicketSummary, 'ende
     }
     case 'working': return ticket.action === 'queued' ? { label: t('stage.queued'), tone: 'neutral', dot: 'idle', icon: 'queue' }
       : { label: t('stage.working'), tone: 'info', dot: 'ongoing', icon: 'running' }
-    case 'pipeline': return ticket.action === 'blocked'
-      ? ticket.pipeline?.manual
-        ? { label: t('pipelineWaiting'), tone: 'warning', dot: 'warning', icon: 'clock' }
-        : { label: t('pipelineBlocked'), tone: 'danger', dot: 'error', icon: 'blocked' }
-      : { label: t('pipelineRunning'), tone: 'info', dot: 'ongoing', icon: 'review' }
+    case 'pipeline': {
+      // The lane already says "pipeline"; the mark names the fine stage a person needs to read at a glance.
+      const label = pipelineStageLabel(t, ticket.pipeline)
+      if (ticket.action !== 'blocked') return { label, tone: 'info', dot: 'ongoing', icon: 'review' }
+      return ticket.pipeline?.manual && !pipelineSmokeFailed(ticket.pipeline)
+        ? { label, tone: 'warning', dot: 'warning', icon: 'clock' }
+        : { label, tone: 'danger', dot: 'error', icon: 'blocked' }
+    }
     default: return { label: t('stage.idle'), tone: 'neutral', dot: 'idle', icon: 'clock' }
   }
 }

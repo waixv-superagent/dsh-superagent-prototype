@@ -145,6 +145,8 @@ export const P4ConfigSchema = z.object({
   jenkinsUser: z.string().trim().max(100).default(''),
   /** Jenkins API token for reading consoleText. Stored only in this installation's settings; never printed or committed. */
   jenkinsToken: z.string().trim().max(500).default(''),
+  /** Jenkins job Swarm triggers after a review is approved; its build is the pre-submit smoke. Empty disables that step. */
+  postApprovalJob: z.string().trim().max(200).default('PostApproval-Entry'),
   /** Seconds between host polls of an open change's Swarm review; 0 turns the automatic follow-up off. */
   followupSeconds: z.number().int().min(0).max(3600).default(60),
   /** How many times a failing pipeline wakes its worker to fix it before it asks a person. */

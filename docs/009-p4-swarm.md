@@ -21,6 +21,7 @@ A Ticket's backend comes from where its work belongs, not from a per-ticket ques
 | `p4.jenkinsUrl` | Jenkins base URL used to read a failed build's consoleText; empty uses the testrun URL's origin |
 | `p4.jenkinsUser` | Jenkins account for that read; empty uses `p4.user` or `P4USER` |
 | `p4.jenkinsToken` | Jenkins API token for that read. It is stored only in this installation's settings, used by the host-side check, redacted from its result, and never written to a prompt, a log or the repository |
+| `p4.postApprovalJob` | Jenkins job Swarm triggers when a review is approved; its build is the pre-submit smoke the host reads for the smoke stage. Empty disables that stage. Default `PostApproval-Entry` |
 | `p4.followupSeconds` | Seconds between the host's polls of an open review; `0` disables automatic follow-up. Default 60 |
 | `p4.fixAttempts` | How many times a failing pipeline wakes its worker to fix it before a person is asked. Default 3 |
 | `p4.stuckMinutes` | Minutes without a new review version or check result before the pipeline counts as stuck. Default 45 |
@@ -89,13 +90,21 @@ checks every open p4 ticket with a changelist or review every `p4.followupSecond
 Swarm with the same credentials the check tool uses. It records one `PipelineObservation` per state change, and the ticket
 stage becomes `pipeline` from the delivery on: the local P4.5 check is recorded in parallel and no longer starts anything.
 
+The panel draws them as one four-step track — pre-approval checks, the person's review, the pre-submit smoke, the
+submit — from the observation's `step`; `progress` (such as `8/11 passed`) fills the first node, and the smoke build's URL
+is the link for the third. Both fields are optional: a pipeline recorded before them is read from its state and last
+check, so old tickets render too.
+
 The states it derives, in order:
 
 | Swarm/Jenkins fact | Observation | What happens |
 | --- | --- | --- |
 | A check `fail`, or an AI verdict that is not 通过 | `failure` | A new signature wakes the worker with the failing check titles, their Jenkins error lines and the AI verdict. The same signature is not handed over twice. |
 | `testStatus = pass` and the AI verdict is 通过 (or absent) | `review` | The pipeline goes blocked+manual with `Swarm 已通过，待人工审核`, and one message reads `Swarm - <id> 已通过，待人工审核。` with the id linked to the review. The AI's remaining suggestions are mentioned, not treated as a failure. |
-| `state = approved`, no commits yet | `approved` | `Swarm 已审核通过，等待提交`, one message `Swarm - <id> 已审核通过，等待提交。` with the id linked; polling continues. |
+| `state = approved`, no commits yet, and a running build of `p4.postApprovalJob` | `approved` (step `smoke`) | `已审核通过 · Jenkins 冒烟中（#N）`, one message `Swarm - <id> 已审核通过，Jenkins 冒烟中。`; the build's URL is the stage link and polling continues. Swarm itself reports only the pre-approval checks, so this build is read from Jenkins by its `ReviewId` parameter. |
+| `state = approved`, no commits yet, and that build passed | `approved` (step `ready`) | `Jenkins 冒烟已通过，等待提交`, one message `Swarm - <id> 已审核通过，等待提交。` |
+| `state = approved`, no commits yet, and that build failed | `blocked` (step `smoke`) | `提交前冒烟失败（#N）`; a person reads the build log and fixes or reruns it. |
+| `state = approved`, no commits yet, and no readable smoke build | `approved` (step `ready`) | `Swarm 已审核通过，等待提交`, the old approval fact; one message `Swarm - <id> 已审核通过，等待提交。` with the id linked; polling continues. |
 | `state = committed`/`archived`, or `approved` with commits | `merged` | The ticket completes as `verification.by: pipeline`, and no check reopens it. The GitHub Source already posts its own concise "PR 已合并" message for a pull request, so the pipeline posts nothing extra. |
 | Review `404` and the changelist is gone (`p4 describe -S` says no such changelist) | `merged` | Submitting deletes the pending changelist, so a missing one after a known review is the submit's trail. |
 | Review `404` but the changelist is still pending | `blocked` | The review disappeared without a submit; a person must check it. A grace period covers the first five minutes after delivery, when Swarm may not serve the new review yet. |
@@ -154,7 +163,7 @@ review conversation.
 1. Accept a Ticket with `backend = p4` and check that its directory is a workspace: `p4 -c "$DSH_SUPERAGENT_P4_CLIENT" opened` runs, and the synced files are the configured revision.
 2. Make a trivial change and deliver it: a changelist exists, `p4 describe -S <CL>` shows it still `*pending*` with its shelved files, `p4 opened -c <CL>` still lists the files (nothing was reverted), the review exists in Swarm, and `p4 changes -s submitted` shows nothing new. The Ticket's stage is now `pipeline / running` and its local check is pending in parallel.
 3. Let a check fail: the host wakes the worker once with the failing check and its Jenkins error lines; the chat receives no failure message. Fixing the content and reshelving opens the next review version; a reshelve with no content change does not, so a flaky failure is rerun with `orchestrator_pipeline_rerun` (no new version), and after `p4.stuckMinutes` the Ticket asks a person instead.
-4. Green checks: the chat receives one "Swarm 已通过，待人工审核" message and the Ticket waits as `pipeline / blocked`; no repeat message on later polls. A person's approval moves it to "Swarm 已审核通过，等待提交", and the submit ends the Ticket silently rather than adding another chat message.
+4. Green checks: the chat receives one "Swarm 已通过，待人工审核" message and the Ticket waits as `pipeline / blocked`; no repeat message on later polls. A person's approval moves it to "Swarm 已审核通过，等待提交", or, with `p4.postApprovalJob` readable, to the pre-submit smoke stage (`已审核通过 · Jenkins 冒烟中`); the submit ends the Ticket silently rather than adding another chat message.
 5. Have a person submit the changelist: `p4 describe -S <CL>` reports no such changelist, the review closes, and the Ticket completes with `verification.by: pipeline` (or keeps a person's earlier local check as `by: person`).
 6. Have a person return the local check on a delivered Ticket: it goes back to `implement` with their note, and a later delivery starts a new pipeline round. Comments on the review still reach no Ticket, so item 3 of section 6 remains unimplemented.
 

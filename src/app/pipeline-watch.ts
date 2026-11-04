@@ -4,16 +4,16 @@
  * review waiting for a person, an approval, a manual blocker, or the submit. Because the host polls, no follow-up worker
  * starts a subagent to poll, and a message is queued only for a fact a person can act on.
  */
-import type { EngineForPipeline, PipelineObservation, Ticket } from '../core/index.ts'
+import type { EngineForPipeline, PipelineObservation, PipelineProgress, PipelineStep, Ticket } from '../core/index.ts'
 import type { Settings } from '../policy.ts'
-import type { PipelineChecks, PipelineStatus } from './pipeline.ts'
+import type { PipelineApprovalBuild, PipelineChecks, PipelineReview, PipelineStatus } from './pipeline.ts'
 
 export interface PipelineWatchHost {
   /** The open tickets to check; the watcher filters them to delivered p4 work. */
   tickets: { open: () => Ticket[] }
   settings: () => Settings
   engine: EngineForPipeline
-  checks: Pick<PipelineChecks, 'review' | 'status' | 'changeState' | 'jenkins'>
+  checks: Pick<PipelineChecks, 'review' | 'status' | 'changeState' | 'jenkins' | 'approvalBuild'>
   paused?: () => boolean
   /** A failed poll of one ticket is logged and does not stop the others. */
   warn?: (message: string) => void
@@ -27,6 +27,10 @@ const RERUN_GRACE_MS = 5 * 60_000
 /** The light heartbeat that only wakes the watcher when its configured interval is due. */
 const HEARTBEAT_MS = 5_000
 const MAX_DETAIL = 3_500
+
+/** The counts a running review reports, shaped for the panel's compact progress line. */
+const progressOf = (status: PipelineStatus): PipelineProgress =>
+  ({ pass: status.pass, running: status.running, fail: status.fail, total: status.total })
 
 /**
  * Polls and reports. `poll` checks every delivered p4 ticket once; `start` repeats it at the configured interval, so a
@@ -101,11 +105,13 @@ export class PipelineWatch {
     const review = ticket.execution?.review
     const changelist = ticket.execution?.changelist
     const url = ticket.pipeline?.url
+    const previousStep = ticket.pipeline?.step
     if (!review) {
       if (changelist === undefined) return
       const state = await this.host.checks.changeState(changelist)
-      if (state === 'pending') this.report(ticket, { kind: 'running', check: 'CL 仍在 pending，等待提交', ...(url ? { url } : {}) })
-      else this.report(ticket, { kind: 'blocked', check: 'CL 状态无法确认',
+      // A change with no review has no Swarm flow to draw: it only waits for its submit.
+      if (state === 'pending') this.report(ticket, { kind: 'running', step: 'ready', check: 'CL 仍在 pending，等待提交', ...(url ? { url } : {}) })
+      else this.report(ticket, { kind: 'blocked', step: 'ready', check: 'CL 状态无法确认',
         reason: `本单没有记录 Swarm review，CL ${changelist} 在服务器上也不存在；请确认它是否已提交，或补一个 review。`, ...(url ? { url } : {}) })
       return
     }
@@ -113,7 +119,7 @@ export class PipelineWatch {
     if (!info) {
       // A submitted review disappears from this Swarm: the submit deletes the pending changelist, so `missing` is its trail.
       if (changelist === undefined) {
-        this.report(ticket, { kind: 'blocked', check: 'Swarm review 已不存在',
+        this.report(ticket, { kind: 'blocked', step: previousStep ?? 'tests', check: 'Swarm review 已不存在',
           reason: `review 已不存在，且本单没有记录 CL；请确认是否已提交。`, ...(url ? { url } : {}) })
         return
       }
@@ -121,26 +127,27 @@ export class PipelineWatch {
       if (state !== 'missing' && state !== 'submitted') {
         const started = Date.parse(ticket.pipeline?.at ?? '') || now
         if (now - started < REVIEW_GRACE_MS) {
-          this.report(ticket, { kind: 'running', check: '等待 Swarm review 可读', ...(url ? { url } : {}) })
+          this.report(ticket, { kind: 'running', step: 'tests', check: '等待 Swarm review 可读', ...(url ? { url } : {}) })
           return
         }
-        this.report(ticket, { kind: 'blocked', check: 'Swarm review 已不存在',
+        this.report(ticket, { kind: 'blocked', step: previousStep ?? 'tests', check: 'Swarm review 已不存在',
           reason: `review 已不存在，但 CL ${changelist} 仍 pending；请确认 review 状态。`, ...(url ? { url } : {}) })
         return
       }
-      this.report(ticket, { kind: 'merged', check: 'CL 已提交入库', ...(url ? { url } : {}) })
+      this.report(ticket, { kind: 'merged', step: 'merged', check: 'CL 已提交入库', ...(url ? { url } : {}) })
       return
     }
     if (info.state === 'committed' || info.state === 'archived' || (info.state === 'approved' && info.commits.length > 0)) {
-      this.report(ticket, { kind: 'merged', check: info.state === 'approved' ? 'review 已审核通过并提交' : `review ${info.state}`, ...(url ? { url } : {}) })
+      this.report(ticket, { kind: 'merged', step: 'merged', check: info.state === 'approved' ? 'review 已审核通过并提交' : `review ${info.state}`, ...(url ? { url } : {}) })
       return
     }
     if (info.state === 'approved') {
-      this.report(ticket, { kind: 'approved', check: 'Swarm 已审核通过，等待提交', ...(url ? { url } : {}), signature: `${info.version}:approved` })
+      await this.approved(ticket, settings, info, url)
       return
     }
     if (info.state === 'rejected' || info.state === 'needsRevision') {
-      await this.failure(ticket, settings, now, `${info.version}:${info.state}`, { check: `Swarm 审核要求修改（${info.stateLabel || info.state}）`,
+      await this.failure(ticket, settings, now, `${info.version}:${info.state}`, { step: 'review',
+        check: `Swarm 审核要求修改（${info.stateLabel || info.state}）`,
         detail: `Swarm 审核人要求修改（${info.stateLabel || info.state}），见 review 评论：${url ?? review}。按要求修改后 reshelve 同一个 CL。` })
       return
     }
@@ -148,14 +155,15 @@ export class PipelineWatch {
     const rerunAt = ticket.pipeline?.rerunAt ? Date.parse(ticket.pipeline.rerunAt) : 0
     if (rerunAt && now - rerunAt < RERUN_GRACE_MS && info.testStatus !== 'pass') {
       // The worker asked for a rerun; until Swarm replaces the old result, it is not a new failure to hand over.
-      this.report(ticket, { kind: 'running', check: '已请求重跑检查，等待新结果', ...(url ? { url } : {}) })
+      this.report(ticket, { kind: 'running', step: 'tests', check: '已请求重跑检查，等待新结果', ...(url ? { url } : {}) })
       return
     }
     if (info.testStatus === 'fail') {
       if (ticket.pipeline?.observed === `${version}:fail`) return this.stuckOrRunning(ticket, settings, now, url)
       const status = await this.host.checks.status(review, version)
       const detail = await this.failureDetail(this.host.checks, settings, info.id, status, url)
-      await this.failure(ticket, settings, now, `${version}:fail`, { check: `Swarm 检查失败：${status.failures.map(item => item.title).slice(0, 3).join('、') || '见 review'}`,
+      await this.failure(ticket, settings, now, `${version}:fail`, { step: 'tests', progress: progressOf(status),
+        check: `Swarm 检查失败：${status.failures.map(item => item.title).slice(0, 3).join('、') || '见 review'}`,
         detail, ...(url ? { url } : {}) })
       return
     }
@@ -168,41 +176,87 @@ export class PipelineWatch {
           ...status.ai.advice ? [`AI 提出了修改建议，见 review 的 AI 评论：${url ?? review}。`] : [],
           '处理后在当前工作区 reshelve 同一个 CL；不要 p4 submit。'
         ].join('\n')
-        await this.failure(ticket, settings, now, `${version}:ai`, { check: `AI 审核未通过：${status.ai.verdict}`,
-          detail, ...(url ? { url } : {}) })
+        await this.failure(ticket, settings, now, `${version}:ai`, { step: 'tests', progress: progressOf(status),
+          check: `AI 审核未通过：${status.ai.verdict}`, detail, ...(url ? { url } : {}) })
         return
       }
       const advice = status.ai?.advice ? '（AI 有修改建议）' : ''
-      this.report(ticket, { kind: 'review', check: `Swarm 已通过${advice}，待人工审核`, ...(url ? { url } : {}), signature: `${version}:pass` })
+      this.report(ticket, { kind: 'review', step: 'review', progress: progressOf(status),
+        check: `Swarm 已通过${advice}，待人工审核`, ...(url ? { url } : {}), signature: `${version}:pass` })
       return
     }
     if (info.testStatus === 'running') {
-      this.report(ticket, { kind: 'running', check: '流水线检查中', ...(url ? { url } : {}) })
+      // The aggregate says checks are running; the testrun list is what turns that into "3/11". A failure to read the detail
+      // still reports the stage, just without counts.
+      let progress: PipelineProgress | undefined
+      try { progress = progressOf(await this.host.checks.status(review, version)) } catch { /* counts are optional */ }
+      this.report(ticket, { kind: 'running', step: 'tests', ...(progress ? { progress } : {}), check: '审核前测试中', ...(url ? { url } : {}) })
       return
     }
     // No result yet. The review's current version says when checks should have appeared; an old one means they never did.
     const since = info.changedAt ? info.changedAt * 1000 : (Date.parse(ticket.pipeline?.at ?? '') || now)
     if (now - since > settings.executor.p4.stuckMinutes * 60_000) {
-      this.report(ticket, { kind: 'blocked', check: '流水线没有结果',
+      this.report(ticket, { kind: 'blocked', step: 'tests', check: '流水线没有结果',
         reason: `${settings.executor.p4.stuckMinutes} 分钟没有检查结果；请确认 Swarm 是否触发。`, ...(url ? { url } : {}) })
       return
     }
-    this.report(ticket, { kind: 'running', check: '等待流水线结果', ...(url ? { url } : {}) })
+    this.report(ticket, { kind: 'running', step: 'tests', check: '等待流水线结果', ...(url ? { url } : {}) })
+  }
+
+  /**
+   * An approved review enters the pre-submit smoke. Swarm itself reports only the pre-approval checks, so the smoke state
+   * comes from the configured Jenkins job: a running build is its own stage, a passed one leaves the person to submit, and a
+   * failed one is a manual blocker with the build to read. Without a readable job the approval is the old "waiting to
+   * submit" fact.
+   */
+  private async approved (ticket: Ticket, settings: Settings, info: PipelineReview, url?: string): Promise<void> {
+    const review = ticket.execution!.review!
+    const p4 = settings.executor.p4
+    if (p4.postApprovalJob.trim() && p4.jenkinsUrl.trim() && p4.jenkinsToken.trim()) {
+      let build: PipelineApprovalBuild | null = null
+      try {
+        build = await this.host.checks.approvalBuild(review, ticket.execution?.changelist)
+      } catch (error) {
+        this.host.warn?.(`pre-submit smoke check for review ${info.id} failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      if (build?.state === 'running') {
+        this.report(ticket, { kind: 'approved', step: 'smoke', check: `已审核通过 · Jenkins 冒烟中（#${build.number}）`,
+          stageUrl: build.url, ...(url ? { url } : {}), signature: `${info.version}:approved:smoke` })
+        return
+      }
+      if (build?.state === 'failed') {
+        this.report(ticket, { kind: 'blocked', step: 'smoke', check: `提交前冒烟失败（#${build.number}）`,
+          reason: `Jenkins 提交前冒烟 #${build.number} 失败；查看构建日志，修复后重新 shelve 再提交。`,
+          stageUrl: build.url, ...(url ? { url } : {}), signature: `${info.version}:smoke:fail` })
+        return
+      }
+      if (build?.state === 'passed') {
+        this.report(ticket, { kind: 'approved', step: 'ready', check: 'Jenkins 冒烟已通过，等待提交',
+          stageUrl: build.url, ...(url ? { url } : {}), signature: `${info.version}:approved` })
+        return
+      }
+    }
+    this.report(ticket, { kind: 'approved', step: 'ready', check: 'Swarm 已审核通过，等待提交',
+      ...(url ? { url } : {}), signature: `${info.version}:approved` })
   }
 
   /** Wake a worker for a failure, unless the automatic attempts are used up; a repeated signature only waits. */
   private async failure (ticket: Ticket, settings: Settings, now: number, signature: string, observation: {
-    check: string; detail: string; url?: string
+    check: string; detail: string; url?: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string
   }): Promise<void> {
     if (ticket.pipeline?.observed === signature) return this.stuckOrRunning(ticket, settings, now, observation.url)
     const fixes = ticket.pipeline?.fixes ?? 0
+    const extra = { ...(observation.step ? { step: observation.step } : {}),
+      ...(observation.progress ? { progress: observation.progress } : {}),
+      ...(observation.stageUrl ? { stageUrl: observation.stageUrl } : {}) }
     if (fixes >= settings.executor.p4.fixAttempts) {
       this.report(ticket, { kind: 'blocked', check: observation.check,
         reason: `连续 ${fixes} 次自动修复仍失败；请人工处理。`,
-        signature: `attempts:${signature}`, ...(observation.url ? { url: observation.url } : {}) })
+        signature: `attempts:${signature}`, ...extra, ...(observation.url ? { url: observation.url } : {}) })
       return
     }
-    this.report(ticket, { kind: 'failure', check: observation.check, signature, detail: observation.detail, ...(observation.url ? { url: observation.url } : {}) })
+    this.report(ticket, { kind: 'failure', check: observation.check, signature, detail: observation.detail,
+      ...extra, ...(observation.url ? { url: observation.url } : {}) })
   }
 
   /**
@@ -219,14 +273,17 @@ export class PipelineWatch {
       Date.parse(latest?.deliveredAt ?? '') || 0,
       Date.parse(latest?.report?.at ?? '') || 0
     )
+    const extra = { ...(ticket.pipeline?.step ? { step: ticket.pipeline.step } : {}),
+      ...(ticket.pipeline?.progress ? { progress: ticket.pipeline.progress } : {}),
+      ...(ticket.pipeline?.stageUrl ? { stageUrl: ticket.pipeline.stageUrl } : {}) }
     const minutes = settings.executor.p4.stuckMinutes
     if (acted && now - acted > minutes * 60_000) {
       this.report(ticket, { kind: 'blocked', check: '失败后没有新的流水线结果',
         reason: `${minutes} 分钟没有新结果；请重跑或确认是否可忽略。`,
-        signature: `stuck:${ticket.pipeline?.observed ?? 'unknown'}`, ...(url ? { url } : {}) })
+        signature: `stuck:${ticket.pipeline?.observed ?? 'unknown'}`, ...extra, ...(url ? { url } : {}) })
       return
     }
-    this.report(ticket, { kind: 'running', check: '流水线失败，等待修复后重跑', ...(url ? { url } : {}) })
+    this.report(ticket, { kind: 'running', check: '流水线失败，等待修复后重跑', ...extra, ...(url ? { url } : {}) })
   }
 
   /** Failing checks, their Jenkins error lines, and the AI conclusion, bounded for one worker message. */

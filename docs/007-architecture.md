@@ -406,6 +406,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/api.ts` | Calls and polls of the management API, typed by `src/app/api.ts`, and the Decision filters of the Eval status |
 | `src/client/route.ts` | The tabs, the two views of 概览, the board focus a hero count carries, the settings groups, the typed routes that `parseRoute` reads (including the removed Agent-status tab, which opens the board), the `?view=board` deep link the status card taps, and the route memory with the settings group opened last |
 | `src/client/overview.tsx` | The board view of 概览: the duty desk, and the one-shot ring that marks the cards a hero count opened |
+| `src/client/pipeline.ts` | Reading a delivered change as stages: the fine stage of the Swarm submitter flow, the four-step track, the running checks' counts and the failed-smoke wait, shared by the board card, the Ticket page and the stage mark |
 | `src/client/source.tsx`, `trigger.tsx`, `eval.tsx`, `execution.tsx` | One file per stage: its status, and its settings where it has some |
 | `src/client/thread.tsx`, `ticket.tsx` | The record pages: a Thread with its timeline, and a Ticket with its authorization, Inputs and Assignments |
 | `src/client/activity.tsx` | The compact "now" block of a running Ticket: the current tool, its latest progress and who acts next, with no reasoning stream or token speed |

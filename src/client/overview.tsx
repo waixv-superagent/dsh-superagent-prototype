@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Reac
 import { usePoll, type EditorRow, type Problem, type TicketRow, type TicketSearchView } from './api.ts'
 import { Button, Icon, Input, Tag } from './controls.tsx'
 import { ticketMark } from './marks.ts'
+import { PIPELINE_TRACK, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackState } from './pipeline.ts'
 import { useAction, usePanel, usePanelData } from './provider.tsx'
 import { ThreadChip } from './rows.tsx'
 import { setupPage, settingsRoute, type BoardFocus, type Route } from './route.ts'
@@ -252,8 +253,9 @@ function PipelineCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
   const { t, call, notify, navigate } = usePanel()
   const pipeline = ticket.pipeline
   const blockedStage = ticket.stage === 'pipeline' && ticket.action === 'blocked'
-  const waiting = blockedStage && !!pipeline?.manual
-  const blocked = blockedStage && !pipeline?.manual
+  const failedSmoke = pipelineSmokeFailed(pipeline)
+  const waiting = blockedStage && !!pipeline?.manual && !failedSmoke
+  const blocked = blockedStage && (!pipeline?.manual || failedSmoke)
   const delivery = ticket.delivery
   const open = () => navigate(ticketRoute(ticket.id))
   const resume = async () => {
@@ -261,17 +263,26 @@ function PipelineCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
     notify(t('pipelineResumedNotice'))
     await onChanged()
   }
+  const step = pipelineStep(pipeline)
+  const progress = step === 'tests' || step === 'review' ? pipelineProgressText(t, pipeline?.progress) : undefined
+  const stageUrl = pipeline?.stageUrl && /^https?:\/\//i.test(pipeline.stageUrl) ? pipeline.stageUrl : undefined
   return <article className="dt-pipeline-card" data-blocked={blocked || undefined} data-waiting={waiting || undefined}>
     <header className="dt-pipeline-head">
-      <Tag tone={waiting ? 'warning' : blocked ? 'danger' : 'info'}>{t(waiting ? 'pipelineWaiting' : blocked ? 'pipelineBlocked' : 'pipelineRunning')}</Tag>
+      <Tag tone={waiting ? 'warning' : blocked ? 'danger' : 'info'}>{pipelineStageLabel(t, pipeline)}</Tag>
       <span className="dt-pipeline-age"><When at={pipeline?.at ?? ticket.updatedAt} /></span>
     </header>
     <button type="button" className="dt-pipeline-title" onClick={open}>{ticket.title}</button>
+    {pipeline && (pipeline.url || delivery?.review) && <div className="dt-pipeline-track" role="img" aria-label={t('pipelineSteps')}>
+      {PIPELINE_TRACK.map((key, index) => <span key={key} data-state={pipelineTrackState(step, index)} />)}
+    </div>}
     {pipeline?.reason && <p className="dt-pipeline-reason">{pipeline.reason}</p>}
     {!pipeline?.reason && pipeline?.check && <p className="dt-pipeline-check">{pipeline.check}</p>}
     <div className="dt-pipeline-facts">
       {delivery?.changelist !== undefined && <span className="dt-verify-cl">CL {delivery.changelist}</span>}
+      {progress && <span className="dt-pipeline-chip" title={progress}>{progress}</span>}
       {pipeline?.reason && pipeline?.check && <span className="dt-pipeline-chip" title={pipeline.check}>{pipeline.check}</span>}
+      {stageUrl && <a className="dt-pipeline-link" href={stageUrl} target="_blank" rel="noreferrer"
+        onClick={event => event.stopPropagation()}>{t('pipelineOpenStage')}</a>}
       {pipeline?.url && <a className="dt-pipeline-link" href={pipeline.url} target="_blank" rel="noreferrer"
         onClick={event => event.stopPropagation()}>{t('pipelineOpenReview')}</a>}
       {delivery?.review && !pipeline?.url && <span className="dt-pipeline-review">{delivery.review}</span>}
@@ -447,7 +458,7 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
   const verification = data.verification ?? []
   const pipeline = data.pipeline ?? []
   const blockedPipeline = pipeline.filter(ticket => ticket.stage === 'pipeline' && ticket.action === 'blocked'
-    && !ticket.pipeline?.manual).length
+    && (!ticket.pipeline?.manual || pipelineSmokeFailed(ticket.pipeline))).length
   const working = data.working ?? []
   const idle = data.idle ?? []
   const ended = data.ended ?? []
