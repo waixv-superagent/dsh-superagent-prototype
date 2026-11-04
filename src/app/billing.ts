@@ -14,6 +14,14 @@ const CATALOG_TTL_MS = 60_000
 const PRICE_TTL_MS = 10 * 60_000
 const PRICE_FAILURE_TTL_MS = 60_000
 const FLUSH_MS = 30_000
+/** The gateway account is read at most this often. */
+const GATEWAY_TTL_MS = 60_000
+/** A view waits this long for a gateway read before it shows what it already has. */
+const GATEWAY_WAIT_MS = 6_000
+/** A gateway figure older than this is dropped rather than shown as current. */
+const GATEWAY_STALE_MS = 5 * 60_000
+/** A minute this far in the past is assumed settled by the gateway and is not read again. */
+const GATEWAY_SETTLE_MS = 2 * 60_000
 const TOKEN_LIMIT = Number.MAX_SAFE_INTEGER
 const PROVIDER_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/
 
@@ -54,8 +62,49 @@ export interface BillingRole {
   readonly model: string
 }
 
+/** The billing account's own quota for its current period, as the route's gateway settles it. */
+export interface BillingQuota {
+  /** Who keeps this account: the gateway, so every client sharing its key counts against it. */
+  readonly source: 'gateway'
+  readonly limit: number
+  readonly used: number
+  readonly remaining: number
+  /** Remaining share of the period's limit, 0–100. */
+  readonly remainingPercent: number
+  /** Epoch milliseconds the current period ends at, when the gateway says. */
+  readonly periodEnd: number | null
+  /** Epoch milliseconds of the gateway's usage snapshot. */
+  readonly at: number
+}
+
+/** The rolling hour as the route's gateway billed it, minute by minute; the account's whole key, not only this host. */
+export interface BillingSettled {
+  readonly source: 'gateway'
+  readonly provider: string
+  readonly cost: number
+  readonly requests: number
+  readonly tokens: number
+  /** One entry per minute of the window, aligned with `BillingView.buckets`. */
+  readonly buckets: readonly { readonly at: number; readonly cost: number; readonly requests: number }[]
+  /** Whether every minute of the window was read; a partial window is a lower bound. */
+  readonly complete: boolean
+}
+
+/** What the route's gateway reports about its account; any part may be missing when the gateway cannot be read. */
+export interface GatewayAccount {
+  readonly quota?: BillingQuota
+  /** Settled requests in [from, to): one per request, the gateway's own cost in CNY. */
+  readonly requests?: readonly { readonly at: number; readonly cost: number; readonly tokens: number }[]
+  /** Minutes the gateway answered completely; a minute outside them was not read. */
+  readonly covered?: { readonly from: number; readonly to: number }
+}
+
 /** The billing strip's data: what is charging now and what the last hour cost. */
 export interface BillingView {
+  /** The gateway account's quota for its period; absent when the route has none or it could not be read. */
+  readonly quota?: BillingQuota
+  /** The rolling hour as the gateway billed it; absent when it could not be read, leaving the estimate in `total`. */
+  readonly settled?: BillingSettled
   readonly windowMinutes: number
   readonly currency: 'CNY'
   /** The provider of the latest request in the window, or the deployment default when nothing ran. */
@@ -92,6 +141,15 @@ export interface BillingSnapshot {
 
 interface Spend { input: number; output: number; cacheRead: number; cacheWrite: number; requests: number; lastAt: number }
 interface CountedUsage { input: number; output: number; cacheRead: number; cacheWrite: number }
+interface SettledMinute { cost: number; requests: number; tokens: number; final: boolean }
+interface SettledState {
+  provider: string
+  minutes: Map<number, SettledMinute>
+  quota?: { value: BillingQuota; readAt: number }
+  readAt: number
+  okAt: number
+  pending?: Promise<void>
+}
 
 /** What the ledger needs from its owner; the host supplies the live catalog and the route's published prices. */
 export interface BillingHost {
@@ -100,6 +158,8 @@ export interface BillingHost {
   catalog(): Promise<ModelCatalog>
   /** Published prices by model id for `provider`, or null when that route publishes none. */
   prices(provider: string): Promise<ReadonlyMap<string, ModelPrice> | null>
+  /** The account `provider`'s gateway bills, settled over [from, to); absent when the host reads no gateway account. */
+  account?(provider: string, from: number, to: number): Promise<GatewayAccount | null>
   now?(): number
   warn?(message: string): void
 }
@@ -150,6 +210,7 @@ export class Billing {
   private readonly lastSeq = new Map<string, number>()
   private readonly priceCache = new Map<string, { at: number; models: ReadonlyMap<string, ModelPrice> | null }>()
   private catalogCache?: { at: number; value: ModelCatalog }
+  private settled: SettledState = { provider: '', minutes: new Map(), readAt: 0, okAt: 0 }
   private timer?: ReturnType<typeof setInterval>
   private dirty = false
   private readonly now: () => number
@@ -272,7 +333,67 @@ export class Billing {
       buckets,
       priced: totalCost !== null,
       updatedAt: now,
+      ...await this.gateway(catalog.default.provider, windowStart, now),
     }
+  }
+
+  /**
+   * The gateway's own account for `provider`: its quota and what it settled minute by minute. A read refreshes at most
+   * once a minute and only re-reads minutes that may still change; a failed or slow read leaves the last good minutes.
+   */
+  private async gateway(provider: string, windowStart: number, now: number): Promise<Pick<BillingView, 'quota' | 'settled'>> {
+    if (!this.host.account || !provider) return {}
+    if (this.settled.provider !== provider) this.settled = { provider, minutes: new Map(), readAt: 0, okAt: 0 }
+    const state = this.settled
+    if (now - state.readAt >= GATEWAY_TTL_MS) {
+      state.readAt = now
+      state.pending ??= this.refreshGateway(state, windowStart, now).finally(() => { state.pending = undefined })
+    }
+    if (state.pending) await Promise.race([state.pending, new Promise(resolve => setTimeout(resolve, GATEWAY_WAIT_MS).unref?.())])
+    const quota = state.quota && now - state.quota.readAt < GATEWAY_STALE_MS ? state.quota.value : undefined
+    if (now - state.okAt >= GATEWAY_STALE_MS) return quota ? { quota } : {}
+    const buckets: BillingSettled['buckets'][number][] = []
+    let cost = 0, requests = 0, tokens = 0, complete = true
+    for (let index = 0; index < BILLING_WINDOW_MINUTES; index++) {
+      const at = windowStart + index * BUCKET_MS
+      const minute = state.minutes.get(at)
+      if (!minute) complete = false
+      buckets.push({ at, cost: minute?.cost ?? 0, requests: minute?.requests ?? 0 })
+      cost += minute?.cost ?? 0
+      requests += minute?.requests ?? 0
+      tokens += minute?.tokens ?? 0
+    }
+    return { ...quota ? { quota } : {}, settled: { source: 'gateway', provider, cost, requests, tokens, buckets, complete } }
+  }
+
+  private async refreshGateway(state: SettledState, windowStart: number, now: number): Promise<void> {
+    for (const at of [...state.minutes.keys()]) if (at < windowStart) state.minutes.delete(at)
+    // A minute is final once the gateway has had time to settle it; only later minutes are read again.
+    let from = windowStart
+    while (from < now && state.minutes.get(from)?.final) from += BUCKET_MS
+    const to = minuteOf(now) + BUCKET_MS
+    let account: GatewayAccount | null = null
+    try { account = await this.host.account!(state.provider, from, to) } catch (error) {
+      this.host.warn?.(`could not read the gateway account of ${state.provider}: ${String(error)}`)
+    }
+    if (!account || this.settled !== state) return
+    const readAt = this.now()
+    if (account.quota) state.quota = { value: account.quota, readAt }
+    const covered = account.covered
+    if (!covered || !account.requests) return
+    const fresh = new Map<number, SettledMinute>()
+    for (let at = minuteOf(covered.from); at < covered.to; at += BUCKET_MS) {
+      fresh.set(at, { cost: 0, requests: 0, tokens: 0, final: at + BUCKET_MS <= readAt - GATEWAY_SETTLE_MS })
+    }
+    for (const request of account.requests) {
+      const minute = fresh.get(minuteOf(request.at))
+      if (!minute) continue
+      minute.cost += request.cost
+      minute.requests += 1
+      minute.tokens += request.tokens
+    }
+    for (const [at, minute] of fresh) state.minutes.set(at, minute)
+    state.okAt = readAt
   }
 
   private async catalog(): Promise<ModelCatalog> {
@@ -419,4 +540,103 @@ export async function publishedPrices(ctx: Context, provider: string): Promise<R
     }
     return models.size ? models : null
   } catch { return null }
+}
+
+/** The gateway quotes money in units of 1/10 000 CNY. */
+const GATEWAY_MONEY_UNIT = 10_000
+/** The gateway's portal reads its own clock: Beijing time, without daylight saving. */
+const GATEWAY_OFFSET_MS = 8 * 3_600_000
+/** Upper bound on timeline reads for one refresh; a busier hour is shown as a partial window rather than read forever. */
+const GATEWAY_TIMELINE_READS = 24
+
+/** One route's gateway endpoint and its key, resolved through the credentials service before the environment. */
+async function gatewayRoute(ctx: Context, provider: string): Promise<{ base: string; key: string } | undefined> {
+  const profile = routeProfile(ctx, provider)
+  if (!profile?.apiKeyEnv) return undefined
+  const base = profile.baseURL.endsWith('/') ? profile.baseURL : `${profile.baseURL}/`
+  if (new URL(base).protocol !== 'https:') return undefined
+  let key: string | undefined
+  try {
+    const credentials = ctx.get('credentials') as { resolve?(ref: string): Promise<{ value?: string } | undefined> } | undefined
+    key = (await credentials?.resolve?.(profile.apiKeyEnv))?.value
+  } catch { key = undefined }
+  key ||= process.env[profile.apiKeyEnv]
+  return key ? { base, key } : undefined
+}
+
+/** Beijing-time `YYYYMMDD` and `YYYY-MM-DDTHH:mm` for one instant, the portal's own query format. */
+function gatewayClock(at: number): { date: string; minute: string } {
+  const iso = new Date(at + GATEWAY_OFFSET_MS).toISOString()
+  return { date: iso.slice(0, 10).replaceAll('-', ''), minute: iso.slice(0, 16) }
+}
+
+async function gatewayJson(route: { base: string; key: string }, path: string): Promise<Record<string, unknown> | undefined> {
+  const response = await fetch(new URL(path, route.base), { headers: { accept: 'application/json', authorization: `Bearer ${route.key}` },
+    redirect: 'manual', signal: AbortSignal.timeout(10_000) })
+  if (!response.ok || !(response.headers.get('content-type') ?? '').includes('application/json')) return undefined
+  const body = record(await response.json())
+  return body && body.error === undefined ? body : undefined
+}
+
+/** The account's current period from the portal's day summary; absent when it reports no period limit. */
+function quotaOf(body: Record<string, unknown> | undefined, now: number): BillingQuota | undefined {
+  const limit = number(body?.period_limit_cny), used = number(body?.period_used_cny), remaining = number(body?.period_remaining_cny)
+  if (!limit || used === undefined || remaining === undefined) return undefined
+  const end = number(record(body?.quota_v2)?.week_end)
+  const snapshot = typeof body?.usage_snapshot_at === 'string' ? Date.parse(body.usage_snapshot_at) : Number.NaN
+  return {
+    source: 'gateway',
+    limit: limit / GATEWAY_MONEY_UNIT,
+    used: used / GATEWAY_MONEY_UNIT,
+    remaining: remaining / GATEWAY_MONEY_UNIT,
+    remainingPercent: Math.max(0, Math.min(100, remaining / limit * 100)),
+    periodEnd: end ? end * 1000 : null,
+    at: Number.isFinite(snapshot) ? snapshot : now,
+  }
+}
+
+/**
+ * Read the account a gateway route bills: its period quota and the requests it settled in [from, to). The source is the
+ * kurogames gateway's own usage portal (`/my-usage/api/detail` and `/my-usage/api/timeline`), the same figures its
+ * "我的用量" page shows; it is undocumented, so any failure yields what could be read and never an estimate. A timeline
+ * answer is capped at 1000 requests, so a truncated range is split until each part is complete.
+ */
+export async function gatewayAccount(ctx: Context, provider: string, from: number, to: number): Promise<GatewayAccount | null> {
+  let route: { base: string; key: string } | undefined
+  try { route = await gatewayRoute(ctx, provider) } catch { return null }
+  if (!route) return null
+  const now = Date.now()
+  let quota: BillingQuota | undefined
+  try { quota = quotaOf(await gatewayJson(route, `my-usage/api/detail?date=${gatewayClock(now).date}`), now) } catch { quota = undefined }
+  const requests: { at: number; cost: number; tokens: number }[] = []
+  // Read the range oldest first, splitting a truncated part; coverage stays contiguous from `from`.
+  const queue: [number, number][] = [[minuteOf(from), Math.max(minuteOf(from) + BUCKET_MS, to)]]
+  let coveredTo = queue[0]![0], reads = 0
+  while (queue.length && reads < GATEWAY_TIMELINE_READS) {
+    const [start, end] = queue.shift()!
+    reads += 1
+    const first = gatewayClock(start), last = gatewayClock(end - BUCKET_MS)
+    let body: Record<string, unknown> | undefined
+    try {
+      body = await gatewayJson(route, `my-usage/api/timeline?date=${first.date}&window=custom`
+        + `&start=${encodeURIComponent(first.minute)}&end=${encodeURIComponent(last.minute)}`)
+    } catch { body = undefined }
+    const rows = Array.isArray(body?.requests) ? body.requests : undefined
+    if (!rows) break
+    if (body?.truncated === true && end - start > BUCKET_MS) {
+      const middle = start + Math.ceil((end - start) / BUCKET_MS / 2) * BUCKET_MS
+      queue.unshift([start, middle], [middle, end])
+      continue
+    }
+    for (const row of rows) {
+      const value = record(row)
+      const at = typeof value?.timestamp === 'string' ? Date.parse(value.timestamp) : Number.NaN
+      const cost = number(value?.cost_cny)
+      if (!Number.isFinite(at) || at < start || at >= end || cost === undefined) continue
+      requests.push({ at, cost: cost / GATEWAY_MONEY_UNIT, tokens: count(value?.total_tokens) ?? 0 })
+    }
+    coveredTo = end
+  }
+  if (!quota && coveredTo <= minuteOf(from)) return null
+  return { ...quota ? { quota } : {}, ...coveredTo > minuteOf(from) ? { requests, covered: { from: minuteOf(from), to: coveredTo } } : {} }
 }

@@ -60,13 +60,23 @@ function BillingStrip({ billing }: { billing: BillingView }) {
   const current = billing.current
   const recent = current.at !== null && Date.now() - current.at < 10 * 60_000
   const extra = Math.max(0, billing.providers.length - 1)
-  const metric = billing.priced ? billing.buckets.map(bucket => bucket.cost) : billing.buckets.map(bucket => bucket.tokens)
-  const max = Math.max(0, ...metric)
+  const settled = billing.settled
+  const quota = billing.quota
+  // The gateway's settled bill is the figure a person pays; the local estimate only stands in when it cannot be read.
+  const bars = settled
+    ? settled.buckets.map(bucket => ({ at: bucket.at, value: bucket.cost, label: moneyText(bucket.cost) }))
+    : billing.buckets.map(bucket => billing.priced
+      ? { at: bucket.at, value: bucket.cost, label: moneyText(bucket.cost) }
+      : { at: bucket.at, value: bucket.tokens, label: `${tokensText(bucket.tokens)} tokens` })
+  const max = Math.max(0, ...bars.map(bar => bar.value))
+  const latest = bars.findLastIndex(bar => bar.value > 0)
   const currentUsage = billing.providers.find(row => row.provider === current.provider)
-  const currentUnpriced = !!currentUsage && currentUsage.tokens > 0 && currentUsage.cost === null
-  const sparkTotal = billing.total.cost !== null ? moneyText(billing.total.cost) : `${tokensText(billing.total.tokens)} tokens`
-  return <section className="dt-billing" aria-label={t('billingTitle')} data-priced={billing.priced || undefined}
-    title={t('billingSourceNote')}>
+  const currentUnpriced = !settled && !!currentUsage && currentUsage.tokens > 0 && currentUsage.cost === null
+  const estimate = billing.total.cost !== null ? moneyText(billing.total.cost) : undefined
+  const requests = settled ? settled.requests : billing.total.requests
+  const quotaTone = quota ? quota.remainingPercent < 10 ? 'danger' : quota.remainingPercent < 25 ? 'warn' : 'ok' : undefined
+  return <section className="dt-billing" aria-label={t('billingTitle')} data-priced={billing.priced || !!settled || undefined}
+    title={settled ? t('billingSettledNote') : t('billingSourceNote')}>
     <div className="dt-billing-now">
       <span className="dt-billing-label">{recent ? t('billingNow') : current.at !== null ? t('billingLast') : t('billingConfigured')}</span>
       <span className="dt-billing-provider" data-unpriced={currentUnpriced || undefined}>
@@ -80,25 +90,46 @@ function BillingStrip({ billing }: { billing: BillingView }) {
       </Tag>)}
     </div>
     <div className="dt-billing-window">
-      {billing.total.cost !== null
-        ? <span className="dt-billing-money">{moneyText(billing.total.cost)}</span>
-        : <span className="dt-billing-money" data-unpriced>{t('billingUnpriced')}</span>}
-      {billing.total.unpricedTokens > 0 && <span className="dt-billing-unpriced"
-        title={t('billingUnpricedTokens', { tokens: tokensText(billing.total.unpricedTokens) })}>+</span>}
       <span className="dt-billing-window-label">{t('billingWindow')}</span>
-      <span className="dt-billing-spark" role="img"
-        aria-label={t('billingSpark', { metric: t(billing.priced ? 'billingCostMetric' : 'billingTokenMetric') })}>
-        {billing.buckets.map((bucket, index) => {
-          const value = metric[index] ?? 0
-          return <span key={bucket.at} className="dt-billing-bar" data-zero={value === 0 || undefined}
-            style={{ height: `${max > 0 ? Math.max(2, Math.round(value / max * 100)) : 2}%` }} />
-        })}
+      {settled
+        ? <span className="dt-billing-money" data-source="gateway"
+          title={settled.complete ? t('billingSettledNote') : t('billingSettledPartial')}>
+          {moneyText(settled.cost)}{!settled.complete && '+'}
+        </span>
+        : estimate !== undefined
+          ? <span className="dt-billing-money" data-source="estimate" title={t('billingSourceNote')}>{estimate}</span>
+          : <span className="dt-billing-money" data-unpriced>{t('billingUnpriced')}</span>}
+      <span className="dt-billing-source" data-source={settled ? 'gateway' : 'estimate'}>
+        {settled ? t('billingSettled') : t('billingEstimate')}
       </span>
-      <span className="dt-billing-requests">{billing.total.requests > 0
-        ? t('billingRequests', { count: billing.total.requests }) : t('billingNoUsage')}</span>
-      <span className="dt-billing-total" title={sparkTotal}>{tokensText(billing.total.tokens)} tokens</span>
+      {!settled && billing.total.unpricedTokens > 0 && <span className="dt-billing-unpriced"
+        title={t('billingUnpricedTokens', { tokens: tokensText(billing.total.unpricedTokens) })}>+</span>}
+      <span className="dt-billing-spark" role="img"
+        aria-label={t('billingSpark', { metric: t(settled || billing.priced ? 'billingCostMetric' : 'billingTokenMetric') })}>
+        {bars.map((bar, index) => <span key={bar.at} className="dt-billing-bar" data-zero={bar.value === 0 || undefined}
+          data-latest={index === latest || undefined} title={`${minuteText(bar.at)} · ${bar.label}`}
+          style={{ height: `${max > 0 ? Math.max(8, Math.round(bar.value / max * 100)) : 8}%` }} />)}
+      </span>
+      <span className="dt-billing-requests">{requests > 0 ? t('billingRequests', { count: requests }) : t('billingNoUsage')}</span>
+      {quota && <span className="dt-billing-quota" data-tone={quotaTone}
+        title={t('billingQuotaNote', { remaining: moneyText(quota.remaining), limit: moneyText(quota.limit),
+          end: quota.periodEnd ? new Date(quota.periodEnd).toLocaleString() : '—' })}>
+        <span className="dt-billing-quota-label">{t('billingQuota')}</span>
+        <span className="dt-billing-quota-meter" role="meter" aria-valuemin={0} aria-valuemax={100}
+          aria-valuenow={Math.round(quota.remainingPercent)} aria-label={t('billingQuota')}>
+          <span className="dt-billing-quota-fill" style={{ width: `${quota.remainingPercent}%` }} />
+        </span>
+        <span className="dt-billing-quota-value">{Math.round(quota.remainingPercent)}%</span>
+      </span>}
+      {!quota && <span className="dt-billing-total">{tokensText(billing.total.tokens)} tokens</span>}
     </div>
   </section>
+}
+
+/** The local clock time of one strip minute, the label its bar's tooltip leads with. */
+function minuteText(at: number): string {
+  const date = new Date(at)
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
 

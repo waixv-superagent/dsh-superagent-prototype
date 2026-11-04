@@ -43,7 +43,7 @@ import { EditorScheduler } from './editor-scheduler.ts'
 import { notifyPlan as sendPlanCard } from './plan.ts'
 import { notifyPriority as sendPriorityCard } from './priority.ts'
 import { IdleScheduler } from './idle.ts'
-import { Billing, publishedPrices } from './billing.ts'
+import { Billing, gatewayAccount, publishedPrices } from './billing.ts'
 import { feishuSettings } from '../sources/feishu.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
@@ -163,9 +163,11 @@ export class Runtime extends Service implements SourceHost {
         editor: () => this.editor.read(), commands: () => store.settings().executor.editor, logDir: join(machine.stateDir, 'editor-jobs'),
         notify: (ticketId, id, text) => sessions.prompt(workerSessionId(ticketId), id, text, 'steer'),
         warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
-      // The board's billing strip reads actual Session usage; the host only fetches the routes' published price lists.
+      // The board's billing strip reads actual Session usage priced from the routes' published lists, and the gateway account's own
+      // settled hour and quota when the default route is a gateway it can read.
       this.billing = new Billing({ store, catalog: () => ctx.sessionController.modelCatalog(),
-        prices: provider => publishedPrices(ctx, provider), warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
+        prices: provider => publishedPrices(ctx, provider),
+        account: (provider, from, to) => gatewayAccount(ctx, provider, from, to), warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       this.pipeline = new PipelineChecks({ settings: () => store.settings() })
       this.idlePool = new IdleScheduler({ store })
       this.assessor = new MasterAssessor({ get engine() { return runtime.engine }, commands, get deployment() { return setup.deployment }, effects,
