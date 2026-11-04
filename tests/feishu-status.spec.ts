@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ago, cardExpired, composeCard, idleMood, runOnce, shortTitle, snapshotOf } from '../scripts/feishu-status.mjs'
+import { ago, browserLink, cardExpired, composeCard, idleMood, runOnce, shortTitle, snapshotOf } from '../scripts/feishu-status.mjs'
 
 const overview = {
   working: [
@@ -127,8 +127,20 @@ describe('composeCard', () => {
     expect((view.card.config as { update_multi: boolean; width_mode: string }).update_multi).toBe(true)
     expect((view.card.config as { width_mode: string }).width_mode).toBe('compact')
     const linked = composeCard(snapshot, { now: at, link: 'https://example.com/?view=board' })
-    expect((linked.card as { card_link: { url: string } }).card_link.url).toBe('https://example.com/?view=board')
+    expect((linked.card as { card_link: { url: string } }).card_link.url)
+      .toBe('https://example.com/?view=board&lk_jump_to_browser=true&lk_mobile_jump_to_browser=true')
     expect((view.card as { card_link?: unknown }).card_link).toBeUndefined()
+  })
+
+  it('makes the card link open in the system browser, where the panel can ask for its login', () => {
+    expect(browserLink('https://10.0.0.1:9443/?view=board#top'))
+      .toBe('https://10.0.0.1:9443/?view=board&lk_jump_to_browser=true&lk_mobile_jump_to_browser=true#top')
+    expect(browserLink('http://127.0.0.1:3082'))
+      .toBe('http://127.0.0.1:3082/?lk_jump_to_browser=true&lk_mobile_jump_to_browser=true')
+    const already = 'https://example.com/?lk_jump_to_browser=true&view=board&lk_mobile_jump_to_browser=true'
+    expect(browserLink(already)).toBe(already)
+    expect(browserLink('not a url')).toBe('not a url')
+    expect((composeCard(snapshot, { now: at, link: '   ' }).card as { card_link?: unknown }).card_link).toBeUndefined()
   })
 
   it('turns blue while work runs and green when idle', () => {
@@ -246,7 +258,8 @@ describe('runOnce', () => {
     await runOnce({ chat: CHAT, panelUrl: 'http://127.0.0.1:9', stateFile: h.stateFile,
       lark: h.lark, fetchImpl: h.fetcher, now: at, link: 'https://example.com/?view=board' })
     const sent = cardOf(h.calls[0]!)
-    expect((sent as { card_link: { url: string } }).card_link.url).toBe('https://example.com/?view=board')
+    expect((sent as { card_link: { url: string } }).card_link.url)
+      .toBe('https://example.com/?view=board&lk_jump_to_browser=true&lk_mobile_jump_to_browser=true')
   })
 
   it('keeps the same card when the service stops answering and paints it red', async () => {

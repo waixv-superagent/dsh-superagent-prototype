@@ -80,6 +80,8 @@ export function clock (value: string | Date, seconds?: boolean): string
 export function idleMood (now: Date): string
 export function ago (value: string | Date, now?: Date): string
 export function shortTitle (value: unknown, max?: number): string
+/** Adds Feishu's open-in-system-browser parameters to a URL, keeping its query and hash; an unparsable URL is returned as is. */
+export function browserLink (url: string): string
 export function composeCard (snapshot: Snapshot, options?: { now?: Date; lastOkAt?: string | null; link?: string }): CardView
 export function cardExpired (sentAt: string | null | undefined, now?: Date): boolean
 export function messageIdOf (output: unknown): string | undefined
