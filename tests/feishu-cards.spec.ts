@@ -54,6 +54,7 @@ describe('reading a card action', () => {
     expect(priorityValue('{"priority":"p2"}')).toBeUndefined()
     expect(priorityValue('{"priority":"P9"}')).toBeUndefined()
     expect(formNote('{"note":" 走 C "}')).toBe('走 C')
+    expect(formNote('{"note":"第一行\\n第二行\\n第三行\\n"}')).toBe('第一行\n第二行\n第三行')
     expect(formNote('')).toBe('')
   })
 })

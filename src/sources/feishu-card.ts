@@ -127,9 +127,35 @@ const DEFAULT_PLAN_OPTIONS: readonly PlanOption[] = [
 ]
 /** The choices a plan card shows, in the worker's order, falling back to the gate's three. */
 export const planChoices = (plan: Pick<Plan, 'options'>): readonly PlanOption[] => plan.options?.length ? plan.options : DEFAULT_PLAN_OPTIONS
-/** One row of choices: two split in half, three in thirds, four flow and wrap when the screen is narrow. */
-const flexOf = (count: number): string => count <= 2 ? 'bisect' : count === 3 ? 'trisect' : 'flow'
 const buttonType = (decision: PlanDecision): string => decision === 'approve' ? 'primary_filled' : decision === 'stop' ? 'danger' : 'default'
+/** A label's width in CJK characters: a Latin letter, digit or space is about half as wide as a Chinese character. */
+const labelWidth = (label: string): number => Array.from(label).reduce((width, char) => width + (/[\u0000-\u024f]/u.test(char) ? 0.5 : 1), 0)
+/**
+ * The widest label that still fits one row of equal buttons on a 375px phone: a card's content area there is about 300px,
+ * a third of it holds four Chinese characters beside the button's own padding, and half of it holds six.
+ */
+const rowFits = (labels: readonly string[]): boolean =>
+  labels.length >= 2 && labels.length <= 3 && labels.every(label => labelWidth(label) <= (labels.length === 2 ? 6 : 4))
+/** One choice as the card shows it: its button and, when the worker wrote one, what choosing it means. */
+export interface CardChoice { button: Record<string, unknown>; description?: string }
+/**
+ * The choices of a card. Short labels share one row, split in halves or thirds as before. Anything longer, four choices,
+ * or choices with descriptions get one full-width button per line, each description in small text right under its button,
+ * so a phone never cuts a label into an ellipsis and a consequence is read beside the button it belongs to.
+ */
+const choiceRows = (choices: readonly CardChoice[], labels: readonly string[]): Record<string, unknown>[] => {
+  if (rowFits(labels) && !choices.some(choice => choice.description)) {
+    return [{
+      tag: 'column_set', flex_mode: labels.length === 2 ? 'bisect' : 'trisect', horizontal_spacing: '8px',
+      columns: choices.map(choice => ({ tag: 'column', elements: [choice.button] })),
+    }]
+  }
+  return choices.map(choice => ({
+    tag: 'column_set', flex_mode: 'none',
+    columns: [{ tag: 'column', width: 'weighted', weight: 1, vertical_spacing: '4px', elements: [choice.button,
+      ...choice.description ? [markdown(choice.description, { text_size: 'notation' })] : []] }],
+  }))
+}
 /** `text` on one line, cut to `max` characters (code points, so an emoji is never split) with `…` when it was longer. */
 const clip = (text: string, max: number): string => {
   const chars = Array.from(text.replace(/\s+/g, ' ').trim())
@@ -161,6 +187,11 @@ const PLAN_LAYOUTS: Readonly<Record<PlanTemplate, { front: readonly string[]; fo
   design: { front: ['问题', '推荐'], fold: ['选项', '证据'] },
 }
 const evidencePanel = (sections: readonly { label: string; text: string }[]): Record<string, unknown> => foldPanel(sections, '证据')
+/**
+ * How much of the ticket title a plan card's subtitle keeps: with ` · 工单 xxxxxxxx` after it, this still fits one line of
+ * a 375px phone, so the subtitle no longer wraps and pushes the buttons down. The body names the question in full.
+ */
+const SUBTITLE_TITLE = 14
 /** The deadline as month, day and minute in China time, which is all a person needs to know when the gate stops. */
 const deadlineText = (deadline: string): string => new Date(deadline).toLocaleString('zh-CN', {
   timeZone: 'Asia/Shanghai', hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -178,7 +209,6 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
   const get = (label: string): string => lines.get(label) ?? ''
   const layout = { front: [...PLAN_LAYOUTS[template].front], fold: [...PLAN_LAYOUTS[template].fold] }
   const choices = planChoices(plan)
-  const described = choices.some(choice => choice.description)
   const question = plan.question || PLAN_CARD_QUESTION
   const custom = plan.sections?.length ? plan.sections : undefined
   const body = custom?.filter(section => !section.fold) ?? []
@@ -188,7 +218,7 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
     config: { update_multi: true, width_mode: 'default' },
     header: {
       title: plain(`待确认 · ${clip(question, 40)}`),
-      subtitle: plain(`${clip(ticket.title, 24)} · 工单 ${shortId(ticket)}`),
+      subtitle: plain(`${clip(ticket.title, SUBTITLE_TITLE)} · 工单 ${shortId(ticket)}`),
       template: 'blue',
     },
     body: {
@@ -198,18 +228,15 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
         ...body.length ? body.map(section => block(section.label, section.text))
           : custom ? [] : layout.front.map(label => block(label, get(label), ['影响面', '预算'].includes(label) ? { text_size: 'notation' } : {})),
         ...folded.length ? [foldPanel(folded, '补充')] : custom ? [] : [evidencePanel(layout.fold.map(label => ({ label, text: get(label) || '—' })))],
-        ...described ? [markdown(`**选项说明**\n${choices.map((choice, index) =>
-          `${index + 1}、${choice.label}${choice.description ? `：${choice.description}` : ''}`).join('\n')}`, { text_size: 'notation' })] : [],
         { tag: 'hr', margin: '4px 0px 0px 0px' },
         markdown([
           '**通过后** worker 开始实现并按验证方案自测，交你确认后才交付，不会直接 submit',
           ...plan.deadline ? [`⏳ ${deadlineText(plan.deadline)} 前不答会自动停`] : [],
         ].join('\n'), { text_size: 'notation' }),
-        {
-          tag: 'column_set', flex_mode: flexOf(choices.length), horizontal_spacing: '8px',
-          columns: choices.map((choice, index) => ({ tag: 'column', elements: [
-            decisionButton(choice.label, buttonType(choice.decision), choice.decision, index)] })),
-        },
+        ...choiceRows(choices.map((choice, index) => ({
+          button: decisionButton(choice.label, buttonType(choice.decision), choice.decision, index),
+          ...choice.description ? { description: choice.description } : {},
+        })), choices.map(choice => choice.label)),
         ...ticketLink ? [ticketLinkLine(ticket.id, ticketLink)] : [],
       ],
     },
@@ -224,6 +251,12 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
     + (ticketLink ? `\n${ticketLinkText(ticket.id, ticketLink)}` : '')
   return { card, text }
 }
+/**
+ * The 改一下 input as a chat box: it opens three lines tall, grows with the text up to eight (Feishu grows it on desktop and
+ * keeps the three lines on a phone), and a return is a new line that the submit carries as `\n`.
+ */
+const REVISE_ROWS = 3
+const REVISE_MAX_ROWS = 8
 /**
  * The card a click on 改一下 turns into: it keeps the original question and the whole plan one tap away, so switching views
  * no longer hides what is being revised, and it offers a way back to the plan card. The form itself cannot upload files, so
@@ -250,17 +283,17 @@ export function reviseCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan
           vertical_spacing: '8px', padding: '8px 8px 8px 8px',
           elements: planLines(plan.text, planTemplate(plan)).map(line => block(line.label, line.text)),
         },
-        markdown('**要改什么？** 写一句方向就行；提交后回到方案阶段，worker 按它重新给方案。'),
+        markdown('**要改什么？** 像在对话框里一样写就行，回车换行；提交后回到方案阶段，worker 按它重新给方案。'),
         {
           tag: 'form', name: 'plan_revise',
           elements: [
-            { tag: 'input', name: 'note', input_type: 'text', required: true, max_length: 1000,
-              placeholder: plain('一句话说清新方向；要贴图或写长文，直接回复这张卡') },
+            { tag: 'input', name: 'note', input_type: 'multiline_text', rows: REVISE_ROWS, auto_resize: true, max_rows: REVISE_MAX_ROWS,
+              width: 'fill', required: true, max_length: 1000, placeholder: plain('写新方向，可以分几行写') },
             { tag: 'button', name: 'submit_revise', form_action_type: 'submit', type: 'primary_filled',
               text: plain('提交新方向') },
           ],
         },
-        markdown('要贴图或写长文，直接回复这张卡（表单里只能填文字）。', { text_size: 'notation' }),
+        markdown('要贴图，直接回复这张卡（表单里只能填文字）。', { text_size: 'notation' }),
         {
           tag: 'column_set', flex_mode: 'bisect',
           columns: [{ tag: 'column', elements: [{ tag: 'button', width: 'fill', text: plain('返回方案'), type: 'default',
@@ -274,19 +307,33 @@ export function reviseCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan
 /** The card that replaces the question once a person answered, so the chat record says what was decided. */
 export function resolvedCard(ticket: Pick<Ticket, 'id' | 'title'>, decision: PlanDecision, note = '', option = ''): CardMessage {
   const chosen = option ? `（你选的是「${option}」）` : ''
+  const lines = noteLines(note)
   const outcome = decision === 'approve' ? { title: '已通过 · 开始实现', template: 'green', body: `方案已通过，worker 进入实现阶段。${chosen}` }
     : decision === 'revise' ? { title: '已换方向 · 等新方案', template: 'orange',
-        body: `已把新方向交给 worker：${note || '（没有附说明）'}${chosen}` }
+        body: lines.length > 1 ? `已把新方向交给 worker${chosen}：` : `已把新方向交给 worker：${lines[0] ?? '（没有附说明）'}${chosen}` }
       : { title: '已停止', template: 'red', body: `这个工单停在方案门，不再继续。${chosen}` }
+  // A direction written over several lines keeps them: it is shown as its own block, one line per line the person wrote.
+  const direction = decision === 'revise' && lines.length > 1 ? lines : []
   const card = {
     schema: '2.0',
     config: { update_multi: true },
     header: { title: plain(outcome.title), subtitle: plain(`${ticket.title} · 工单 ${shortId(ticket)}`), template: outcome.template },
     body: { direction: 'vertical', padding: '12px 12px 20px 12px',
-      elements: [markdown(outcome.body), markdown('决定已记录，可在工单面板查看完整方案与执行过程。',
-        { text_size: 'notation' })] },
+      elements: [markdown(outcome.body),
+        ...direction.length ? [{ tag: 'column_set', flex_mode: 'none', background_style: 'grey-50', margin: '0px 0px 0px 0px',
+          columns: [{ tag: 'column', width: 'weighted', weight: 1, padding: '8px 12px 8px 12px',
+            elements: [{ tag: 'markdown', content: textSafe(direction.join('\n')) }] }] }] : [],
+        markdown('决定已记录，可在工单面板查看完整方案与执行过程。', { text_size: 'notation' })] },
   }
-  return { card, text: textSafe(`${outcome.title}：${ticket.title}。${outcome.body}`) }
+  const said = direction.length ? `${outcome.body}\n${direction.join('\n')}` : outcome.body
+  return { card, text: textSafe(`${outcome.title}：${ticket.title}。${said}`) }
+}
+/** A person's note as the lines they wrote: Windows and old Mac returns read as one, and blank lines at either end go. */
+const noteLines = (note: string): string[] => {
+  const lines = note.replace(/\r\n?/g, '\n').split('\n').map(line => line.trimEnd())
+  while (lines.length && !lines[0]) lines.shift()
+  while (lines.length && !lines[lines.length - 1]) lines.pop()
+  return lines
 }
 /**
  * What a TAPD priority card says about the bug, taken from its origin Trigger; every field is optional because a card is
@@ -384,13 +431,10 @@ export function attentionCard(question: string, attentionId: string, options: re
         markdown(`**${question}**`),
         ...body.map(section => block(section.label, section.text)),
         ...folded.length ? [foldPanel(folded, '补充')] : [],
-        {
-          tag: 'column_set', flex_mode: flexOf(options.length), horizontal_spacing: '8px',
-          columns: options.map((option, index) => ({ tag: 'column', elements: [{
-            tag: 'button', text: plain(option), type: 'default', width: 'fill',
-            behaviors: [{ type: 'callback', value: { v: 1, attention: attentionId, choice: index } }],
-          }] })),
-        },
+        ...choiceRows(options.map((option, index) => ({ button: {
+          tag: 'button', text: plain(option), type: 'default', width: 'fill',
+          behaviors: [{ type: 'callback', value: { v: 1, attention: attentionId, choice: index } }],
+        } })), options),
         markdown('点一个就行；也可以直接在对话里回复。', { text_size: 'notation' }),
         ...ticketLink && ticketId ? [ticketLinkLine(ticketId, ticketLink)] : [],
       ],

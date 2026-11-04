@@ -1,0 +1,796 @@
+{
+  "before-plan": {
+    "schema": "2.0",
+    "config": {
+      "update_multi": true,
+      "width_mode": "default"
+    },
+    "header": {
+      "title": {
+        "tag": "plain_text",
+        "content": "待确认 · 【对照】这张卡在手机上按钮能看全吗？（合成内容，只用于版式对照）"
+      },
+      "subtitle": {
+        "tag": "plain_text",
+        "content": "【对照】方案卡与回复卡改版（合成内容，非真实工… · 工单 ffffffff"
+      },
+      "template": "blue"
+    },
+    "body": {
+      "direction": "vertical",
+      "padding": "16px 16px 20px 16px",
+      "vertical_spacing": "12px",
+      "elements": [
+        {
+          "tag": "markdown",
+          "content": "**【对照】这张卡在手机上按钮能看全吗？（合成内容，只用于版式对照）**"
+        },
+        {
+          "tag": "markdown",
+          "content": "**现象**\n手机上选项按钮被省略号截断；改一下的输入框只能写一行。"
+        },
+        {
+          "tag": "markdown",
+          "content": "**修复锚点**\n按钮长标签各占一行撑满；输入框改多行。"
+        },
+        {
+          "tag": "markdown",
+          "content": "**影响面**\n只改卡片排版，回调不变。",
+          "text_size": "notation"
+        },
+        {
+          "tag": "markdown",
+          "content": "**预算**\n约 1 小时。",
+          "text_size": "notation"
+        },
+        {
+          "tag": "collapsible_panel",
+          "expanded": false,
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "证据 · 代码线 / 资产线 / 配置线 / 验证方案"
+            },
+            "icon": {
+              "tag": "standard_icon",
+              "token": "down-small-ccm_outlined",
+              "size": "16px 16px"
+            },
+            "icon_position": "right",
+            "icon_expanded_angle": -180
+          },
+          "border": {
+            "color": "grey",
+            "corner_radius": "5px"
+          },
+          "vertical_spacing": "8px",
+          "padding": "8px 8px 8px 8px",
+          "elements": [
+            {
+              "tag": "markdown",
+              "content": "**代码线**\nsrc/sources/feishu-card.ts 的按钮行和表单输入框。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**资产线**\n无。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**配置线**\n无。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**验证方案**\n单测加 375px 规则断言，再真机看卡。"
+            }
+          ]
+        },
+        {
+          "tag": "markdown",
+          "content": "**选项说明**\n1、按此方案开工：按上面的修复锚点改，改完发对照卡\n2、调整一下范围\n3、先停",
+          "text_size": "notation"
+        },
+        {
+          "tag": "hr",
+          "margin": "4px 0px 0px 0px"
+        },
+        {
+          "tag": "markdown",
+          "content": "**通过后** worker 开始实现并按验证方案自测，交你确认后才交付，不会直接 submit\n⏳ 11/7 02:55 前不答会自动停",
+          "text_size": "notation"
+        },
+        {
+          "tag": "column_set",
+          "flex_mode": "trisect",
+          "horizontal_spacing": "8px",
+          "columns": [
+            {
+              "tag": "column",
+              "elements": [
+                {
+                  "tag": "button",
+                  "text": {
+                    "tag": "plain_text",
+                    "content": "按此方案开工"
+                  },
+                  "type": "primary_filled",
+                  "width": "fill",
+                  "behaviors": [
+                    {
+                      "type": "callback",
+                      "value": {
+                        "v": 1,
+                        "decision": "approve",
+                        "choice": 0
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "tag": "column",
+              "elements": [
+                {
+                  "tag": "button",
+                  "text": {
+                    "tag": "plain_text",
+                    "content": "调整一下范围"
+                  },
+                  "type": "default",
+                  "width": "fill",
+                  "behaviors": [
+                    {
+                      "type": "callback",
+                      "value": {
+                        "v": 1,
+                        "decision": "revise",
+                        "choice": 1
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "tag": "column",
+              "elements": [
+                {
+                  "tag": "button",
+                  "text": {
+                    "tag": "plain_text",
+                    "content": "先停"
+                  },
+                  "type": "danger",
+                  "width": "fill",
+                  "behaviors": [
+                    {
+                      "type": "callback",
+                      "value": {
+                        "v": 1,
+                        "decision": "stop",
+                        "choice": 2
+                      }
+                    }
+                  ],
+                  "confirm": {
+                    "title": {
+                      "tag": "plain_text",
+                      "content": "停止工单？"
+                    },
+                    "text": {
+                      "tag": "plain_text",
+                      "content": "停止后这个工单不再继续，需要重新接单。"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "before-revise": {
+    "schema": "2.0",
+    "config": {
+      "update_multi": true,
+      "width_mode": "default"
+    },
+    "header": {
+      "title": {
+        "tag": "plain_text",
+        "content": "改一下 · 说清哪里不对"
+      },
+      "subtitle": {
+        "tag": "plain_text",
+        "content": "【对照】方案卡与回复卡改版（合成内容，非真实工单） · 工单 ffffffff"
+      },
+      "template": "orange"
+    },
+    "body": {
+      "direction": "vertical",
+      "padding": "12px 12px 20px 12px",
+      "vertical_spacing": "10px",
+      "elements": [
+        {
+          "tag": "markdown",
+          "content": "**原问题**\n【对照】这张卡在手机上按钮能看全吗？（合成内容，只用于版式对照）",
+          "text_size": "notation"
+        },
+        {
+          "tag": "collapsible_panel",
+          "expanded": false,
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "原方案 · 点开对照"
+            },
+            "icon": {
+              "tag": "standard_icon",
+              "token": "down-small-ccm_outlined",
+              "size": "16px 16px"
+            },
+            "icon_position": "right",
+            "icon_expanded_angle": -180
+          },
+          "border": {
+            "color": "grey",
+            "corner_radius": "5px"
+          },
+          "vertical_spacing": "8px",
+          "padding": "8px 8px 8px 8px",
+          "elements": [
+            {
+              "tag": "markdown",
+              "content": "**现象**\n手机上选项按钮被省略号截断；改一下的输入框只能写一行。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**代码线**\nsrc/sources/feishu-card.ts 的按钮行和表单输入框。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**资产线**\n无。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**配置线**\n无。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**修复锚点**\n按钮长标签各占一行撑满；输入框改多行。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**影响面**\n只改卡片排版，回调不变。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**验证方案**\n单测加 375px 规则断言，再真机看卡。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**预算**\n约 1 小时。"
+            }
+          ]
+        },
+        {
+          "tag": "markdown",
+          "content": "**要改什么？** 写一句方向就行；提交后回到方案阶段，worker 按它重新给方案。"
+        },
+        {
+          "tag": "form",
+          "name": "plan_revise",
+          "elements": [
+            {
+              "tag": "input",
+              "name": "note",
+              "input_type": "text",
+              "required": true,
+              "max_length": 1000,
+              "placeholder": {
+                "tag": "plain_text",
+                "content": "一句话说清新方向；要贴图或写长文，直接回复这张卡"
+              }
+            },
+            {
+              "tag": "button",
+              "name": "submit_revise",
+              "form_action_type": "submit",
+              "type": "primary_filled",
+              "text": {
+                "tag": "plain_text",
+                "content": "提交新方向"
+              }
+            }
+          ]
+        },
+        {
+          "tag": "markdown",
+          "content": "要贴图或写长文，直接回复这张卡（表单里只能填文字）。",
+          "text_size": "notation"
+        },
+        {
+          "tag": "column_set",
+          "flex_mode": "bisect",
+          "columns": [
+            {
+              "tag": "column",
+              "elements": [
+                {
+                  "tag": "button",
+                  "width": "fill",
+                  "text": {
+                    "tag": "plain_text",
+                    "content": "返回方案"
+                  },
+                  "type": "default",
+                  "behaviors": [
+                    {
+                      "type": "callback",
+                      "value": {
+                        "v": 1,
+                        "back": true
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "before-resolved": {
+    "schema": "2.0",
+    "config": {
+      "update_multi": true
+    },
+    "header": {
+      "title": {
+        "tag": "plain_text",
+        "content": "已换方向 · 等新方案"
+      },
+      "subtitle": {
+        "tag": "plain_text",
+        "content": "【对照】方案卡与回复卡改版（合成内容，非真实工单） · 工单 ffffffff"
+      },
+      "template": "orange"
+    },
+    "body": {
+      "direction": "vertical",
+      "padding": "12px 12px 20px 12px",
+      "elements": [
+        {
+          "tag": "markdown",
+          "content": "已把新方向交给 worker：先别动按钮颜色\n长标签每个占一行\n输入框像飞书对话框一样能换行（你选的是「调整一下范围」）"
+        },
+        {
+          "tag": "markdown",
+          "content": "决定已记录，可在工单面板查看完整方案与执行过程。",
+          "text_size": "notation"
+        }
+      ]
+    }
+  },
+  "after-plan": {
+    "schema": "2.0",
+    "config": {
+      "update_multi": true,
+      "width_mode": "default"
+    },
+    "header": {
+      "title": {
+        "tag": "plain_text",
+        "content": "待确认 · 【对照】这张卡在手机上按钮能看全吗？（合成内容，只用于版式对照）"
+      },
+      "subtitle": {
+        "tag": "plain_text",
+        "content": "【对照】方案卡与回复卡改版… · 工单 ffffffff"
+      },
+      "template": "blue"
+    },
+    "body": {
+      "direction": "vertical",
+      "padding": "16px 16px 20px 16px",
+      "vertical_spacing": "12px",
+      "elements": [
+        {
+          "tag": "markdown",
+          "content": "**【对照】这张卡在手机上按钮能看全吗？（合成内容，只用于版式对照）**"
+        },
+        {
+          "tag": "markdown",
+          "content": "**现象**\n手机上选项按钮被省略号截断；改一下的输入框只能写一行。"
+        },
+        {
+          "tag": "markdown",
+          "content": "**修复锚点**\n按钮长标签各占一行撑满；输入框改多行。"
+        },
+        {
+          "tag": "markdown",
+          "content": "**影响面**\n只改卡片排版，回调不变。",
+          "text_size": "notation"
+        },
+        {
+          "tag": "markdown",
+          "content": "**预算**\n约 1 小时。",
+          "text_size": "notation"
+        },
+        {
+          "tag": "collapsible_panel",
+          "expanded": false,
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "证据 · 代码线 / 资产线 / 配置线 / 验证方案"
+            },
+            "icon": {
+              "tag": "standard_icon",
+              "token": "down-small-ccm_outlined",
+              "size": "16px 16px"
+            },
+            "icon_position": "right",
+            "icon_expanded_angle": -180
+          },
+          "border": {
+            "color": "grey",
+            "corner_radius": "5px"
+          },
+          "vertical_spacing": "8px",
+          "padding": "8px 8px 8px 8px",
+          "elements": [
+            {
+              "tag": "markdown",
+              "content": "**代码线**\nsrc/sources/feishu-card.ts 的按钮行和表单输入框。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**资产线**\n无。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**配置线**\n无。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**验证方案**\n单测加 375px 规则断言，再真机看卡。"
+            }
+          ]
+        },
+        {
+          "tag": "hr",
+          "margin": "4px 0px 0px 0px"
+        },
+        {
+          "tag": "markdown",
+          "content": "**通过后** worker 开始实现并按验证方案自测，交你确认后才交付，不会直接 submit\n⏳ 11/7 02:55 前不答会自动停",
+          "text_size": "notation"
+        },
+        {
+          "tag": "column_set",
+          "flex_mode": "none",
+          "columns": [
+            {
+              "tag": "column",
+              "width": "weighted",
+              "weight": 1,
+              "vertical_spacing": "4px",
+              "elements": [
+                {
+                  "tag": "button",
+                  "text": {
+                    "tag": "plain_text",
+                    "content": "按此方案开工"
+                  },
+                  "type": "primary_filled",
+                  "width": "fill",
+                  "behaviors": [
+                    {
+                      "type": "callback",
+                      "value": {
+                        "v": 1,
+                        "decision": "approve",
+                        "choice": 0
+                      }
+                    }
+                  ]
+                },
+                {
+                  "tag": "markdown",
+                  "content": "按上面的修复锚点改，改完发对照卡",
+                  "text_size": "notation"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "tag": "column_set",
+          "flex_mode": "none",
+          "columns": [
+            {
+              "tag": "column",
+              "width": "weighted",
+              "weight": 1,
+              "vertical_spacing": "4px",
+              "elements": [
+                {
+                  "tag": "button",
+                  "text": {
+                    "tag": "plain_text",
+                    "content": "调整一下范围"
+                  },
+                  "type": "default",
+                  "width": "fill",
+                  "behaviors": [
+                    {
+                      "type": "callback",
+                      "value": {
+                        "v": 1,
+                        "decision": "revise",
+                        "choice": 1
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "tag": "column_set",
+          "flex_mode": "none",
+          "columns": [
+            {
+              "tag": "column",
+              "width": "weighted",
+              "weight": 1,
+              "vertical_spacing": "4px",
+              "elements": [
+                {
+                  "tag": "button",
+                  "text": {
+                    "tag": "plain_text",
+                    "content": "先停"
+                  },
+                  "type": "danger",
+                  "width": "fill",
+                  "behaviors": [
+                    {
+                      "type": "callback",
+                      "value": {
+                        "v": 1,
+                        "decision": "stop",
+                        "choice": 2
+                      }
+                    }
+                  ],
+                  "confirm": {
+                    "title": {
+                      "tag": "plain_text",
+                      "content": "停止工单？"
+                    },
+                    "text": {
+                      "tag": "plain_text",
+                      "content": "停止后这个工单不再继续，需要重新接单。"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "after-revise": {
+    "schema": "2.0",
+    "config": {
+      "update_multi": true,
+      "width_mode": "default"
+    },
+    "header": {
+      "title": {
+        "tag": "plain_text",
+        "content": "改一下 · 说清哪里不对"
+      },
+      "subtitle": {
+        "tag": "plain_text",
+        "content": "【对照】方案卡与回复卡改版（合成内容，非真实工单） · 工单 ffffffff"
+      },
+      "template": "orange"
+    },
+    "body": {
+      "direction": "vertical",
+      "padding": "12px 12px 20px 12px",
+      "vertical_spacing": "10px",
+      "elements": [
+        {
+          "tag": "markdown",
+          "content": "**原问题**\n【对照】这张卡在手机上按钮能看全吗？（合成内容，只用于版式对照）",
+          "text_size": "notation"
+        },
+        {
+          "tag": "collapsible_panel",
+          "expanded": false,
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "原方案 · 点开对照"
+            },
+            "icon": {
+              "tag": "standard_icon",
+              "token": "down-small-ccm_outlined",
+              "size": "16px 16px"
+            },
+            "icon_position": "right",
+            "icon_expanded_angle": -180
+          },
+          "border": {
+            "color": "grey",
+            "corner_radius": "5px"
+          },
+          "vertical_spacing": "8px",
+          "padding": "8px 8px 8px 8px",
+          "elements": [
+            {
+              "tag": "markdown",
+              "content": "**现象**\n手机上选项按钮被省略号截断；改一下的输入框只能写一行。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**代码线**\nsrc/sources/feishu-card.ts 的按钮行和表单输入框。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**资产线**\n无。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**配置线**\n无。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**修复锚点**\n按钮长标签各占一行撑满；输入框改多行。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**影响面**\n只改卡片排版，回调不变。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**验证方案**\n单测加 375px 规则断言，再真机看卡。"
+            },
+            {
+              "tag": "markdown",
+              "content": "**预算**\n约 1 小时。"
+            }
+          ]
+        },
+        {
+          "tag": "markdown",
+          "content": "**要改什么？** 像在对话框里一样写就行，回车换行；提交后回到方案阶段，worker 按它重新给方案。"
+        },
+        {
+          "tag": "form",
+          "name": "plan_revise",
+          "elements": [
+            {
+              "tag": "input",
+              "name": "note",
+              "input_type": "multiline_text",
+              "rows": 3,
+              "auto_resize": true,
+              "max_rows": 8,
+              "width": "fill",
+              "required": true,
+              "max_length": 1000,
+              "placeholder": {
+                "tag": "plain_text",
+                "content": "写新方向，可以分几行写"
+              }
+            },
+            {
+              "tag": "button",
+              "name": "submit_revise",
+              "form_action_type": "submit",
+              "type": "primary_filled",
+              "text": {
+                "tag": "plain_text",
+                "content": "提交新方向"
+              }
+            }
+          ]
+        },
+        {
+          "tag": "markdown",
+          "content": "要贴图，直接回复这张卡（表单里只能填文字）。",
+          "text_size": "notation"
+        },
+        {
+          "tag": "column_set",
+          "flex_mode": "bisect",
+          "columns": [
+            {
+              "tag": "column",
+              "elements": [
+                {
+                  "tag": "button",
+                  "width": "fill",
+                  "text": {
+                    "tag": "plain_text",
+                    "content": "返回方案"
+                  },
+                  "type": "default",
+                  "behaviors": [
+                    {
+                      "type": "callback",
+                      "value": {
+                        "v": 1,
+                        "back": true
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "after-resolved": {
+    "schema": "2.0",
+    "config": {
+      "update_multi": true
+    },
+    "header": {
+      "title": {
+        "tag": "plain_text",
+        "content": "已换方向 · 等新方案"
+      },
+      "subtitle": {
+        "tag": "plain_text",
+        "content": "【对照】方案卡与回复卡改版（合成内容，非真实工单） · 工单 ffffffff"
+      },
+      "template": "orange"
+    },
+    "body": {
+      "direction": "vertical",
+      "padding": "12px 12px 20px 12px",
+      "elements": [
+        {
+          "tag": "markdown",
+          "content": "已把新方向交给 worker（你选的是「调整一下范围」）："
+        },
+        {
+          "tag": "column_set",
+          "flex_mode": "none",
+          "background_style": "grey-50",
+          "margin": "0px 0px 0px 0px",
+          "columns": [
+            {
+              "tag": "column",
+              "width": "weighted",
+              "weight": 1,
+              "padding": "8px 12px 8px 12px",
+              "elements": [
+                {
+                  "tag": "markdown",
+                  "content": "先别动按钮颜色\n长标签每个占一行\n输入框像飞书对话框一样能换行"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "tag": "markdown",
+          "content": "决定已记录，可在工单面板查看完整方案与执行过程。",
+          "text_size": "notation"
+        }
+      ]
+    }
+  }
+}
