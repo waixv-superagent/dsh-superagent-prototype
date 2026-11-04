@@ -1,5 +1,5 @@
 /** Ticket list, ticket detail, mandate basis formatting, and executor load views. */
-import { completedArchived, latestReport, liveTicket, pendingPlan, planLines, planTemplate, threadKey, ticketStage, type AcceptMode, type AdmissionCell,
+import { completedArchived, latestReport, liveTicket, pendingPlan, planLines, planTemplate, threadKey, ticketKind, ticketStage, type AcceptMode, type TicketKind, type AdmissionCell,
   type MandateBasis, type Ticket, type TicketStage } from '../../core/index.ts'
 import { workerSessionId } from '../../executor/dsh.ts'
 import { KV } from '../../kv.ts'
@@ -34,7 +34,8 @@ export function basisFacts(basis: MandateBasis, rule: Snapshot['rule']): { facts
   if (authority) facts.push({ name: 'legacyAuthority', value: authority })
   return { facts, legacy: authority !== undefined }
 }
-export function ticketList(host: ViewHost, stage: 'open' | TicketStage['stage'] | 'verify' | 'unverified', offset: number, limit: number) {
+export function ticketList(host: ViewHost, stage: 'open' | TicketStage['stage'] | 'verify' | 'unverified', offset: number, limit: number,
+  kind?: TicketKind) {
   const view = snapshot(host)
   const { store } = view
   const shown = (ticket: Ticket) => {
@@ -51,8 +52,11 @@ export function ticketList(host: ViewHost, stage: 'open' | TicketStage['stage'] 
   }
   const tickets = (stage === 'ended' || stage === 'unverified' || stage === 'verify' ? store.tickets.list() : store.tickets.open())
     .filter(ticket => !completedArchived(ticket)).filter(shown).sort(newestFirst)
-  const result = page(tickets, offset, limit)
-  return { ...result, items: result.items.map(ticket => ticketRow(view, ticket)) }
+  // How many of the stage's tickets are of each kind, counted before the kind filter, so every kind pill shows its own total.
+  const kinds: Partial<Record<TicketKind, number>> = {}
+  for (const ticket of tickets) { const own = ticketKind(ticket).kind; kinds[own] = (kinds[own] ?? 0) + 1 }
+  const result = page(kind ? tickets.filter(ticket => ticketKind(ticket).kind === kind) : tickets, offset, limit)
+  return { ...result, kinds, items: result.items.map(ticket => ticketRow(view, ticket)) }
 }
 export type TicketListView = ReturnType<typeof ticketList>
 /** Why a search hit matched, in data the panel can label without guessing: the field and the concrete value it saw. */

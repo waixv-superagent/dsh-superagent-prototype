@@ -1,6 +1,6 @@
 /** Shared view projections for triggers, tickets, threads, decisions, and channel links. */
 import { z } from 'zod'
-import { canRetry, currentReport, followupOwners, latestReport, liveTicket, ownPull, settled, threadKey, ticketStage, type ActorRef, type ChannelRef, type Decision,
+import { canRetry, currentReport, followupOwners, latestReport, liveTicket, ownPull, settled, threadKey, ticketKind, ticketStage, type ActorRef, type ChannelRef, type Decision,
   type DecisionKind, type Thread, type ThreadFacts, type Ticket, type TicketStage, type Trigger } from '../../core/index.ts'
 import { allowedSender, listedBot } from '../../policy.ts'
 import type { ChannelLink, Localized } from '../../sources/kind.ts'
@@ -135,7 +135,9 @@ export function ticketSummary(ticket: Ticket) {
       : delivered(ticket) ? ticket.execution?.verification ? 'agent' as const : 'none' as const
         : 'auto' as const
     : undefined
-  return { id: ticket.id, title: ticket.title, state, ...stage, ...note ? { note } : {},
+  // What kind of work it is, recorded at acceptance or derived for an older ticket, so the board can label and filter it.
+  const kind = ticketKind(ticket)
+  return { id: ticket.id, title: ticket.title, state, ...stage, ...note ? { note } : {}, kind: kind.kind, kindSource: kind.source,
     // A live Ticket whose pipeline merged was resumed by a person's later message: that round is not pipeline work, so the
     // panel must not offer the merge gate again. An ended Ticket keeps the observation for its record.
     ...pipeline && !(liveTicket(ticket) && pipeline.state === 'merged') ? { pipeline } : {},

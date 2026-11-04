@@ -14,7 +14,7 @@ import type { Editor } from './editor.ts'
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
-import { UserError, type EngineForPeople, type Ticket } from '../core/index.ts'
+import { TICKET_KINDS, UserError, type EngineForPeople, type Ticket } from '../core/index.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import type { DshExecutor } from '../executor/dsh.ts'
 import type { Health } from '../sources/host.ts'
@@ -153,7 +153,8 @@ interface Input<K extends keyof Api> {
 type Routes = { [K in keyof Api]: (input: Input<K>) => ApiResponse<K> | Promise<ApiResponse<K>> }
 const offset = z.coerce.number().int().nonnegative().catch(0)
 const limit = (fallback: number, max: number) => z.coerce.number().int().positive().catch(fallback).transform(value => Math.min(max, value))
-const TicketsQuery = z.object({ state: z.enum(TICKET_FILTERS).catch('open'), offset, limit: limit(20, 1000) })
+const TicketsQuery = z.object({ state: z.enum(TICKET_FILTERS).catch('open'), kind: z.enum(TICKET_KINDS).optional().catch(undefined), offset,
+  limit: limit(20, 1000) })
 const TicketSearchQuery = z.object({ q: z.string().trim().max(200).default(''), limit: z.coerce.number().int().min(1).max(20).default(8) })
 const ThreadsQuery = z.object({ filter: z.enum(THREAD_FILTERS).catch('subscribed'), offset, limit: limit(20, 1000) })
 const ThreadQuery = z.object({ limit: limit(50, 100), before: z.string().optional(), around: z.string().optional() })
@@ -228,8 +229,8 @@ function routes(runtime: HttpHost): Routes {
       return { withdrawn: true }
     },
     'GET tickets': ({ query }) => {
-      const { state, offset, limit } = TicketsQuery.parse(query)
-      return ticketList(views(runtime), state, offset, limit)
+      const { state, kind, offset, limit } = TicketsQuery.parse(query)
+      return ticketList(views(runtime), state, offset, limit, kind)
     },
     // Dedicated Ticket-first search: the Overview box and the header search must not each invent their own ranking.
     'GET tickets/search': ({ query }) => {

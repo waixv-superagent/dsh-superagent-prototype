@@ -5,7 +5,7 @@ import { Button, Icon, Input, Tag } from './controls.tsx'
 import { ticketMark } from './marks.ts'
 import { PIPELINE_TRACK, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackState } from './pipeline.ts'
 import { useAction, usePanel, usePanelData } from './provider.tsx'
-import { ThreadChip } from './rows.tsx'
+import { KindTag, ThreadChip } from './rows.tsx'
 import { setupPage, settingsRoute, type BoardFocus, type Route } from './route.ts'
 import { healthText, localized, reasonLabel, valueLabel, readableMarkers, type T } from './text.ts'
 import { CheckSetupButton, ConfirmButton, LoadState, SetupMessage, VerificationChecks, When, clientHref, linkTarget } from './widgets.tsx'
@@ -194,6 +194,7 @@ function DecisionCard({ ticket, onChanged, focused }: { ticket: TicketRow; onCha
     <button type="button" className="dt-deck-card-title" onClick={open}>{ticket.title}</button>
     {body && <p className={ticket.note?.error ? 'dt-deck-card-body dt-deck-card-body-error' : 'dt-deck-card-body'}>{body}</p>}
     <div className="dt-deck-card-facts">
+      <KindTag kind={ticket.kind} source={ticket.kindSource} />
       {thread && <ThreadChip thread={thread} />}
       {ticket.undelivered > 0 && <span className="dt-deck-card-fact">{t('ticketUndeliveredLabel')} {ticket.undelivered}</span>}
       {ticket.assignments > 1 && <span className="dt-deck-card-fact">{t('boardRunCount', { count: ticket.assignments })}</span>}

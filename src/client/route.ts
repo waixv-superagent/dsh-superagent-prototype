@@ -1,5 +1,6 @@
 /** Typed panel routes, route parser, and sessionStorage location history. */
 import { THREAD_FILTERS, TICKET_FILTERS, type ThreadFilter, type TicketFilter } from '../app/api.ts'
+import { TICKET_KINDS, type TicketKind } from '../core/kind.ts'
 import type { SetupPlace } from '../setup.ts'
 import { DECISION_FILTERS, type DecisionFilter } from './api.ts'
 import type { T } from './text.ts'
@@ -22,7 +23,7 @@ export type Route = { page: 'editor'; id?: undefined; query?: { view?: HomeView;
   | { page: 'trigger'; id?: undefined; query?: { filter?: ThreadFilter } }
   | { page: 'trigger'; id: string; query?: { trigger?: string } }
   | { page: 'eval'; id?: undefined; query?: { filter?: DecisionFilter; window?: '24h' } }
-  | { page: 'execution'; id?: undefined; query?: { filter?: TicketFilter } }
+  | { page: 'execution'; id?: undefined; query?: { filter?: TicketFilter; kind?: TicketKind } }
   | { page: 'execution'; id: string; query?: undefined }
   | { page: 'settings'; id?: undefined; query: { group: SettingsGroup; source?: string; version?: string } }
 export const HOME: Route = { page: 'editor' }
@@ -52,7 +53,8 @@ export function parseRoute(value: unknown): Route | undefined {
       : { page, query: compact({ filter: pick(THREAD_FILTERS, query?.filter) }) }
     case 'eval': return { page, query: compact({ filter: pick(DECISION_FILTERS, query?.filter),
       window: query?.window === '24h' ? '24h' as const : undefined }) }
-    case 'execution': return record ? { page, id: record } : { page, query: compact({ filter: pick(TICKET_FILTERS, query?.filter) }) }
+    case 'execution': return record ? { page, id: record } : { page, query: compact({ filter: pick(TICKET_FILTERS, query?.filter),
+      kind: pick(TICKET_KINDS, query?.kind) }) }
     case 'settings': return { page, query: { group: pick(SETTINGS_GROUPS, query?.group) ?? 'source',
       ...compact({ source: text('source'), version: text('version') }) } }
     default: return undefined

@@ -21,6 +21,7 @@ export function TicketLine({ ticket, question, onChanged, context }: {
       <div className="dt-row-title"><button type="button" className="dt-open" onClick={() => navigate({ page: 'execution',
         id: ticket.id })}>{ticket.title}</button></div>
       <div className="dt-row-meta dt-ticket-meta">
+        <KindTag kind={ticket.kind} source={ticket.kindSource} />
         {ticket.threads.map(thread => <ThreadChip key={thread.key} thread={thread} />)}
         {context && <ContextTag />}
         {ticket.undelivered > 0 && <LabelValue label={t('ticketUndeliveredLabel')} value={ticket.undelivered} />}
@@ -46,6 +47,12 @@ export function TicketLine({ ticket, question, onChanged, context }: {
 function ContextTag() {
   const { t } = usePanel()
   return <Tag tone="quiet" title={t('contextOnlyHint')}>{t('contextOnly')}</Tag>
+}
+/** The kind of work a ticket is, with who decided it in the tooltip; a bug reads as a warning so it stands out in a list. */
+export function KindTag({ kind, source }: { kind: TicketRow['kind']; source: TicketRow['kindSource'] }) {
+  const { t } = usePanel()
+  return <Tag tone={kind === 'bug' ? 'warning' : kind === 'self' ? 'info' : 'outline'}
+    title={t('ticketKindSourceHint', { source: t(`ticketKindSource.${source}`) })}>{t(`ticketKind.${kind}`)}</Tag>
 }
 /** Thread list row; on a Ticket page, `ticketId` omits that Ticket from fanout targets and `context` marks context-only threads. */
 export function ThreadLine({ thread, ticketId, context }: { thread: ThreadRow; ticketId?: string; context?: boolean }) {
