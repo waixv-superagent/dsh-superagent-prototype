@@ -109,7 +109,10 @@ function seed(store: Store, accounts: Accounts = {}): void {
   const settings = store.settings()
   const { feishu: _feishu, ...others } = settings.sources
   const feishu = accounts.feishu === null ? undefined : { ...settings.sources.feishu?.config, cli: BOT(), ...accounts.feishu }
-  store.saveSettings(SettingsSchema.parse({ ...settings, sources: { ...others, github: { enabled: true, config: { repository: 'acme/widgets', cli: AGENT(), ...accounts.github } }, ...feishu ? { feishu: { enabled: true, config: feishu } } : {} } }))
+  // The idle gate is off here: this suite drives the rest of the application, and a P2 Ticket waiting for an idle window
+  // would leave its worker unstarted. The gate's own behavior is covered by `tests/priority.spec.ts`.
+  const idleOff = { ...settings.executor, idle: { ...settings.executor.idle, enabled: false } }
+  store.saveSettings(SettingsSchema.parse({ ...settings, executor: idleOff, sources: { ...others, github: { enabled: true, config: { repository: 'acme/widgets', cli: AGENT(), ...accounts.github } }, ...feishu ? { feishu: { enabled: true, config: feishu } } : {} } }))
 }
 let restarts: ReturnType<typeof vi.fn<() => void>>
 async function restart(machine: Partial<Machine> = {}, accounts: Accounts = {}): Promise<Runtime> {

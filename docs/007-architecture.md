@@ -317,6 +317,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/core/stage.ts` | `ticketStage` and `canRetry`: the Ticket stages of [003 Execution](003-execution.md) |
 | `src/core/waiting.ts` | `waitingOf`: who a Ticket waits for (person, pipeline, worker or nobody), the action that wait corresponds to, and the one real deadline it may have |
 | `src/core/plan.ts` | The P1 plan gate: a Ticket's phases, `Plan`, the fix/analysis/design templates, `planDecision` and the entrance a decision came through |
+| `src/core/priority.ts` | Ticket priority: the four levels, who set a level and why, `defaultPriority` (a TAPD question, a person's mention P1, P0 only from a person), `priorityOfText`/`priorityAnswer`, `systemPriority`'s stickiness, and the TAPD suggestion |
+| `src/core/idle.ts` | Idle time: the five signals (`queue`, `capacity`, `window`, `human`, `guard`), the three depths `L1`/`L2`/`L3`, the configured windows and their defaults, `idleState`, `idleAdmits` and the daily budget |
 | `src/core/verification.ts` | The four-block verification package a delivered change reports: `VERIFY_LABELS`, `verifyLines` and `missingVerifyLabels` |
 | `src/core/errors.ts` | `UserError` and `USER_ERRORS` |
 | `src/core/reasons.ts` | `Reason`, `REASONS` and `reasonText`: why the core recorded a Decision or set a Trigger aside, by code |
@@ -329,6 +331,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/outbox.ts` | The Outbox: the Engine's `Outbox` port, the receipts and the `reply` effects that send them |
 | `src/app/notices.ts` | The main Session's notices and relays: `eventNotice`, `reportRelay`, `resultRelay` and `followupRelay` |
 | `src/app/plan.ts` | `notifyChat` and `notifyPlan`: sends a Ticket's P1 plan card to the ticket's Feishu conversation — the topic its replies moved to, else the chat it started in — or the private chat that decides it, and remembers which card asked about which plan |
+| `src/app/priority.ts` | `notifyPriority` and `priorityFacts`: sends a TAPD Ticket's priority question to the ticket's Feishu conversation (the configured intervention chat when it has none of its own), records the mapping its buttons use, and reads the bug's facts for the card — TAPD's own priority only as a suggestion |
+| `src/app/idle.ts` | `IdleScheduler`: the deployment's inputs to the idle judgement (`core/idle.ts`) — the queue, the guard, the newest human message, how long a worker slot stayed free, the idle concurrency and the daily budget — and the `admission` the Executor asks before starting `P2`/`P3` work |
 | `src/app/store.ts` | The Store, and `Receipt`, a message of the outbox |
 | `src/app/store-read.ts` | `storeReads`: the Store's read queries for the views, the tools and the Sources' polls, which never write |
 | `src/app/migration.ts` | The schema 11 migration: one step from schema 10 that writes every stored record in its current shape |
@@ -486,6 +490,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/feishu-links.spec.ts` | Message links versus chat links and topic links: a Thread keeping the opening message's AppLink, asking Feishu for its root, falling back to the chat, opening the topic at its newest message while cards keep their position, and the pass that fills cards and Threads stored before their message link was known |
 | `tests/feishu-topic.spec.ts` | Opening a ticket's Feishu topic: the root brief and link, the retargeted reply channel and thread, the back-link in the original thread, a failed link lookup, idempotence, and the config requiring a receive-all topic chat |
 | `tests/plan-host.spec.ts` | Where a plan card goes: the ticket's topic reply channel, the configured private chat, the direct chat a ticket started in, and what a send failure reports |
+| `tests/priority.spec.ts` | Priority and idle: level parsing, source defaults and stickiness, P0 only from a person, TAPD's suggestion, the five-signal judgement and its windows, the idle scheduler's hold/admit answers and daily budget, the priority card and its button parsing, and the Executor holding a pending-question launch without failing it |
 | `tests/deployment.spec.ts`, `tests/environment.spec.ts`, `tests/index.spec.ts` | The plugin configuration and setup, the agent's process environment, the plugin entry |
 | `tests/service-script.spec.ts` | `scripts/dsh-superagent` against fake `ps`, `tmux` and `dsh` |
 | `tests/client.spec.tsx`, `tests/navigation.spec.ts`, `tests/controls.spec.tsx` | The client plugin's registration and polling, Session navigation and route memory, the `?view=board` deep link, the local controls, and the panel's imports, which have no cycle |

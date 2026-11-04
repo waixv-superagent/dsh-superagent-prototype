@@ -1,6 +1,8 @@
 /** Domain model of a proactive agent: the concepts and their invariants, independent of any source, policy, or executor. */
 import type { Reason } from './reasons.ts'
 import type { Plan, TicketPhase } from './plan.ts'
+import type { IdleLevel } from './idle.ts'
+import type { PriorityAsk, TicketPriority } from './priority.ts'
 
 /** Actor identity in the source's own vocabulary; Policy decides which actors may originate work on that Source. */
 export interface ActorRef { source: string; id: string }
@@ -270,7 +272,8 @@ export type TicketInput =
   | { id: string; kind: 'resumed'; triggerId: string; at: string }
   /** A person wrote in the Ticket's worker Session, which resumed it: `text` is what they wrote there. */
   | { id: string; kind: 'session-resume'; text: string; at: string }
-  | { id: string; kind: 'text'; text: string; at: string }
+  /** The host's own instruction, such as a status request; `person` marks one a person wrote, which the idle gate never holds. */
+  | { id: string; kind: 'text'; text: string; at: string; person?: true }
   /** A fact the main Session gave the ticket from other work: context, which asks for nothing and grants nothing. */
   | { id: string; kind: 'note'; text: string; at: string }
 
@@ -313,6 +316,18 @@ export interface Ticket {
   mandate: Mandate
   /** 这张单是缺陷还是需求；只有从 escalation 建出来的单才有，直接在路由里接的单不填。 */
   category?: 'bug' | 'feature'
+  /**
+   * Where the ticket runs: `P0`/`P1` with the mainline, `P2`/`P3` only in an idle window (see `core/priority.ts` and
+   * `core/idle.ts`). Absent on tickets stored before priorities existed, which count as `P1` (`ticketPriority`).
+   */
+  priority?: TicketPriority
+  /** The priority question a TAPD ticket asks before it may start; absent when the ticket never asked. */
+  priorityAsk?: PriorityAsk
+  /**
+   * A `P2`/`P3` ticket waiting in the idle pool: when it entered, and when and at which idle depth its work started. The
+   * daily budget counts the tickets whose `launchedIn` falls on the current day.
+   */
+  idle?: { enteredAt: string; launchedIn?: IdleLevel; launchedAt?: string }
   /** The Channels of the messages it was accepted from. */
   channels: ChannelRef[]
   /** Where its replies go now; a Source may move them to a conversation it opened, such as a topic. */

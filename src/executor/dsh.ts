@@ -5,8 +5,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { mkdir, rmdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { key, latestAssignment, latestReport, liveTicket, reprojectable, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
-import type { AssessmentOutcome, Assignment, Backend, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, TicketRepair,
-  Trigger } from '../core/index.ts'
+import type { AssessmentOutcome, Assignment, Backend, EngineForExecutor, Execution, Executor, IdleLevel, Mandate, PolicyEffect, Ticket, TicketInput,
+  TicketRepair, Trigger } from '../core/index.ts'
 import type { Machine } from '../deployment.ts'
 import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
 import type { Settings } from '../policy.ts'
@@ -99,7 +99,7 @@ export interface ExecutorHost {
   readonly context: Context
   /** Where the Executor reports what happened to Assignments and Inputs. */
   readonly engine: Pick<EngineForExecutor, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed' | 'report'
-    | 'assignmentInterrupted' | 'repaired' | 'repairAssignment'>
+    | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'idleLaunch'>
   readonly store: Pick<Store, 'tickets' | 'triggers' | 'set' | 'settings' | 'atomic' | 'afterCommit'>
   /** The GitHub repository this deployment watches, one of the configured delivery targets; empty without a GitHub Source. */
   readonly repository: string
@@ -119,6 +119,11 @@ export interface ExecutorHost {
   sourceLink(trigger: Trigger, signal?: AbortSignal): Promise<{ source_url?: string; source_url_read?: string }>
   /** Stored Trigger of the message `trigger` replies to, when it replies to one. */
   repliedTo(trigger: Trigger): Trigger | undefined
+  /**
+   * Whether a `P2`/`P3` ticket may start now under the idle five-signal judgement; absent starts every ticket at once.
+   * A refusal holds the launch (it retries later) instead of failing the assignment.
+   */
+  idleAdmission?(ticket: Ticket, load: { running: number; max: number }): { admitted: boolean; level?: IdleLevel; reason: string }
 }
 /** Looks up a ticket's origin trigger in Store. */
 export const sourceTrigger = (host: { store: Pick<Store, 'triggers'> }, ticket: Ticket): Trigger | undefined =>
@@ -426,13 +431,25 @@ export class DshExecutor implements Executor {
   }
   /** Enqueues a `delivery` effect to steer pending inputs into `ticket`'s running worker session. */
   deliver(ticket: Ticket, _assignment: Assignment): void { this.host.effects.enqueue('delivery', ticket.id, { ticketId: ticket.id }) }
+  /** The worker load the idle judgement reads: slots in use across running workers and launch reservations, and the limit. */
+  load(): { running: number; max: number } {
+    return { running: this.slots.used(), max: this.host.store.settings().executor.maxWorkers }
+  }
   /** Launches a queued assignment unless its ticket ended or a newer assignment replaced it meanwhile. */
   private async launchQueued({ ticketId, assignmentId }: { ticketId: string; assignmentId: string }): Promise<void> {
     const ticket = this.host.store.tickets.get(ticketId)
     const assignment = ticket && latestAssignment(ticket)
     if (!ticket || !liveTicket(ticket) || assignment?.id !== assignmentId || assignment.state !== 'pending') return
+    // A P2/P3 ticket waits for an idle window instead of competing with the mainline (see `core/idle.ts`): the launch is
+    // held, not failed, and retries until the five signals break its way or a person moves it to P0/P1.
+    const admission = this.host.idleAdmission?.(ticket, this.load())
+    if (admission && !admission.admitted) throw new Later(`Waiting for an idle window: ${admission.reason}`)
     this.slots.reserve(ticketId, 'launch')
-    try { await this.launch(ticket, assignment); this.transient.delete(`launch:${assignmentId}`) }
+    try {
+      // Record which depth let the ticket start, so the idle pool's daily budget and the board can say why it ran now.
+      if (admission?.level) this.host.engine.idleLaunch(ticketId, admission.level)
+      await this.launch(ticket, assignment); this.transient.delete(`launch:${assignmentId}`)
+    }
     catch (error) {
       // Shutdown or pause re-queues the launch for resume, and transient network/provider errors retry with backoff.
       // A failed prepare command is not retried automatically because an existing directory counts as prepared, so retrying

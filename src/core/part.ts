@@ -25,6 +25,8 @@ export interface EngineOptions {
   swarmUrl?: () => string
   /** Whether delivered work goes on to the host's pipeline follow-up: the p4 backend has one, a git backend has no Swarm/Jenkins stage. */
   pipelineFollowup?: (ticket: Ticket) => boolean
+  /** Minutes a `TAPD` ticket's priority question waits before the `P2` default applies; the deployment's `executor.idle.priorityAskMin`. */
+  priorityAskMinutes?: () => number
   now?: () => string
   emit?: (event: DomainEvent) => void
 }

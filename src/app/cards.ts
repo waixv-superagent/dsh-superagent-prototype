@@ -33,6 +33,11 @@ export function ticketCard(ticket: Ticket) {
     ...(ticket.category ? { category: ticket.category } : {}),
     // Who the ticket waits for and what it is doing, so a reader does not have to translate a stage word into an action.
     next: waitingOf(ticket),
+    // Where the ticket stands in the queue: its level and who set it, a question nobody answered yet, and whether it waits for idle.
+    ...(ticket.priority ? { priority: { level: ticket.priority.level, source: ticket.priority.source, ...ticket.priority.by ? { by: ticket.priority.by } : {}, ...ticket.priority.via ? { via: ticket.priority.via } : {},
+      ...ticket.priority.note ? { note: ticket.priority.note } : {} } } : {}),
+    ...(ticket.priorityAsk?.state === 'pending' ? { priority_ask: { deadline: ticket.priorityAsk.deadline } } : {}),
+    ...(ticket.idle ? { idle: { since: ticket.idle.enteredAt, ...ticket.idle.launchedIn ? { launched_in: ticket.idle.launchedIn } : {} } } : {}),
     ...(pullOf(ticket) ? { pr_number: pullOf(ticket) } : {}), ...(ended ? { ended } : {}), ...(gate ? { plan: gate } : {}),
     ...(attention ? { attention: { question: attention.question, ...attention.options?.length ? { options: attention.options } : {},
       ...attention.triggerId ? { trigger_id: attention.triggerId } : {} } } : {}),

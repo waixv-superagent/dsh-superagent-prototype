@@ -14,3 +14,8 @@ export { ANALYSIS_PLAN_LABELS, DESIGN_PLAN_LABELS, missingPlanLabels, pendingPla
 export { key } from './ids.ts'
 export { missingVerifyLabels, verifyLines, VERIFY_LABELS, VERIFY_LIMITS } from './verification.ts'
 export { REPAIR_LIMIT, REPROJECT_AFTER_MS, reprojectable, type Liveness, type Reprojection } from './invariants.ts'
+export { PRIORITY_LEVELS, PRIORITY_LABELS, PRIORITY_ASK_MINUTES, defaultPriority, priorityAnswer, priorityAskDeadline, priorityAskOverdue, priorityIsMainline,
+  priorityOfText, systemPriority, tapdSuggestion, ticketPriority, waitsForIdle, type PriorityAsk, type PriorityDefault, type PriorityLevel, type PriorityNote, type PriorityVia,
+  type PrioritySource, type TicketPriority } from './priority.ts'
+export { IDLE_ADMITS, IDLE_DEFAULTS, clockMinutes, dailyIdleRoom, idleAdmits, idleState, inWindow, localDay, minuteOfDay, protectedAt, windowAt,
+  type ClockTime, type IdleConfig, type IdleLevel, type IdleRange, type IdleSignals, type IdleState, type IdleWindow } from './idle.ts'
