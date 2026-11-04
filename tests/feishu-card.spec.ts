@@ -19,9 +19,12 @@ describe('P1 plan card', () => {
     const { card } = planCard(ticket, { text: PLAN, deadline: '2026-09-24T00:00:00Z' })
     expect(card.schema).toBe('2.0')
     const header = card.header as { title: { content: string }; subtitle: { content: string }; template: string }
-    // The chat list previews a card by its header title, so the title keeps the kind's prefix and adds what this card asks.
-    expect(header.title.content).toContain('待确认')
-    expect(header.title.content).toContain('开工')
+    // The header names only the state and the kind; the chat list previews the card by its summary, which carries the question,
+    // so the header no longer repeats the question the body leads with.
+    expect(header.title.content).toBe('待确认 · 方案')
+    expect((card.config as { summary: { content: string } }).summary.content).toContain('开工')
+    expect(header.subtitle.content).toContain('工单 aaaaaaaa')
+    expect(planCard(ticket, { text: PLAN }, 'http://panel').card.header).toMatchObject({ subtitle: { content: '翻页头像闪烁' } })
     expect(header.template).toBe('blue')
     const elements = (card.body as { elements: Element[] }).elements
     const front = JSON.stringify(elements)
@@ -244,7 +247,7 @@ describe('P1 plan card', () => {
     // A one-line direction stays in the sentence, as before.
     const single = resolvedCard(ticket, 'revise', '走 B')
     expect((single.card.body as { elements: Element[] }).elements.some(item => item.tag === 'column_set')).toBe(false)
-    expect(JSON.stringify(single.card)).toContain('已把新方向交给 worker：走 B')
+    expect(JSON.stringify(single.card)).toContain('新方向：走 B')
   })
   it('keeps short labels on one row and gives every longer label its own full-width line on a phone', () => {
     const row = (labels: string[]): Element[] => (attentionCard('选哪个？', 'att-1', labels).card.body as { elements: Element[] }).elements

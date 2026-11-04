@@ -21,6 +21,37 @@ const shortId = (ticket: Pick<Ticket, 'id'>): string => ticket.id.slice(0, 8)
 const ticketLinkText = (ticketId: string, link: string): string => `[工单 ${shortId({ id: ticketId })} ↗](${link})`
 const ticketLinkLine = (ticketId: string, link: string): Record<string, unknown> =>
   ({ tag: 'markdown', content: ticketLinkText(ticketId, link), text_size: 'notation' })
+/**
+ * Every card's frame, so they read alike: the header says what state the card is in (its colour is that state, its title
+ * a few words such as `待确认 · 方案`) and which ticket it is about, the body says the content once, and the chat list
+ * previews the card by `summary` rather than by a generic "[卡片]". The header never repeats the question the body leads
+ * with, and the ticket id appears once: in the footer link when there is one, else in the subtitle.
+ */
+const shell = (input: { title: string; subtitle?: string; template: string; summary: string; elements: Record<string, unknown>[] }):
+  Record<string, unknown> => ({
+  schema: '2.0',
+  config: { update_multi: true, width_mode: 'default', summary: { content: textSafe(clip(input.summary, 60)) } },
+  header: { title: plain(input.title), ...input.subtitle ? { subtitle: plain(input.subtitle) } : {}, template: input.template },
+  body: { direction: 'vertical', padding: '12px 16px 16px 16px', vertical_spacing: '12px', elements: input.elements },
+})
+/**
+ * The subtitle that names a ticket: its title, plus its short id only when no footer link carries the id already. With the
+ * id after it the title keeps 14 characters, so the subtitle still fits one line of a 375px phone and does not push the
+ * buttons down; the body names the question in full.
+ */
+const ticketSubtitle = (ticket: Pick<Ticket, 'id' | 'title'>, linked: boolean): string =>
+  linked ? clip(ticket.title, 24) : `${clip(ticket.title, 14)} · 工单 ${shortId(ticket)}`
+/**
+ * The small grey closing lines of a card, joined into one block so the card ends with one quiet paragraph instead of a stack
+ * of separate notes: what happens next, the deadline, and the way back to the ticket on the last line.
+ */
+const footer = (lines: readonly string[], ticketId?: string, link?: string): Record<string, unknown> | undefined => {
+  const all = [...lines.filter(Boolean)]
+  if (ticketId && link) all.push(ticketLinkText(ticketId, link))
+  // The link line is built without markdown's rewrite (see ticketLinkLine), so the notes are made safe on their own.
+  return all.length ? { tag: 'markdown', content: all.map((line, index) => index === all.length - 1 && ticketId && link ? line : textSafe(line)).join('\n'),
+    text_size: 'notation' } : undefined
+}
 /** The plan's lines by label; a card shows the lines the worker wrote and `—` for one it left out (the gate refuses those). */
 const linesOf = (text: string, template: PlanTemplate = 'fix'): Map<string, string> => new Map(planLines(text, template).map(line => [line.label, line.text]))
 /** A bare URL's display title: what it is, not the address, while the link still opens the URL. */
@@ -139,9 +170,9 @@ const rowFits = (labels: readonly string[]): boolean =>
 /** One choice as the card shows it: its button and, when the worker wrote one, what choosing it means. */
 export interface CardChoice { button: Record<string, unknown>; description?: string }
 /**
- * The choices of a card. Short labels share one row, split in halves or thirds as before. Anything longer, four choices,
- * or choices with descriptions get one full-width button per line, each description in small text right under its button,
- * so a phone never cuts a label into an ellipsis and a consequence is read beside the button it belongs to.
+ * The choices of a card. Short labels share one row, split in halves or thirds. Anything longer, four choices, or choices
+ * with descriptions get one full-width button per line, each description in small text right under its button, so a phone
+ * never cuts a label into an ellipsis and a consequence is read beside the button it belongs to.
  */
 const choiceRows = (choices: readonly CardChoice[], labels: readonly string[]): Record<string, unknown>[] => {
   if (rowFits(labels) && !choices.some(choice => choice.description)) {
@@ -170,7 +201,8 @@ const bodyMarkdown = (text: string): Record<string, unknown> => {
 const foldPanel = (sections: readonly QuestionSection[], title: string): Record<string, unknown> => ({
   tag: 'collapsible_panel', expanded: false,
   header: {
-    title: plain(`${title} · ${sections.map(section => section.label).join(' / ')}`),
+    // One section is named; several are counted, so the header stays one short line on a phone (the labels are inside).
+    title: plain(sections.length === 1 ? `${title} · ${sections[0]?.label ?? ''}` : `${title} · ${sections.length} 项`),
     icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' },
     icon_position: 'right', icon_expanded_angle: -180,
   },
@@ -187,20 +219,24 @@ const PLAN_LAYOUTS: Readonly<Record<PlanTemplate, { front: readonly string[]; fo
   design: { front: ['问题', '推荐'], fold: ['选项', '证据'] },
 }
 const evidencePanel = (sections: readonly { label: string; text: string }[]): Record<string, unknown> => foldPanel(sections, '证据')
-/**
- * How much of the ticket title a plan card's subtitle keeps: with ` · 工单 xxxxxxxx` after it, this still fits one line of
- * a 375px phone, so the subtitle no longer wraps and pushes the buttons down. The body names the question in full.
- */
-const SUBTITLE_TITLE = 14
 /** The deadline as month, day and minute in China time, which is all a person needs to know when the gate stops. */
 const deadlineText = (deadline: string): string => new Date(deadline).toLocaleString('zh-CN', {
   timeZone: 'Asia/Shanghai', hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+/** What a plan card's header calls the plan, by template: a fix plan, an analysis, a design choice. */
+const PLAN_KIND: Readonly<Record<PlanTemplate, string>> = { fix: '方案', analysis: '分析', design: '取舍' }
+/** A row of equal buttons for a card's own controls (priority levels, 返回方案), where no label is long. */
+const buttonRow = (buttons: readonly Record<string, unknown>[]): Record<string, unknown> => ({
+  tag: 'column_set', flex_mode: buttons.length <= 2 ? 'bisect' : buttons.length === 3 ? 'trisect' : 'flow', horizontal_spacing: '8px',
+  columns: buttons.map(button => ({ tag: 'column', elements: [button] })),
+})
 /**
- * The P1 plan gate card as a decision brief: the worker's question (or the gate's standard one), then the plan's own key
- * lines for its template in full (the fix template leads with 现象/修复锚点/影响面/预算, an analysis with 问题/结论/建议, a design
- * with 问题/推荐), the rest folded behind one tap, what approving does, the deadline, the choices in full and the worker's 2–4
- * buttons (the standard three when it wrote none). The text fallback carries the key lines and the labels in full, since only
- * a person who cannot see the card reads it.
+ * The P1 plan gate card as a decision brief. The header says only the state and the kind (`待确认 · 方案`) and which ticket;
+ * the body leads with the one question the person answers, then the plan's key lines for its template in full (the fix
+ * template leads with 现象/修复锚点/影响面/预算, an analysis with 问题/结论/建议, a design with 问题/推荐), the rest folded
+ * behind one tap, what each choice means when the worker described them, and the 2–4 buttons (the standard three when it
+ * wrote none). One grey footer closes the card: what approving does, the deadline and the link to the ticket. The chat list
+ * previews the card by its question. The text fallback carries the key lines and the labels in full, since only a person
+ * who cannot see the card reads it.
  */
 export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 'text' | 'template' | 'question' | 'options' | 'deadline' | 'sections'>,
   ticketLink?: string): CardMessage {
@@ -213,127 +249,98 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
   const custom = plan.sections?.length ? plan.sections : undefined
   const body = custom?.filter(section => !section.fold) ?? []
   const folded = custom?.filter(section => section.fold) ?? []
-  const card = {
-    schema: '2.0',
-    config: { update_multi: true, width_mode: 'default' },
-    header: {
-      title: plain(`待确认 · ${clip(question, 40)}`),
-      subtitle: plain(`${clip(ticket.title, SUBTITLE_TITLE)} · 工单 ${shortId(ticket)}`),
-      template: 'blue',
-    },
-    body: {
-      direction: 'vertical', padding: '16px 16px 20px 16px', vertical_spacing: '12px',
-      elements: [
-        markdown(`**${question}**`),
-        ...body.length ? body.map(section => block(section.label, section.text))
-          : custom ? [] : layout.front.map(label => block(label, get(label), ['影响面', '预算'].includes(label) ? { text_size: 'notation' } : {})),
-        ...folded.length ? [foldPanel(folded, '补充')] : custom ? [] : [evidencePanel(layout.fold.map(label => ({ label, text: get(label) || '—' })))],
-        { tag: 'hr', margin: '4px 0px 0px 0px' },
-        markdown([
-          '**通过后** worker 开始实现并按验证方案自测，交你确认后才交付，不会直接 submit',
-          ...plan.deadline ? [`⏳ ${deadlineText(plan.deadline)} 前不答会自动停`] : [],
-        ].join('\n'), { text_size: 'notation' }),
-        ...choiceRows(choices.map((choice, index) => ({
-          button: decisionButton(choice.label, buttonType(choice.decision), choice.decision, index),
-          ...choice.description ? { description: choice.description } : {},
-        })), choices.map(choice => choice.label)),
-        ...ticketLink ? [ticketLinkLine(ticket.id, ticketLink)] : [],
-      ],
-    },
-  }
+  const card = shell({
+    title: `待确认 · ${PLAN_KIND[template]}`, subtitle: ticketSubtitle(ticket, !!ticketLink), template: 'blue', summary: `待确认：${question}`,
+    elements: [
+      markdown(`**${question}**`, { text_size: 'heading' }),
+      ...body.length ? body.map(section => block(section.label, section.text))
+        : custom ? [] : layout.front.map(label => block(label, get(label), ['影响面', '预算'].includes(label) ? { text_size: 'notation' } : {})),
+      ...folded.length ? [foldPanel(folded, '补充')] : custom ? [] : [evidencePanel(layout.fold.map(label => ({ label, text: get(label) || '—' })))],
+      { tag: 'hr', margin: '0px 0px 0px 0px' },
+      ...choiceRows(choices.map((choice, index) => ({
+        button: decisionButton(choice.label, buttonType(choice.decision), choice.decision, index),
+        ...choice.description ? { description: choice.description } : {},
+      })), choices.map(choice => choice.label)),
+      footer(['通过后开始实现，交付前再请你确认，不会直接 submit', ...plan.deadline ? [`⏳ ${deadlineText(plan.deadline)} 前不答会自动停`] : []],
+        ticket.id, ticketLink)!,
+    ],
+  })
   const context = custom ?? layout.front.map(label => ({ label, text: get(label) || '—' }))
-  const text = textSafe([`待确认 · 方案已出：${ticket.title}（工单 ${shortId(ticket)}）`,
+  const text = textSafe([`待确认 · ${PLAN_KIND[template]}：${ticket.title}（工单 ${shortId(ticket)}）`,
     `要你定：${question}`,
     ...context.map(section => blockText(section.label, section.text)),
-    '通过后：开始实现，按验证方案验证，再交给你确认交付；不会直接 submit。',
+    '通过后：开始实现，交付前再请你确认；不会直接 submit。',
     `选项：${choices.map(choice => choice.description ? `${choice.label}（${choice.description}）` : choice.label).join(' ｜ ')}`,
-    custom ? '卡片按这次对话的语境用了自定义分块。' : `证据（${layout.fold.join('/')}）在卡片折叠与工单面板里。`, PLAN_REPLY_HINT].join('\n'))
+    custom ? '' : `证据（${layout.fold.join('/')}）在卡片折叠与工单面板里。`, PLAN_REPLY_HINT].filter(Boolean).join('\n'))
     + (ticketLink ? `\n${ticketLinkText(ticket.id, ticketLink)}` : '')
   return { card, text }
 }
 /**
- * The 改一下 input as a chat box: it opens three lines tall, grows with the text up to eight (Feishu grows it on desktop and
- * keeps the three lines on a phone), and a return is a new line that the submit carries as `\n`.
- */
-const REVISE_ROWS = 3
-const REVISE_MAX_ROWS = 8
-/**
  * The card a click on 改一下 turns into: it keeps the original question and the whole plan one tap away, so switching views
  * no longer hides what is being revised, and it offers a way back to the plan card. The form itself cannot upload files, so
- * the hint sends a person with a screenshot to reply to the card instead of losing the evidence.
+ * the footer sends a person with a screenshot to reply to the card instead of losing the evidence.
  */
 export function reviseCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 'text' | 'template' | 'question'>): CardMessage {
   const question = plan.question?.trim() || PLAN_CARD_QUESTION
-  const card = {
-    schema: '2.0',
-    config: { update_multi: true, width_mode: 'default' },
-    header: { title: plain('改一下 · 说清哪里不对'), subtitle: plain(`${clip(ticket.title, 40)} · 工单 ${shortId(ticket)}`), template: 'orange' },
-    body: {
-      direction: 'vertical', padding: '12px 12px 20px 12px', vertical_spacing: '10px',
-      elements: [
-        markdown(`**原问题**\n${question}`, { text_size: 'notation' }),
-        {
-          tag: 'collapsible_panel', expanded: false,
-          header: {
-            title: plain('原方案 · 点开对照'),
-            icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' },
-            icon_position: 'right', icon_expanded_angle: -180,
-          },
-          border: { color: 'grey', corner_radius: '5px' },
-          vertical_spacing: '8px', padding: '8px 8px 8px 8px',
-          elements: planLines(plan.text, planTemplate(plan)).map(line => block(line.label, line.text)),
+  const card = shell({
+    title: '改一下 · 写一句新方向', subtitle: ticketSubtitle(ticket, false), template: 'orange', summary: `改一下：${question}`,
+    elements: [
+      markdown(`**原问题**\n${question}`, { text_size: 'notation' }),
+      {
+        tag: 'collapsible_panel', expanded: false,
+        header: {
+          title: plain('原方案 · 点开对照'),
+          icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' },
+          icon_position: 'right', icon_expanded_angle: -180,
         },
-        markdown('**要改什么？** 像在对话框里一样写就行，回车换行；提交后回到方案阶段，worker 按它重新给方案。'),
-        {
-          tag: 'form', name: 'plan_revise',
-          elements: [
-            { tag: 'input', name: 'note', input_type: 'multiline_text', rows: REVISE_ROWS, auto_resize: true, max_rows: REVISE_MAX_ROWS,
-              width: 'fill', required: true, max_length: 1000, placeholder: plain('写新方向，可以分几行写') },
-            { tag: 'button', name: 'submit_revise', form_action_type: 'submit', type: 'primary_filled',
-              text: plain('提交新方向') },
-          ],
-        },
-        markdown('要贴图，直接回复这张卡（表单里只能填文字）。', { text_size: 'notation' }),
-        {
-          tag: 'column_set', flex_mode: 'bisect',
-          columns: [{ tag: 'column', elements: [{ tag: 'button', width: 'fill', text: plain('返回方案'), type: 'default',
-            behaviors: [{ type: 'callback', value: { v: 1, back: true } }] }] }],
-        },
-      ],
-    },
-  }
+        border: { color: 'grey', corner_radius: '5px' },
+        vertical_spacing: '8px', padding: '8px 8px 8px 8px',
+        elements: planLines(plan.text, planTemplate(plan)).map(line => block(line.label, line.text)),
+      },
+      {
+        tag: 'form', name: 'plan_revise', vertical_spacing: '8px',
+        elements: [
+          // A chat box: three lines tall, growing to eight on desktop (a phone keeps three and scrolls); a return is a new line.
+          { tag: 'input', name: 'note', input_type: 'multiline_text', rows: REVISE_ROWS, auto_resize: true, max_rows: REVISE_MAX_ROWS,
+            width: 'fill', required: true, max_length: 1000, placeholder: plain('写新方向，可以分几行写') },
+          { tag: 'button', name: 'submit_revise', form_action_type: 'submit', type: 'primary_filled', width: 'fill',
+            text: plain('提交新方向') },
+        ],
+      },
+      buttonRow([{ tag: 'button', width: 'fill', text: plain('返回方案'), type: 'default',
+        behaviors: [{ type: 'callback', value: { v: 1, back: true } }] }]),
+      footer(['提交后 worker 按新方向重出方案；要贴图，直接回复这张卡'])!,
+    ],
+  })
   return { card, text: textSafe(`改一下 · ${ticket.title}：回复 2 并附一句新方向；原方案见上一条方案卡。`) }
 }
-/** The card that replaces the question once a person answered, so the chat record says what was decided. */
-export function resolvedCard(ticket: Pick<Ticket, 'id' | 'title'>, decision: PlanDecision, note = '', option = ''): CardMessage {
-  const chosen = option ? `（你选的是「${option}」）` : ''
-  const lines = noteLines(note)
-  const outcome = decision === 'approve' ? { title: '已通过 · 开始实现', template: 'green', body: `方案已通过，worker 进入实现阶段。${chosen}` }
-    : decision === 'revise' ? { title: '已换方向 · 等新方案', template: 'orange',
-        body: lines.length > 1 ? `已把新方向交给 worker${chosen}：` : `已把新方向交给 worker：${lines[0] ?? '（没有附说明）'}${chosen}` }
-      : { title: '已停止', template: 'red', body: `这个工单停在方案门，不再继续。${chosen}` }
-  // A direction written over several lines keeps them: it is shown as its own block, one line per line the person wrote.
-  const direction = decision === 'revise' && lines.length > 1 ? lines : []
-  const card = {
-    schema: '2.0',
-    config: { update_multi: true },
-    header: { title: plain(outcome.title), subtitle: plain(`${ticket.title} · 工单 ${shortId(ticket)}`), template: outcome.template },
-    body: { direction: 'vertical', padding: '12px 12px 20px 12px',
-      elements: [markdown(outcome.body),
-        ...direction.length ? [{ tag: 'column_set', flex_mode: 'none', background_style: 'grey-50', margin: '0px 0px 0px 0px',
-          columns: [{ tag: 'column', width: 'weighted', weight: 1, padding: '8px 12px 8px 12px',
-            elements: [{ tag: 'markdown', content: textSafe(direction.join('\n')) }] }] }] : [],
-        markdown('决定已记录，可在工单面板查看完整方案与执行过程。', { text_size: 'notation' })] },
-  }
-  const said = direction.length ? `${outcome.body}\n${direction.join('\n')}` : outcome.body
-  return { card, text: textSafe(`${outcome.title}：${ticket.title}。${said}`) }
-}
+/** The 改一下 input's starting height and the height it grows to, in lines. */
+const REVISE_ROWS = 3
+const REVISE_MAX_ROWS = 8
 /** A person's note as the lines they wrote: Windows and old Mac returns read as one, and blank lines at either end go. */
 const noteLines = (note: string): string[] => {
   const lines = note.replace(/\r\n?/g, '\n').split('\n').map(line => line.trimEnd())
   while (lines.length && !lines[0]) lines.shift()
   while (lines.length && !lines[lines.length - 1]) lines.pop()
   return lines
+}
+/** The card that replaces the question once a person answered, so the chat record says what was decided. */
+export function resolvedCard(ticket: Pick<Ticket, 'id' | 'title'>, decision: PlanDecision, note = '', option = ''): CardMessage {
+  const chosen = option ? `你选的是「${option}」。` : ''
+  const lines = noteLines(note)
+  // A direction written over several lines keeps them: it is shown as its own grey block, one line per line the person wrote.
+  const direction = decision === 'revise' && lines.length > 1 ? lines : []
+  const outcome = decision === 'approve' ? { title: '已通过 · 开始实现', template: 'green', body: `${chosen}worker 进入实现阶段，交付前会再请你确认。` }
+    : decision === 'revise' ? { title: '已换方向 · 等新方案', template: 'orange',
+        body: direction.length ? `${chosen}新方向：` : `${chosen}新方向：${lines[0] ?? '（没有附说明）'}` }
+      : { title: '已停止', template: 'red', body: `${chosen}这个工单停在方案门，不再继续。` }
+  const card = shell({ title: outcome.title, subtitle: ticketSubtitle(ticket, false), template: outcome.template,
+    summary: `${outcome.title}：${ticket.title}`, elements: [markdown(outcome.body),
+      ...direction.length ? [{ tag: 'column_set', flex_mode: 'none', background_style: 'grey-50', margin: '0px 0px 0px 0px',
+        columns: [{ tag: 'column', width: 'weighted', weight: 1, padding: '8px 12px 8px 12px',
+          elements: [{ tag: 'markdown', content: textSafe(direction.join('\n')) }] }] }] : []] })
+  const said = direction.length ? `${outcome.body}\n${direction.join('\n')}` : outcome.body
+  return { card, text: textSafe(`${outcome.title}：${ticket.title}。${said}`) }
 }
 /**
  * What a TAPD priority card says about the bug, taken from its origin Trigger; every field is optional because a card is
@@ -351,33 +358,20 @@ export const priorityLabel = (level: PriorityLevel): string => `${PRIORITY_LABEL
  */
 export function priorityCard(ticket: Pick<Ticket, 'id' | 'title'>, ask: Pick<PriorityAsk, 'deadline'>, facts: PriorityFacts = {},
   ticketLink?: string): CardMessage {
-  const suggested = facts.suggestion ? `**建议** ${priorityLabel(facts.suggestion)}${facts.reason ? `：${facts.reason}` : ''}` : ''
+  const suggested = facts.suggestion ? `**建议 ${priorityLabel(facts.suggestion)}**${facts.reason ? `：${facts.reason}` : ''}` : ''
   const source = [facts.shortId ? `TAPD ${facts.shortId}` : '', facts.status ? `状态 ${facts.status}` : '',
     facts.tapdPriority ? `TAPD 优先级 ${facts.tapdPriority}` : ''].filter(Boolean).join(' · ')
-  const card = {
-    schema: '2.0',
-    config: { update_multi: true, width_mode: 'default' },
-    header: { title: plain('待确认 · 这张单的优先级'), subtitle: plain(`${clip(ticket.title, 24)} · 工单 ${shortId(ticket)}`), template: 'orange' },
-    body: {
-      direction: 'vertical', padding: '16px 16px 20px 16px', vertical_spacing: '12px',
-      elements: [
-        ...source ? [markdown(`**${source}**`, { text_size: 'notation' })] : [],
-        ...suggested ? [markdown(suggested)] : [],
-        markdown('**优先级**'),
-        {
-          tag: 'column_set', flex_mode: 'flow', horizontal_spacing: '8px',
-          columns: PRIORITY_LEVELS.map(level => ({ tag: 'column', elements: [{
-            tag: 'button', text: plain(priorityLabel(level)), type: priorityButtonType(level), width: 'fill',
-            behaviors: [{ type: 'callback', value: { v: 1, priority: level } }],
-          }] })),
-        },
-        { tag: 'hr', margin: '4px 0px 0px 0px' },
-        markdown(`⏳ ${deadlineText(ask.deadline)} 前不回复默认 **P2**，进闲时池等系统有空时处理；之后也能随时改。直接回 \`p0\` / \`p1\` / \`p2\` / \`p3\` 也一样。`,
-          { text_size: 'notation' }),
-        ...ticketLink ? [ticketLinkLine(ticket.id, ticketLink)] : [],
-      ],
-    },
-  }
+  const card = shell({
+    title: '待确认 · 优先级', subtitle: ticketSubtitle(ticket, !!ticketLink), template: 'orange', summary: `定优先级：${ticket.title}`,
+    elements: [
+      ...source || suggested ? [markdown([source, suggested].filter(Boolean).join('\n'))] : [],
+      buttonRow(PRIORITY_LEVELS.map(level => ({
+        tag: 'button', text: plain(priorityLabel(level)), type: priorityButtonType(level), width: 'fill',
+        behaviors: [{ type: 'callback', value: { v: 1, priority: level } }],
+      }))),
+      footer([`⏳ ${deadlineText(ask.deadline)} 前不选默认 P2（闲时处理），之后随时能改`, '直接回 p0–p3 也行'], ticket.id, ticketLink)!,
+    ],
+  })
   const text = textSafe([`待确认 · 这张单的优先级：${ticket.title}（工单 ${shortId(ticket)}）`,
     ...source ? [source] : [], ...suggested ? [suggested.replace(/\*\*/g, '')] : [],
     `选项：${PRIORITY_LEVELS.map(priorityLabel).join(' ｜ ')}`,
@@ -388,25 +382,17 @@ export function priorityCard(ticket: Pick<Ticket, 'id' | 'title'>, ask: Pick<Pri
 /** The card that replaces a priority question once it is answered, so the chat record says where the ticket now stands. */
 export function priorityResolvedCard(ticket: Pick<Ticket, 'id' | 'title'>, level: PriorityLevel): CardMessage {
   const label = priorityLabel(level)
-  const card = {
-    schema: '2.0',
-    config: { update_multi: true },
-    header: { title: plain(`已记录 · ${label}`), subtitle: plain(`${clip(ticket.title, 24)} · 工单 ${shortId(ticket)}`), template: 'green' },
-    body: { direction: 'vertical', padding: '12px 12px 20px 12px',
-      elements: [markdown(`这张单按 **${label}** 排队：${PRIORITY_LABELS[level].hint}。`), markdown('之后也能随时改。', { text_size: 'notation' })] },
-  }
+  const card = shell({ title: `已记录 · ${label}`, subtitle: ticketSubtitle(ticket, false), template: 'green', summary: `优先级 ${label}：${ticket.title}`,
+    elements: [markdown(`${PRIORITY_LABELS[level].hint}。之后也能随时改。`)] })
   return { card, text: textSafe(`已记录 · ${ticket.title} 的优先级是 ${label}（${PRIORITY_LABELS[level].hint}）。`) }
 }
+/** A grey "already handled" card: one line on why the click changed nothing, and where the current state is. */
+const handledCard = (title: string, subtitle: string, line: string): Record<string, unknown> =>
+  shell({ title, subtitle, template: 'grey', summary: title, elements: [markdown(line, { text_size: 'notation' })] })
 /** The card for a click on a priority question that is already settled: idempotent, and it never changes the ticket. */
 export function priorityStaleCard(ticketId: string): CardMessage {
-  const card = {
-    schema: '2.0',
-    config: { update_multi: true },
-    header: { title: plain('已处理 · 这张卡的优先级已记过'), subtitle: plain(`工单 ${ticketId.slice(0, 8)}`), template: 'grey' },
-    body: { direction: 'vertical', padding: '12px 12px 20px 12px',
-      elements: [markdown('这张单的优先级已经有人答过，或者已经默认过了；在工单面板里能看到当前值。')] },
-  }
-  return { card, text: '已处理 · 这张卡的优先级已记过' }
+  return { card: handledCard('已处理 · 优先级已记过', `工单 ${ticketId.slice(0, 8)}`, '已经有人答过或已按默认处理，当前值在工单面板里。'),
+    text: '已处理 · 这张卡的优先级已记过' }
 }
 /**
  * A worker's question card: the question in full, then one button per choice the worker wrote (2–4), and the note that a
@@ -417,67 +403,43 @@ export function attentionCard(question: string, attentionId: string, options: re
   ticketLink?: string): CardMessage {
   const body = sections?.filter(section => !section.fold) ?? []
   const folded = sections?.filter(section => section.fold) ?? []
-  const card = {
-    schema: '2.0',
-    config: { update_multi: true, width_mode: 'default' },
-    header: {
-      title: plain(`要你选 · ${clip(question, 40)}`),
-      subtitle: plain(ticketId ? `工单 ${ticketId.slice(0, 8)} · 人在等你的答复` : '人在等你的答复'),
-      template: 'orange',
-    },
-    body: {
-      direction: 'vertical', padding: '16px 16px 20px 16px', vertical_spacing: '12px',
-      elements: [
-        markdown(`**${question}**`),
-        ...body.map(section => block(section.label, section.text)),
-        ...folded.length ? [foldPanel(folded, '补充')] : [],
-        ...choiceRows(options.map((option, index) => ({ button: {
-          tag: 'button', text: plain(option), type: 'default', width: 'fill',
-          behaviors: [{ type: 'callback', value: { v: 1, attention: attentionId, choice: index } }],
-        } })), options),
-        markdown('点一个就行；也可以直接在对话里回复。', { text_size: 'notation' }),
-        ...ticketLink && ticketId ? [ticketLinkLine(ticketId, ticketLink)] : [],
-      ],
-    },
-  }
+  const linked = !!ticketLink && !!ticketId
+  const card = shell({
+    title: '要你选', ...ticketId && !linked ? { subtitle: `工单 ${ticketId.slice(0, 8)}` } : {}, template: 'orange', summary: `要你选：${question}`,
+    elements: [
+      markdown(`**${question}**`, { text_size: 'heading' }),
+      ...body.map(section => block(section.label, section.text)),
+      ...folded.length ? [foldPanel(folded, '补充')] : [],
+      ...choiceRows(options.map((option, index) => ({ button: {
+        tag: 'button', text: plain(option), type: 'default', width: 'fill',
+        behaviors: [{ type: 'callback', value: { v: 1, attention: attentionId, choice: index } }],
+      } })), options),
+      footer(['点一个就行，也可以直接回复'], ticketId, linked ? ticketLink : undefined)!,
+    ],
+  })
   const text = textSafe([`要你选：${question}`, ...sections?.map(section => blockText(section.label, section.text)) ?? [],
     `可选项：${options.map((option, index) => `${index + 1}. ${option}`).join(' ｜ ')}`,
-    '点卡片或直接回复都可以。'].join('\n')) + (ticketLink && ticketId ? `\n${ticketLinkText(ticketId, ticketLink)}` : '')
+    '点卡片或直接回复都可以。'].join('\n')) + (linked ? `\n${ticketLinkText(ticketId, ticketLink)}` : '')
   return { card, text }
 }
 /** The card that replaces a question once a person clicked one of its choices. */
 export function attentionResolvedCard(question: string, option: string, ticketId?: string): CardMessage {
-  const card = {
-    schema: '2.0',
-    config: { update_multi: true },
-    header: { title: plain('已收到你的答复 · worker 继续处理'), subtitle: plain(ticketId ? `工单 ${ticketId.slice(0, 8)}` : '问题已记下'), template: 'green' },
-    body: { direction: 'vertical', padding: '12px 12px 20px 12px',
-      elements: [markdown(`你选了：**${option}**`), markdown(question, { text_size: 'notation' }),
-        markdown('worker 会按这个继续。', { text_size: 'notation' })] },
-  }
+  const card = shell({
+    title: '已收到你的答复 · worker 继续处理', ...ticketId ? { subtitle: `工单 ${ticketId.slice(0, 8)}` } : {}, template: 'green',
+    summary: `你选了：${option}`,
+    elements: [markdown(`你选了：**${option}**`), markdown(question, { text_size: 'notation' })],
+  })
   return { card, text: textSafe(`已收到你的答复：${option}（${question}）`) }
 }
 /** The card for a click on a question that no longer waits: idempotent, and it never changes the ticket. */
 export function attentionStaleCard(ticketId?: string): CardMessage {
-  const card = {
-    schema: '2.0',
-    config: { update_multi: true },
-    header: { title: plain('已处理 · 这个问题不用再答'), subtitle: plain(ticketId ? `工单 ${ticketId.slice(0, 8)}` : '问题已关闭'), template: 'grey' },
-    body: { direction: 'vertical', padding: '12px 12px 20px 12px',
-      elements: [markdown('这张卡片的问题已经有人答过，或者已经换了一个问题；在工单面板里能看到最新状态。')] },
-  }
-  return { card, text: '已处理 · 这个问题不用再答' }
+  return { card: handledCard('已处理 · 这个问题不用再答', ticketId ? `工单 ${ticketId.slice(0, 8)}` : '问题已关闭',
+    '已经有人答过，或已换成新问题，最新状态在工单面板里。'), text: '已处理 · 这个问题不用再答' }
 }
-/** The card for a click on a question that no longer waits: idempotent, and it never changes the ticket. */
+/** The card for a click on a plan that no longer waits: idempotent, and it never changes the ticket. */
 export function staleCard(ticket: Pick<Ticket, 'id' | 'title'>): CardMessage {
-  const card = {
-    schema: '2.0',
-    config: { update_multi: true },
-    header: { title: plain('已处理 · 这版方案不再等人'), subtitle: plain(`${ticket.title} · 工单 ${shortId(ticket)}`), template: 'grey' },
-    body: { direction: 'vertical', padding: '12px 12px 20px 12px',
-      elements: [markdown('这版方案已经有人答过，或者已经换了一版；在工单面板里能看到最新状态。')] },
-  }
-  return { card, text: textSafe(`已处理：${ticket.title}（这版方案不再等人）`) }
+  return { card: handledCard('已处理 · 这版方案不再等人', ticketSubtitle(ticket, false), '已经有人答过，或已换成新一版，最新状态在工单面板里。'),
+    text: textSafe(`已处理：${ticket.title}（这版方案不再等人）`) }
 }
 /** Replaces a card in place with the delayed-update token its button callback carries (valid 30 minutes, two uses). */
 export async function updateCard(host: CardHost, token: string, message: CardMessage): Promise<void> {
