@@ -5,7 +5,7 @@ import { canRetry, currentReport, followupOwners, latestReport, liveTicket, ownP
 import { allowedSender, listedBot } from '../../policy.ts'
 import type { ChannelLink, Localized } from '../../sources/kind.ts'
 import type { SourceRegistry } from '../../sources/registry.ts'
-import { feishuClientLink, isMessageLink } from '../../sources/feishu-channel.ts'
+import { feishuClientLink, feishuTopicLink, isMessageLink } from '../../sources/feishu-channel.ts'
 import { workerSessionId } from '../../executor/dsh.ts'
 import type { Store } from '../store.ts'
 import { attribute, markdown, plain, preview, readable } from './text.ts'
@@ -176,12 +176,23 @@ function deliveryOf(ticket: Ticket) {
     ...(execution.review ? { review: execution.review } : {}), ...(execution.verification ? { verification: execution.verification } : {}) } }
 }
 export type TicketSummaryView = ReturnType<typeof ticketSummary>
+/** The Feishu chat and topic a Thread records: a topic link needs both, and an older Thread names the topic only on a Trigger. */
+function feishuTopic(store: Store, thread: Thread): { chatId?: string; threadId?: string } {
+  if (thread.ref.source !== 'feishu') return {}
+  const colon = thread.ref.id.indexOf(':')
+  const chatId = colon > 0 ? thread.ref.id.slice(0, colon) : undefined
+  const known = thread.meta.threadId ?? store.read.firstTrigger(thread.key)?.meta.threadId
+  const threadId = typeof known === 'string' && known ? known : undefined
+  return { chatId, threadId }
+}
 function threadUrl(store: Store, thread: Thread): string | undefined {
   // The opening message's own link wins over the thread's stored one, which an older build refreshed with the chat
   // link. A chat link opens the conversation rather than the message a person asked about.
   const first = store.read.firstTrigger(thread.key)?.url
   const url = isMessageLink(first) ? first : attribute(thread.meta.url) ?? first
-  return url ? feishuClientLink(url) : undefined
+  // A Thread opens at its topic's newest message; only a card's own link keeps the position that lands on it.
+  const opened = thread.ref.source === 'feishu' ? feishuTopicLink({ ...feishuTopic(store, thread), url }) : url
+  return opened ? feishuClientLink(opened) : undefined
 }
 export function threadFacts(store: Store, thread: Thread) {
   const url = threadUrl(store, thread)

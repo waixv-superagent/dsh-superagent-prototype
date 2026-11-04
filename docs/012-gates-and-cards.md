@@ -164,10 +164,11 @@ P1 时工单的工作区还没检出（`ticket.execution.directory` 为空或未
 用 `im +messages-send --msg-type interactive --content <json>`。发送成功后把
 `message_id → { ticketId, planAt, url }` 记进 `KV.feishu.cards`（48 小时后清理）；回调没有工单号时靠它反查。
 `url` 来自紧接着的 `im +messages-mget` 的 `message_app_link`（形如
-`https://applink.feishu.cn/client/thread/open?…&thread_position=…`，`position` 让它直接定位到这张卡）。
-面板里所有飞书入口——「去飞书回答」、工单页和话题页的「打开飞书原文」、话题 chip、过滤记录的来源链接——都优先用
-消息级链接（话题链接，或带 `position` 的会话链接）：卡片用发卡时记下的 `url`，工单和话题先用首个 Trigger 自带的
-AppLink，再问 Feishu 要话题根消息的 `message_app_link`，都拿不到才退回会话链接。链接按飞书的降级协议转成
+`https://applink.feishu.cn/client/thread/open?…&thread_position=…`，`thread_position` 让它直接定位到这张卡）。
+面板里只有卡片入口（「去飞书回答」）留在消息级链接上：卡片用发卡时记下的 `url`，没有卡片时退回来源消息或会话链接，
+点开正好落到要回答的那张卡；工单页和话题页的「打开飞书原文」、话题 chip 则打开话题的**最新消息**：用同一话题链接去掉 `thread_position`
+（会话链接去掉 `position`），只有会话链接时先用 `chatId` 和 `threadId`（话题 id，旧话题从首个 Trigger 的 meta 取）
+补出话题链接，都拿不到才退回会话链接。过滤记录的来源链接仍指向被过滤的那条消息。链接按飞书的降级协议转成
 `feishu://applink/client/…`（Lark 品牌为 `lark://applink/…`）后再放进面板：它直接拉起已安装的客户端，
 不再先打开 `https://applink…` 的落地页，也就不会在浏览器里留下一个要手动关掉的标签页。
 旧版本只存了会话链接的卡片和话题由 `linksLoop` 定期补齐（每轮最多 12 次 `im +messages-mget`，失败的下一轮重试），
