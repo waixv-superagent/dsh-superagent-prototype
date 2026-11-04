@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ago, browserLink, cardExpired, composeCard, idleMood, runOnce, shortTitle, snapshotOf } from '../scripts/feishu-status.mjs'
+import { ago, billingLine, billingOf, browserLink, cardExpired, composeCard, idleMood, runOnce, shortTitle, snapshotOf } from '../scripts/feishu-status.mjs'
 
 const overview = {
   working: [
@@ -240,6 +240,49 @@ describe('cardExpired', () => {
     expect(cardExpired('2026-10-20T02:00:00.000Z', now)).toBe(true)
     expect(cardExpired('2026-10-22T02:00:00.000Z', now)).toBe(false)
     expect(cardExpired(undefined, now)).toBe(true)
+  })
+})
+
+describe('usage line', () => {
+  const buckets = [{ at: 0, cost: 1, requests: 1 }]
+  const view = (billing: unknown) => composeCard(snapshotOf({ ...overview, billing }, runtime), { now: at })
+  const lineOf = (billing: unknown) => {
+    const elements = (view(billing).card.body as { elements: { tag: string; content?: string }[] }).elements
+    // The line sits right under the three counts, before the detail fold.
+    return elements[1]!.tag === 'markdown' ? elements[1]!.content : undefined
+  }
+
+  it('leads with the gateway bill and the quota left, as the board strip does', () => {
+    const billing = { windowMinutes: 60, total: { cost: 5540.78, tokens: 221_969_427, requests: 1078, unpricedTokens: 0 },
+      settled: { source: 'gateway', provider: 'ai-gateway', cost: 12.345, requests: 80, tokens: 1, buckets, complete: true },
+      quota: { source: 'gateway', limit: 500, used: 190, remaining: 310, remainingPercent: 62.4, periodEnd: null, at: 0 } }
+    expect(billingOf(billing)).toEqual({ source: 'gateway', cost: 12.345, partial: false, tokens: 221_969_427, requests: 80,
+      windowMinutes: 60, quotaPercent: 62.4 })
+    expect(lineOf(billing)).toBe('近 1 小时 ¥12.35（网关账单） · 本周余量 62%')
+    expect(lineOf({ ...billing, settled: { ...billing.settled, complete: false } })).toBe('近 1 小时 ¥12.35+（网关账单） · 本周余量 62%')
+    expect(lineOf({ ...billing, quota: { ...billing.quota, remainingPercent: 8 } })).toContain('⚠️ 本周余量 8%')
+  })
+
+  it('falls back to the labelled estimate, then to tokens, when the gateway cannot be read', () => {
+    const estimate = { windowMinutes: 60, total: { cost: 5540.780506, tokens: 221_969_427, requests: 1078, unpricedTokens: 0 } }
+    expect(lineOf(estimate)).toBe('近 1 小时 ¥5540.78（估算） · 1078 次请求')
+    expect(lineOf({ windowMinutes: 60, total: { cost: null, tokens: 1_234_567, requests: 9, unpricedTokens: 1_234_567 } }))
+      .toBe('近 1 小时 1.2M tokens（未计价） · 9 次请求')
+    expect(lineOf({ windowMinutes: 60, total: { cost: 0.004, tokens: 10, requests: 1, unpricedTokens: 0 } }))
+      .toBe('近 1 小时 不足 ¥0.01（估算） · 1 次请求')
+    expect(lineOf({ windowMinutes: 60, total: { cost: 0, tokens: 0, requests: 0, unpricedTokens: 0 } })).toBe('近 1 小时没有请求')
+  })
+
+  it('stays out of the card for an older host and while the service is down', () => {
+    expect(snapshotOf(overview, runtime).billing).toBeNull()
+    expect(lineOf(undefined)).toBeUndefined()
+    const billed = snapshotOf({ ...overview, billing: { windowMinutes: 60, total: { cost: 1, tokens: 1, requests: 1, unpricedTokens: 0 } } }, runtime)
+    const offline = composeCard({ ...billed, online: false, counts: null, executor: null }, { now: at })
+    expect(JSON.stringify(offline.card)).not.toContain('近 1 小时')
+    // An older hand-built snapshot without the field still composes.
+    const { billing: _, ...legacy } = billed
+    expect(() => composeCard(legacy, { now: at })).not.toThrow()
+    expect(billingLine(null)).toBe('')
   })
 })
 

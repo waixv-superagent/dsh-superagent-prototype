@@ -462,7 +462,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/feishu-control.spec.ts` | The Feishu processing controls: which whole messages pause or resume processing, resuming from chat while paused with its answer and no Trigger, replay idempotence, and the refusal of a sender outside the allowed list |
 | `tests/tapd.spec.ts` | The TAPD Source: the credentials it resolves, the `current_owner` read, normalization and paging, one Trigger per bug revision, and the execution variables it declares |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
-| `tests/feishu-status.spec.ts` | The Feishu status card script: the counts it reads, the card's state colors and phrases, the watchdog outage/recovery state, the expandable Ticket detail and the card's dashboard link, and sending, updating, retiring and locking through a fake CLI |
+| `tests/feishu-status.spec.ts` | The Feishu status card script: the counts it reads, the card's state colors and phrases, the watchdog outage/recovery state, the last hour's usage line in the board's billing terms, the expandable Ticket detail and the card's dashboard link, and sending, updating, retiring and locking through a fake CLI |
 | `tests/feishu-read.spec.ts`, `tests/github-read.spec.ts` | Feishu and GitHub reads |
 | `tests/admission-context.spec.ts`, `tests/feishu-image.spec.ts` | The Thread window of assessments, and Feishu image reads |
 | `tests/assessment.spec.ts` | What the MasterAssessor keeps per Eval, and when it lets go |
