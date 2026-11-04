@@ -148,7 +148,10 @@ async function start() {
   for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service)
   const seed = new Store(join(directory, 'orchestrator.sqlite'))
   const github = { enabled: true, config: { repository: 'acme/widgets', cli: AGENT } }
-  seed.saveSettings(SettingsSchema.parse({ ...seed.settings(), sources: { github, feishu: { enabled: true, config: { cli: BOT } } } }))
+  // The idle gate is off here: this suite drives the model-facing surfaces, and a P2 Ticket waiting for an idle window would
+  // leave its worker unstarted. The gate's own behavior is covered by `tests/priority.spec.ts`.
+  const idleOff = { ...seed.settings().executor, idle: { ...seed.settings().executor.idle, enabled: false } }
+  seed.saveSettings(SettingsSchema.parse({ ...seed.settings(), executor: idleOff, sources: { github, feishu: { enabled: true, config: { cli: BOT } } } }))
   seed.close()
   const runtime = new Runtime(ctx, testMachine({ stateDir: directory }), () => {})
   await runtime.ready

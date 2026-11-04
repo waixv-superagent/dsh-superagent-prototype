@@ -10,6 +10,8 @@ export interface PassesHost {
   readonly lifetime: AbortSignal
   configured(): boolean
   closing(): boolean
+  /** Records the current worker load for the idle judgement, on every pass rather than only when a launch asks. */
+  observe?(): void
   /** Repairs provable ticket state inconsistencies after the Engine's due work, throttled by the Executor itself. */
   reproject(): void
 }
@@ -65,6 +67,8 @@ export class Passes {
   private async pumpOnce(): Promise<void> {
     this.host.effects.kick()
     if (this.host.closing()) return
+    // The idle judgement reads a slot's free time, so the load is recorded while it is current, not only when a launch asks.
+    this.host.observe?.()
     // While processing is paused, the Engine only records the pause on active Evals so they do not expire.
     this.host.engine.evaluateDue()
     // Then repair state the Engine's own work left provably inconsistent (I4), which is stateless to the Engine.

@@ -1,34 +1,37 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Ticket } from '../src/core/index.ts'
 import type { SourceContext } from '../src/sources/host.ts'
-import { actionValue, attentionValue, formNote, handleCardAction, type CardAction } from '../src/sources/feishu-cards.ts'
+import { actionValue, attentionValue, formNote, handleCardAction, priorityValue, type CardAction } from '../src/sources/feishu-cards.ts'
 
 const PLAN_AT = '2026-09-23T00:00:00Z'
 const ticket = (overrides: Partial<Ticket> = {}) => ({ id: 't1', title: 'Fix', mandate: { actor: { source: 'feishu', id: 'ou_1' } },
   plan: { text: '现象：x', at: PLAN_AT, waiting: true }, ...overrides }) as unknown as Ticket
-type CardRef = { ticketId: string; planAt?: string; attentionId?: string; at?: string }
+type CardRef = { ticketId: string; planAt?: string; attentionId?: string; at?: string; askAt?: string }
 const ASKED = { id: 'att-1', question: '先上 A 还是先上 B？', options: ['先上 A', '先上 B'] }
 
 function harness(plan: Ticket = ticket()) {
   const cards: Record<string, CardRef> = { om_1: { ticketId: 't1', planAt: PLAN_AT } }
   const asked: Record<string, CardRef> = { om_2: { ticketId: 't1', attentionId: 'att-1', at: PLAN_AT } }
+  const priority: Record<string, CardRef> = { om_3: { ticketId: 't1', askAt: PLAN_AT } }
   const decidePlan = vi.fn()
   const answerAttention = vi.fn(() => plan)
+  const decidePriority = vi.fn(() => plan)
+  const mayDecidePriority = vi.fn((_id: string, actor: string) => actor === 'ou_1')
   const lark = vi.fn(async (_args: string[]) => '{}')
-  const families: Record<string, unknown> = { 'feishu-plan-cards': cards, 'feishu-attention-cards': asked }
+  const families: Record<string, unknown> = { 'feishu-plan-cards': cards, 'feishu-attention-cards': asked, 'feishu-priority-cards': priority }
   const ctx = {
     state: {
       get: (key: string) => families[key],
       set: (key: string, value: unknown) => {
-        const target = key === 'feishu-plan-cards' ? cards : key === 'feishu-attention-cards' ? asked : undefined
+        const target = key === 'feishu-plan-cards' ? cards : key === 'feishu-attention-cards' ? asked : key === 'feishu-priority-cards' ? priority : undefined
         if (!target) return
         for (const id of Object.keys(target)) delete target[id]
         Object.assign(target, value)
       },
     },
-    tickets: { get: (id: string) => id === 't1' ? plan : undefined }, decidePlan, answerAttention, commands: { lark },
+    tickets: { get: (id: string) => id === 't1' ? plan : undefined }, decidePlan, answerAttention, decidePriority, mayDecidePriority, commands: { lark },
   } as unknown as SourceContext
-  return { ctx, cards, asked, decidePlan, answerAttention, lark }
+  return { ctx, cards, asked, priority, decidePlan, answerAttention, decidePriority, mayDecidePriority, lark }
 }
 const action = (overrides: Partial<CardAction> = {}): CardAction => ({ event_id: 'e1', operator_id: 'ou_1', message_id: 'om_1',
   token: 'tok', action_tag: 'button', action_value: JSON.stringify({ v: 1, decision: 'approve' }), ...overrides })
@@ -47,6 +50,9 @@ describe('reading a card action', () => {
     expect(attentionValue('{"decision":"approve"}')).toBeUndefined()
     expect(attentionValue('{"attention":"att-1"}')).toBeUndefined()
     expect(attentionValue('{"attention":"att-1","choice":-1}')).toBeUndefined()
+    expect(priorityValue('{"priority":"P2"}')).toEqual({ level: 'P2' })
+    expect(priorityValue('{"priority":"p2"}')).toBeUndefined()
+    expect(priorityValue('{"priority":"P9"}')).toBeUndefined()
     expect(formNote('{"note":" 走 C "}')).toBe('走 C')
     expect(formNote('')).toBe('')
   })
@@ -112,6 +118,28 @@ describe('handling a card action', () => {
     await handleCardAction(ctx, action({ operator_id: 'ou_2' }))
     expect(decidePlan).not.toHaveBeenCalled()
     expect(lark).not.toHaveBeenCalled()
+  })
+})
+
+describe('handling a priority card action', () => {
+  const priorityAction = (overrides: Partial<CardAction> = {}): CardAction => action({ message_id: 'om_3',
+    action_value: JSON.stringify({ v: 1, priority: 'P2' }), ...overrides })
+  it('records the clicked level as the person\'s, replaces the card and drops the mapping', async () => {
+    const { ctx, priority, decidePriority, mayDecidePriority, lark } = harness()
+    await handleCardAction(ctx, priorityAction())
+    expect(mayDecidePriority).toHaveBeenCalledWith('t1', 'ou_1')
+    expect(decidePriority).toHaveBeenCalledWith('t1', 'P2', 'ou_1', 'feishu')
+    expect(priority.om_3).toBeUndefined()
+    const data = JSON.parse((lark.mock.calls[0]![0] as string[])[(lark.mock.calls[0]![0] as string[]).indexOf('--data') + 1]!)
+    expect(JSON.stringify(data.card)).toContain('已记录')
+  })
+  it('ignores a click from someone the Policy does not let decide, and an unknown level changes nothing', async () => {
+    const { ctx, decidePriority, lark } = harness()
+    await handleCardAction(ctx, priorityAction({ operator_id: 'ou_2' }))
+    expect(decidePriority).not.toHaveBeenCalled()
+    expect(lark).not.toHaveBeenCalled()
+    await handleCardAction(ctx, priorityAction({ action_value: JSON.stringify({ v: 1, priority: 'P9' }) }))
+    expect(decidePriority).not.toHaveBeenCalled()
   })
 })
 

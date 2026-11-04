@@ -261,7 +261,10 @@ export async function startRuntime(seed?: (store: Store) => void, options: { mis
   for (const cli of [AGENT, BOT]) writeFileSync(cli, '#!/bin/sh\n', { mode: 0o755 })
   const seeded = new Store(join(directory, 'orchestrator.sqlite'))
   const sources = { github: { enabled: true, config: { repository: 'acme/widgets', cli: AGENT } }, feishu: { enabled: true, config: { cli: BOT } } }
-  seeded.saveSettings(SettingsSchema.parse({ ...seeded.settings(), sources }))
+  // These tests exercise every other flow, so the idle gate is off here: otherwise a proactive (P2) Ticket would wait for
+  // an idle window and its worker would never start. `tests/priority.spec.ts` turns the gate back on for its own cases.
+  const idleOff = { ...seeded.settings().executor, idle: { ...seeded.settings().executor.idle, enabled: false } }
+  seeded.saveSettings(SettingsSchema.parse({ ...seeded.settings(), executor: idleOff, sources }))
   seed?.(seeded)
   seeded.close()
   const runtime = new Runtime(ctx, testMachine({ stateDir: directory }), vi.fn())

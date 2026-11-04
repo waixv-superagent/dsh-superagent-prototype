@@ -1,5 +1,5 @@
 /** Host and context interfaces connecting Source plugins to the application; also imported by the web panel, so it must not import Node-only modules. */
-import type { ChannelRef, PlanDecision, PlanVia, ReceiveResult, OutboundMessage, Thread, ThreadFact, ThreadRef, Ticket, Trigger,
+import type { ChannelRef, PlanDecision, PlanVia, PriorityLevel, PriorityVia, ReceiveResult, OutboundMessage, Thread, ThreadFact, ThreadRef, Ticket, Trigger,
   TriggerDisposition } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
 import type { Deployment } from '../deployment.ts'
@@ -94,6 +94,17 @@ export interface SourceContext {
    * @throws UserError when the ticket is unknown or ended, the question is gone, or the option is not offered.
    */
   answerAttention(ticketId: string, attentionId: string, option: string): Ticket
+  /**
+   * A person's click on a TAPD ticket's priority card: the level is recorded as theirs, which no assessment or default
+   * overwrites, without a Trigger, Decision or Eval. `by` is the Source identity of the person who clicked.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  decidePriority(ticketId: string, level: PriorityLevel, by: string, via?: PriorityVia): Ticket
+  /**
+   * Whether a person may decide a ticket's priority through this Source's UI: a ticket this Source started is decided by its
+   * own actor, and a ticket another Source started (TAPD has no UI of its own) by a person the Policy allows on this Source.
+   */
+  mayDecidePriority(ticketId: string, actor: string): boolean
   /** Reports the state of one of this kind's declared health entries; throws for undeclared entry names. */
   report(entry: string, health: Health): void
 }

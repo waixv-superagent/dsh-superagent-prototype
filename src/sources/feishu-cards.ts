@@ -1,12 +1,14 @@
 /**
- * `card.action.trigger` handling: a person's click on a plan card decides the ticket directly, with no Trigger, Eval, or
- * chat round-trip. The card's message id maps to the ticket and plan it asked about, and the callback's delayed-update
- * token replaces the card with the recorded answer.
+ * `card.action.trigger` handling: a person's click on a plan card decides the ticket directly, a click on a TAPD ticket's
+ * priority card records its level, and a click on a question card answers the worker — all with no Trigger, Eval, or chat
+ * round-trip. The card's message id maps to the ticket and the thing it asked, and the callback's delayed-update token
+ * replaces the card with the recorded answer.
  */
 import { z } from 'zod'
-import { pendingPlan, type PlanDecision } from '../core/index.ts'
+import { pendingPlan, PRIORITY_LEVELS, type PlanDecision, type PriorityLevel } from '../core/index.ts'
 import { KV } from '../kv.ts'
-import { attentionResolvedCard, attentionStaleCard, planCard, planChoices, resolvedCard, reviseCard, staleCard, updateCard, type CardMessage } from './feishu-card.ts'
+import { attentionResolvedCard, attentionStaleCard, planCard, planChoices, priorityResolvedCard, priorityStaleCard, resolvedCard, reviseCard, staleCard,
+  updateCard, type CardMessage } from './feishu-card.ts'
 import type { SourceContext } from './host.ts'
 
 /** The fields of a card callback this plugin reads; `card_content` is large and unnecessary because the card is rebuilt. */
@@ -48,6 +50,15 @@ export function attentionValue(value: string | undefined): { attentionId: string
     return { attentionId: parsed.attention, choice: parsed.choice }
   } catch { return undefined }
 }
+/** The button's value on a TAPD priority card: the level the person clicked; an unknown level changes nothing. */
+export function priorityValue(value: string | undefined): { level: PriorityLevel } | undefined {
+  if (!value) return undefined
+  try {
+    const parsed = JSON.parse(value) as { priority?: unknown }
+    const level = PRIORITY_LEVELS.find(item => item === parsed?.priority)
+    return level ? { level } : undefined
+  } catch { return undefined }
+}
 /** The text a form submit carries under its `note` field. */
 export function formNote(value: string | undefined): string {
   if (!value) return ''
@@ -65,6 +76,8 @@ export function formNote(value: string | undefined): string {
 export async function handleCardAction(ctx: SourceContext, action: CardAction): Promise<void> {
   const asked = attentionValue(action.action_value)
   if (asked) { await handleAttentionAction(ctx, action, asked); return }
+  const priority = priorityValue(action.action_value)
+  if (priority) { await handlePriorityAction(ctx, action, priority.level); return }
   const ref = (ctx.state.get(KV.feishu.cards) ?? {})[action.message_id]
   if (!ref) return
   const ticket = ctx.tickets.get(ref.ticketId)
@@ -97,6 +110,34 @@ export async function handleCardAction(ctx: SourceContext, action: CardAction): 
   try { ctx.decidePlan(ticket.id, decision, note, 'feishu', option) } catch { forget(); await replace(staleCard(ticket)); return }
   forget()
   await replace(resolvedCard(ticket, decision, note, option))
+}
+/**
+ * Applies a click on a TAPD ticket's priority card: the level is recorded as the person's, which settles the question and
+ * releases the ticket from the idle pool when it is `P0`/`P1`; the card is replaced with the recorded answer. A card whose
+ * question was already settled answers with the "already handled" card and changes nothing. Only the ticket's actor may click.
+ */
+async function handlePriorityAction(ctx: SourceContext, action: CardAction, level: PriorityLevel): Promise<void> {
+  const cards = ctx.state.get(KV.feishu.priorityCards) ?? {}
+  const ref = cards[action.message_id]
+  if (!ref) return
+  const ticket = ctx.tickets.get(ref.ticketId)
+  if (!ticket) return
+  // A TAPD ticket's actor is a TAPD nickname, so its card may also be clicked by a person the Policy allows on Feishu.
+  if (!ctx.mayDecidePriority(ticket.id, action.operator_id)) return
+  const replace = async (message: CardMessage): Promise<void> => {
+    if (!action.token) return
+    try { await updateCard({ commands: ctx.commands }, action.token, message) } catch { /* the card stays as it was */ }
+  }
+  const forget = (): void => {
+    const next = { ...cards }
+    delete next[action.message_id]
+    ctx.state.set(KV.feishu.priorityCards, next)
+  }
+  // A person may click another level after answering in chat, so an answered question is not stale: the new level simply
+  // replaces the old one. Only a ticket that ended, or another person, makes the click meaningless.
+  try { ctx.decidePriority(ticket.id, level, action.operator_id, 'feishu') } catch { forget(); await replace(priorityStaleCard(ticket.id)); return }
+  forget()
+  await replace(priorityResolvedCard(ticket, level))
 }
 /**
  * Applies a click on a worker's question card: the choice becomes the person's answer to the worker, and the mapping goes.

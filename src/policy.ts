@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { ADMISSION_DEFAULTS, type Admission, type AdmissionCell, type AdmissionRow } from './admission.ts'
 import { key, type AssessmentOutcome, type Escalation, type Mandate, type Policy, type PolicyEffect, type SourceScope, type Strength, type Thread, type Ticket,
   type Trigger, type ActorRef, type GateResult } from './core/index.ts'
+import { IDLE_DEFAULTS } from './core/idle.ts'
 import { sameName } from './infra/text.ts'
 import { WORKER_COMMANDS } from './infra/environment.ts'
 import { WorkspaceSchema } from './executor/workspace.ts'
@@ -154,6 +155,25 @@ export const P4ConfigSchema = z.object({
   /** Minutes without a new review version or check result before the follow-up reports the pipeline stuck. */
   stuckMinutes: z.number().int().min(5).max(240).default(45),
 }).strict()
+/**
+ * Idle time and priority questions: the windows in which `P2`/`P3` work may start, how long a worker slot must stay free,
+ * how quiet a person must be, the idle pool's daily and concurrent budget, and how long a TAPD priority question waits.
+ * The judgement itself is `core/idle.ts`; this is only what the deployment may tune.
+ */
+const ClockTimeSchema = z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/, 'A time of day, HH:MM')
+export const IdleConfigSchema = z.object({
+  enabled: z.boolean().default(IDLE_DEFAULTS.enabled),
+  windows: z.array(z.object({ from: ClockTimeSchema, to: ClockTimeSchema, level: z.enum(['L1', 'L2', 'L3']) }).strict())
+    .min(1).max(8).default(() => IDLE_DEFAULTS.windows.map(window => ({ ...window }))),
+  protectedWindows: z.array(z.object({ from: ClockTimeSchema, to: ClockTimeSchema }).strict())
+    .max(8).default(() => IDLE_DEFAULTS.protectedWindows.map(window => ({ ...window }))),
+  slotFreeMin: z.number().int().min(1).max(120).default(IDLE_DEFAULTS.slotFreeMin),
+  humanQuietMin: z.number().int().min(1).max(240).default(IDLE_DEFAULTS.humanQuietMin),
+  dailyItems: z.number().int().min(1).max(100).default(IDLE_DEFAULTS.dailyItems),
+  analysisWorkers: z.number().int().min(1).max(4).default(IDLE_DEFAULTS.analysisWorkers),
+  priorityAskMin: z.number().int().min(5).max(720).default(IDLE_DEFAULTS.priorityAskMin),
+}).strict()
+export type IdleSettings = z.infer<typeof IdleConfigSchema>
 /** Executor settings: worker model, concurrency, ticket directory root (empty defaults to `<stateDir>/work`), `prepare` command, blocked commands, and the delivery backend. */
 export const ExecutorConfigSchema = z.object({
   model: RoleModelSchema.nullable().default(null),
@@ -163,6 +183,8 @@ export const ExecutorConfigSchema = z.object({
   blockedCommands: z.array(CommandNameSchema).default([]),
   /** `git` keeps the GitHub pull-request flow; `p4` shelves a changelist and opens a Swarm review instead. */
   backend: z.enum(['git', 'p4']).default('git'),
+  /** When `P2`/`P3` work may start and how a TAPD priority question expires (see `core/idle.ts`). */
+  idle: IdleConfigSchema.default(() => IdleConfigSchema.parse({})),
   p4: P4ConfigSchema.default(() => P4ConfigSchema.parse({})),
   /** The task center's workspaces: empty means one implicit directory per ticket under `directory` or `<stateDir>/work`. */
   workspaces: z.array(WorkspaceSchema).default([]),

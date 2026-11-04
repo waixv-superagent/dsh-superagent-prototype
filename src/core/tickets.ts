@@ -6,8 +6,11 @@ import type { Assignment, Backend, ChannelRef, Evaluation, Follow, Mandate, Pipe
   TicketInput, TicketOutcome, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
-import { missingPlanLabels, pendingPlan, planOverdue, PLAN_GATE_HOURS, PLAN_QUESTION, planTemplate, ticketPhase, validPlanOptions, validQuestionSections, type PlanDecision,
-  type PlanOption, type PlanTemplate, type PlanVia, type TicketPhase } from './plan.ts'
+import { missingPlanLabels, pendingPlan, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planTemplate, ticketPhase, validPlanOptions, validQuestionSections,
+  type PlanDecision, type PlanOption, type PlanTemplate, type PlanVia, type TicketPhase } from './plan.ts'
+import { defaultPriority, priorityAskDeadline, PRIORITY_ASK_MINUTES, priorityAskOverdue, systemPriority, waitsForIdle, type PriorityLevel,
+  type PriorityVia } from './priority.ts'
+import type { IdleLevel } from './idle.ts'
 import type { Replies } from './replies.ts'
 import { canRetry } from './stage.ts'
 
@@ -44,8 +47,16 @@ export class Tickets extends EnginePart {
     // Fall back to the last trigger for Evals recorded before `primary` existed.
     const primary = this.repo.triggers.get(evaluation.primary ?? triggerIds.at(-1)!)
     const origin = { triggerId: primary?.id ?? triggerIds[0]!, triggerIds }
+    const fallback = defaultPriority(primary)
     let ticket: Ticket = { id, title: outcome.title, decisionId, mandate, channels: [], assignments: [], inputs: [], undelivered: [],
       createdAt: at, updatedAt: at, origin, ...(outcome.category ? { category: outcome.category } : {}) }
+    // Who set a level, and why, is part of the ticket: a person's explicit words are `human` and sticky, everything else is
+    // a default that an idle window or a later person may change, and only a person may make a ticket `P0`.
+    ticket.priority = { level: fallback.level, source: fallback.source, at, note: fallback.note, ...fallback.source === 'human' && primary ? { by: primary.actor.id } : {} }
+    // A TAPD bug asks its person first; an unanswered question falls back to P2 after the configured delay.
+    if (fallback.ask) ticket.priorityAsk = { state: 'pending', at, deadline: priorityAskDeadline(at, this.askMinutes()) }
+    // P2/P3 work waits for an idle window instead of competing with the mainline: record when it entered the pool.
+    if (waitsForIdle(fallback.level)) ticket.idle = { enteredAt: at }
     for (const triggerId of triggerIds) {
       const channel = this.repo.triggers.get(triggerId)?.channel
       if (channel && !ticket.channels.some(item => sameChannel(item, channel))) ticket.channels.push(channel)
@@ -452,7 +463,8 @@ export class Tickets extends EnginePart {
     if (current?.state === 'running') this.endAssignment(ticket, current, 'verificationReturned')
     const assignment = this.newAssignment(ticket)
     const input: TicketInput = { id: key('input', ticket.id, 'verify-rework', at), kind: 'text', at,
-      text: `人做了本地验证，未通过：${note || '（没有附说明）'}\n请按上面的问题修复，然后重新验证、报 ready；不要提交，改动仍属于本单。` }
+      text: `人做了本地验证，未通过：${note || '（没有附说明）'}\n请按上面的问题修复，然后重新验证、报 ready；不要提交，改动仍属于本单。`,
+      person: true }
     ticket.inputs.push(input); ticket.undelivered.push(input.id)
     this.repo.tickets.save(ticket)
     this.options.executor.start(ticket, assignment)
@@ -566,6 +578,66 @@ export class Tickets extends EnginePart {
     this.repo.tickets.save(ticket)
     return ticket
   }
+  /**
+   * Applies the idle default to every open ticket whose priority question nobody answered: the question expires, the level
+   * becomes the `P2` default (a person's level, if they set one meanwhile, stands), and the ticket joins the idle pool. Run
+   * on every pass, since no message arrives for a timeout.
+   * @returns the tickets whose question it expired.
+   */
+  expirePriorityAsks(now = this.now()): string[] {
+    const expired: string[] = []
+    for (const ticket of this.repo.tickets.open()) {
+      const ask = ticket.priorityAsk
+      if (!priorityAskOverdue(ask, now)) continue
+      ticket.priorityAsk = { ...ask!, state: 'expired', settledAt: now }
+      const applied = systemPriority(ticket.priority, { level: 'P2', source: 'default', note: 'ask-timeout' }, now)
+      if (applied) ticket.priority = applied
+      if (waitsForIdle(ticket.priority?.level ?? 'P2') && !ticket.idle) ticket.idle = { enteredAt: now }
+      ticket.updatedAt = now
+      this.repo.tickets.save(ticket)
+      expired.push(ticket.id)
+    }
+    return expired
+  }
+  /**
+   * A person sets a ticket's level, by a card button, a short reply, or the panel: the value becomes `human`, which an
+   * assessment or a later default never overwrites, their answer settles the priority question, and a level that runs with
+   * the mainline releases the ticket from the idle pool. A change never preempts a worker that already runs.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  decidePriority(ticketId: string, level: PriorityLevel, by: string, via: PriorityVia = 'feishu'): Ticket {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    const at = this.now()
+    ticket.priority = { level, source: 'human', at, by, via }
+    if (ticket.priorityAsk && (ticket.priorityAsk.state !== 'answered' || ticket.priorityAsk.by !== by)) {
+      ticket.priorityAsk = { ...ticket.priorityAsk, state: 'answered', settledAt: at, by }
+    }
+    if (waitsForIdle(level)) {
+      if (!ticket.idle) ticket.idle = { enteredAt: at }
+    } else delete ticket.idle
+    ticket.updatedAt = at
+    this.repo.tickets.save(ticket)
+    return ticket
+  }
+  /** Remember the message a TAPD ticket's priority question went out as, so the panel can open that card. */
+  notePriorityCard(ticketId: string, cardId: string): void {
+    const ticket = this.repo.tickets.get(ticketId)
+    if (!ticket?.priorityAsk) return
+    ticket.priorityAsk = { ...ticket.priorityAsk, cardId }
+    this.repo.tickets.save(ticket)
+  }
+  /** Record that a ticket waited in the idle pool and that depth let its work start, which the daily budget counts. */
+  noteIdleLaunch(ticketId: string, level: IdleLevel): void {
+    const ticket = this.repo.tickets.get(ticketId)
+    if (!ticket || !liveTicket(ticket)) return
+    const at = this.now()
+    ticket.idle = { enteredAt: ticket.idle?.enteredAt ?? at, launchedIn: level, launchedAt: at }
+    ticket.updatedAt = at
+    this.repo.tickets.save(ticket)
+  }
+  /** How long a TAPD ticket's priority question waits, from the deployment's `executor.idle.priorityAskMin`. */
+  private askMinutes(): number { return this.options.priorityAskMinutes?.() ?? PRIORITY_ASK_MINUTES }
   /**
    * Ends every open ticket whose waiting plan passed its deadline, with `stopped` and why: a gate nobody answered defaults
    * to stop, never to continue.

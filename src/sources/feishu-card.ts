@@ -1,10 +1,10 @@
 /**
  * Feishu interactive cards: the P1 plan gate's decision brief (with the choices the worker writes), a question card whose
- * buttons answer a worker's `human_action`, the forms for a typed direction, the cards that record an answer, and the text
- * fallback when Feishu refuses a card.
+ * buttons answer a worker's `human_action`, a TAPD ticket's priority question, the forms for a typed direction, the cards
+ * that record an answer, and the text fallback when Feishu refuses a card.
  */
-import { PLAN_CARD_QUESTION, PLAN_REPLY_HINT, PLAN_TEMPLATES, planLines, planTemplate, type Plan, type PlanDecision, type PlanOption, type PlanTemplate,
-  type QuestionSection, type Ticket } from '../core/index.ts'
+import { PLAN_CARD_QUESTION, PLAN_REPLY_HINT, PLAN_TEMPLATES, PRIORITY_LABELS, PRIORITY_LEVELS, planLines, planTemplate, type Plan, type PlanDecision,
+  type PlanOption, type PlanTemplate, type PriorityAsk, type PriorityLevel, type QuestionSection, type Ticket } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
 import { feishuPostContent, jsonForCmd, textSafe } from './feishu-text.ts'
 
@@ -277,6 +277,77 @@ export function resolvedCard(ticket: Pick<Ticket, 'id' | 'title'>, decision: Pla
         { text_size: 'notation' })] },
   }
   return { card, text: textSafe(`${outcome.title}：${ticket.title}。${outcome.body}`) }
+}
+/**
+ * What a TAPD priority card says about the bug, taken from its origin Trigger; every field is optional because a card is
+ * still worth sending when TAPD gave fewer facts.
+ */
+export interface PriorityFacts { shortId?: string; status?: string; tapdPriority?: string; suggestion?: PriorityLevel; reason?: string }
+/** The level buttons' colours: P0 is the danger one, P1 the primary, and the two idle levels are plain. */
+const priorityButtonType = (level: PriorityLevel): string => level === 'P0' ? 'danger' : level === 'P1' ? 'primary_filled' : 'default'
+/** A level as a person reads it, such as `P1 主线`. */
+export const priorityLabel = (level: PriorityLevel): string => `${PRIORITY_LABELS[level].code} ${PRIORITY_LABELS[level].word}`
+/**
+ * A TAPD ticket's priority question: what the bug is, what the system suggests and why, one button per level, and the
+ * deadline after which the `P2` default applies and the ticket joins the idle pool. A short chat reply (`p0`–`p3`, 紧急,
+ * 不急, 排期) answers it as well, so the card is a question with defaults, not a notification.
+ */
+export function priorityCard(ticket: Pick<Ticket, 'id' | 'title'>, ask: Pick<PriorityAsk, 'deadline'>, facts: PriorityFacts = {}): CardMessage {
+  const suggested = facts.suggestion ? `**建议** ${priorityLabel(facts.suggestion)}${facts.reason ? `：${facts.reason}` : ''}` : ''
+  const source = [facts.shortId ? `TAPD ${facts.shortId}` : '', facts.status ? `状态 ${facts.status}` : '',
+    facts.tapdPriority ? `TAPD 优先级 ${facts.tapdPriority}` : ''].filter(Boolean).join(' · ')
+  const card = {
+    schema: '2.0',
+    config: { update_multi: true, width_mode: 'default' },
+    header: { title: plain('待确认 · 这张单的优先级'), subtitle: plain(`${clip(ticket.title, 24)} · 工单 ${shortId(ticket)}`), template: 'orange' },
+    body: {
+      direction: 'vertical', padding: '16px 16px 20px 16px', vertical_spacing: '12px',
+      elements: [
+        ...source ? [markdown(`**${source}**`, { text_size: 'notation' })] : [],
+        ...suggested ? [markdown(suggested)] : [],
+        markdown('**优先级**'),
+        {
+          tag: 'column_set', flex_mode: 'flow', horizontal_spacing: '8px',
+          columns: PRIORITY_LEVELS.map(level => ({ tag: 'column', elements: [{
+            tag: 'button', text: plain(priorityLabel(level)), type: priorityButtonType(level), width: 'fill',
+            behaviors: [{ type: 'callback', value: { v: 1, priority: level } }],
+          }] })),
+        },
+        { tag: 'hr', margin: '4px 0px 0px 0px' },
+        markdown(`⏳ ${deadlineText(ask.deadline)} 前不回复默认 **P2**，进闲时池等系统有空时处理；之后也能随时改。直接回 \`p0\` / \`p1\` / \`p2\` / \`p3\` 也一样。`,
+          { text_size: 'notation' }),
+      ],
+    },
+  }
+  const text = textSafe([`待确认 · 这张单的优先级：${ticket.title}（工单 ${shortId(ticket)}）`,
+    ...source ? [source] : [], ...suggested ? [suggested.replace(/\*\*/g, '')] : [],
+    `选项：${PRIORITY_LEVELS.map(priorityLabel).join(' ｜ ')}`,
+    `${deadlineText(ask.deadline)} 前不回复默认 P2，进闲时池；之后也能随时改。`,
+    '回 p0 / p1 / p2 / p3，或 紧急 / 不急 / 排期。'].join('\n'))
+  return { card, text }
+}
+/** The card that replaces a priority question once it is answered, so the chat record says where the ticket now stands. */
+export function priorityResolvedCard(ticket: Pick<Ticket, 'id' | 'title'>, level: PriorityLevel): CardMessage {
+  const label = priorityLabel(level)
+  const card = {
+    schema: '2.0',
+    config: { update_multi: true },
+    header: { title: plain(`已记录 · ${label}`), subtitle: plain(`${clip(ticket.title, 24)} · 工单 ${shortId(ticket)}`), template: 'green' },
+    body: { direction: 'vertical', padding: '12px 12px 20px 12px',
+      elements: [markdown(`这张单按 **${label}** 排队：${PRIORITY_LABELS[level].hint}。`), markdown('之后也能随时改。', { text_size: 'notation' })] },
+  }
+  return { card, text: textSafe(`已记录 · ${ticket.title} 的优先级是 ${label}（${PRIORITY_LABELS[level].hint}）。`) }
+}
+/** The card for a click on a priority question that is already settled: idempotent, and it never changes the ticket. */
+export function priorityStaleCard(ticketId: string): CardMessage {
+  const card = {
+    schema: '2.0',
+    config: { update_multi: true },
+    header: { title: plain('已处理 · 这张卡的优先级已记过'), subtitle: plain(`工单 ${ticketId.slice(0, 8)}`), template: 'grey' },
+    body: { direction: 'vertical', padding: '12px 12px 20px 12px',
+      elements: [markdown('这张单的优先级已经有人答过，或者已经默认过了；在工单面板里能看到当前值。')] },
+  }
+  return { card, text: '已处理 · 这张卡的优先级已记过' }
 }
 /**
  * A worker's question card: the question in full, then one button per choice the worker wrote (2–4), and the note that a

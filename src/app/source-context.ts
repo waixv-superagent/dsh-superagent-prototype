@@ -5,13 +5,14 @@ import type { Commands } from '../infra/commands.ts'
 import type { SetupProblem } from '../setup.ts'
 import type { SourceContext } from '../sources/host.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
+import { sameName } from '../infra/text.ts'
 import type { Outbox } from './outbox.ts'
 import type { Store } from './store.ts'
 
 export interface SourceContextDeps {
-  readonly store: Pick<Store, 'atomic' | 'get' | 'set' | 'delete' | 'keys' | 'threads' | 'tickets' | 'triggers' | 'read'>
+  readonly store: Pick<Store, 'atomic' | 'get' | 'set' | 'delete' | 'keys' | 'threads' | 'tickets' | 'triggers' | 'read' | 'settings'>
   readonly outbox: Pick<Outbox, 'send'>
-  readonly engine: Pick<EngineForSources, 'bindThread' | 'retarget' | 'threadClosed' | 'admissible' | 'decidePlan' | 'answerAttention'>
+  readonly engine: Pick<EngineForSources, 'bindThread' | 'retarget' | 'threadClosed' | 'admissible' | 'decidePlan' | 'answerAttention' | 'decidePriority'>
   readonly commands: Commands
   readonly sources: SourceRegistry
   /** Throws when accessed before initial setup completes. */
@@ -71,6 +72,15 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
     notify: message => { deps.outbox.send(message) },
     decidePlan: (id, decision, note, via, option) => deps.engine.decidePlan(id, decision, note, via, option),
     answerAttention: (id, attentionId, option) => deps.engine.answerAttention(id, attentionId, option),
+    decidePriority: (id, level, by, via) => deps.engine.decidePriority(id, level, by, via),
+    mayDecidePriority: (id, actor) => {
+      const ticket = store.tickets.get(id)
+      if (!ticket) return false
+      if (ticket.mandate.actor.source === kind.kind && sameName(ticket.mandate.actor.id, actor)) return true
+      // A ticket from another Source (TAPD has no UI of its own) is decided by a person the Policy allows on this Source.
+      const allowed = store.settings().policy.sources[kind.kind]?.allowed ?? []
+      return allowed.some(entry => sameName(entry.id, actor))
+    },
     report: (entry, value) => {
       if (!kind.health.includes(entry)) throw new Error(`The ${kind.kind} Source has no health entry ${entry}`)
       health.get(entry)?.set(value)

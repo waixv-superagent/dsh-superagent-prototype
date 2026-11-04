@@ -5,6 +5,8 @@ import type { Backend, ChannelRef, Decision, PipelineObservation, PolicyEffect, 
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
 import type { PlanDecision, PlanOption, PlanTemplate, PlanVia } from './plan.ts'
+import type { PriorityLevel, PriorityVia } from './priority.ts'
+import type { IdleLevel } from './idle.ts'
 import { Assignments, type WorkerReport } from './assignments.ts'
 import { Evals, type Outcome } from './evals.ts'
 import { Intake, type ReceiveResult } from './intake.ts'
@@ -92,7 +94,7 @@ export class Engine {
     for (const thread of this.repo.threads.active()) if (thread.evaluating) this.repo.atomic(() => { this.evals.due(thread, policy) })
     if (policy.paused) return
     // A P1 plan gate nobody answered stops its ticket: checked on every pass, since no message arrives for a timeout.
-    this.repo.atomic(() => { this.tickets.expireGates() })
+    this.repo.atomic(() => { this.tickets.expireGates(); this.tickets.expirePriorityAsks() })
     for (const ticket of this.repo.tickets.active()) {
       if (!liveTicket(ticket) && ticket.undelivered.length) this.repo.atomic(() => { this.tickets.wake(ticket.id) })
     }
@@ -254,6 +256,18 @@ export class Engine {
     return this.repo.atomic(() => this.tickets.decidePlan(ticketId, decision, note, via, option))
   }
   /**
+   * A person sets a ticket's priority, by a card button, a short reply, or the panel: the level becomes `human`, which no
+   * assessment or default overwrites, and their answer settles the ticket's priority question. Only a person may set `P0`.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  decidePriority(ticketId: string, level: PriorityLevel, by: string, via: PriorityVia = 'feishu'): Ticket {
+    return this.repo.atomic(() => this.tickets.decidePriority(ticketId, level, by, via))
+  }
+  /** The message a TAPD ticket's priority question went out as, so the panel can open that card. */
+  priorityCardSent(ticketId: string, cardId: string): void { this.repo.atomic(() => { this.tickets.notePriorityCard(ticketId, cardId) }) }
+  /** The idle depth at which a `P2`/`P3` ticket's work started, kept as the idle pool's trace and the daily budget's count. */
+  idleLaunch(ticketId: string, level: IdleLevel): void { this.repo.atomic(() => { this.tickets.noteIdleLaunch(ticketId, level) }) }
+  /**
    * A person's click on a question card: the answer becomes a message to the worker and clears the question.
    * @throws UserError when the ticket is unknown or ended, the question is gone, or the option is not offered.
    */
@@ -380,18 +394,18 @@ export class Engine {
 }
 
 /** What Sources ask and tell the Engine. */
-export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThread' | 'retarget' | 'threadClosed' | 'decidePlan' | 'answerAttention'>
+export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThread' | 'retarget' | 'threadClosed' | 'decidePlan' | 'answerAttention' | 'decidePriority'>
 /** What the main Session asks of the Engine. */
 export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'>
 /** What people ask of the Engine, through the panel or the main Session. */
 export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'redispatchTicket' | 'confirmTicket' | 'verifyTicket' | 'recordPipeline' | 'resumePipeline'
-  | 'reworkTicket' | 'decidePlan' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
+  | 'reworkTicket' | 'decidePlan' | 'decidePriority' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
 /** What Settings tells the Engine. */
 export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
   | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply'
-  | 'submitPlan' | 'advancePhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline'>
+  | 'submitPlan' | 'advancePhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>
 /** What the host's watchdog tells the Engine: it recovers a ticket its worker stopped on a passing failure. */

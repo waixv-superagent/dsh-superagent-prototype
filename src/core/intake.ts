@@ -4,6 +4,7 @@ import { isoTime, liveTicket, threadKey } from './model.ts'
 import type { Ticket, Trigger } from './model.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { pendingPlan, planChoice, planDecision } from './plan.ts'
+import { priorityAnswer } from './priority.ts'
 import type { Tickets } from './tickets.ts'
 
 export type ReceiveResult = 'stored' | 'duplicate' | 'filtered'
@@ -50,6 +51,20 @@ export class Intake extends EnginePart {
     const fanout = [...reached.keys()], context = fanout.filter(id => reached.get(id)!.context)
     const disposition = { fanout, ...context.length ? { context } : {}, at }
     this.repo.triggers.saveDisposition(trigger.id, disposition)
+    const decided = new Set<string>()
+    // A person's short "p1" / "不急" / "排期" answers a waiting priority question instead of reaching the worker: the level
+    // is recorded there and the message is consumed. A ticket that once asked keeps accepting a short change after its
+    // question expired, so "之后也能随时改" holds; tickets that never asked (no question) are left alone.
+    const answers = trigger.human
+      ? [...reached].flatMap(([ticketId, { ticket }]) => {
+        const level = ticket.priorityAsk ? priorityAnswer(trigger.text) : undefined
+        return level ? [{ ticketId, level }] : []
+      })
+      : []
+    if (answers.length === 1) {
+      this.tickets.decidePriority(answers[0]!.ticketId, answers[0]!.level, trigger.actor.id, 'feishu')
+      decided.add(answers[0]!.ticketId)
+    }
     // A person's one-word answer decides a waiting P1 plan instead of reaching its worker as ordinary work: `1` approves,
     // `2` asks for another direction, `3` stops. Several reached tickets waiting for a plan keep the message ambiguous, so
     // it reaches no worker and the Router asks which ticket; only exactly one waiting plan may consume it.
@@ -61,12 +76,12 @@ export class Intake extends EnginePart {
         return decision ? [{ ticketId, decision, option: choice?.option ?? '' }] : []
       })
       : []
-    const decided = new Set<string>()
     // Several reached tickets waiting for a plan keep the message ambiguous: it reaches no worker, and the Router asks
     // which ticket the person meant instead of guessing.
     const ambiguous = waiting.length > 1
     if (!ambiguous) {
       for (const [ticketId, { ticket, context: followed }] of reached) {
+        if (decided.has(ticketId)) continue
         const answer = waiting.length === 1 && waiting[0]!.ticketId === ticketId ? waiting[0]! : undefined
         if (answer) { this.tickets.decidePlan(ticketId, answer.decision.decision, answer.decision.note, 'feishu', answer.option); decided.add(ticketId) }
         else if (!waiting.length) this.tickets.addInput(ticket, { id: key('input', ticketId, 'trigger', trigger.id), kind: 'trigger', triggerId: trigger.id, at,
@@ -74,12 +89,22 @@ export class Intake extends EnginePart {
       }
     }
     // A person may answer in a fresh thread, such as a Feishu direct chat where every message is its own thread: a bare
-    // 1/2/3 that reached no ticket decides the one plan that person has waiting. Several waiting plans make it ambiguous.
+    // 1/2/3 that reached no ticket decides the one plan that person has waiting, and a bare level the one priority question.
     if (!decided.size && !fanout.length && trigger.human && trigger.meta.direct === true) {
+      const level = priorityAnswer(trigger.text)
+      // A ticket this Source started is answered by its own actor; a TAPD bug's actor is a TAPD nickname with no Feishu
+      // identity, so the person in the bot's direct chat is the one who answers it.
+      const asking = level ? this.repo.tickets.open().filter(ticket => ticket.priorityAsk
+        && (ticket.mandate.actor.source === trigger.actor.source && ticket.mandate.actor.id === trigger.actor.id
+          || this.source(ticket)?.source === 'tapd')) : []
+      if (asking.length === 1) {
+        this.tickets.decidePriority(asking[0]!.id, level!, trigger.actor.id, 'feishu')
+        decided.add(asking[0]!.id)
+      }
       const decision = planDecision(trigger.text)
       const plans = decision ? this.repo.tickets.open().filter(ticket => pendingPlan(ticket)
         && ticket.mandate.actor.source === trigger.actor.source && ticket.mandate.actor.id === trigger.actor.id) : []
-      if (plans.length === 1) {
+      if (!decided.size && plans.length === 1) {
         this.tickets.decidePlan(plans[0]!.id, decision!.decision, decision!.note, 'feishu')
         decided.add(plans[0]!.id)
       }

@@ -40,6 +40,8 @@ import { Passes } from './passes.ts'
 import { Setup } from './setup.ts'
 import { Editor } from './editor.ts'
 import { notifyPlan as sendPlanCard } from './plan.ts'
+import { notifyPriority as sendPriorityCard } from './priority.ts'
+import { IdleScheduler } from './idle.ts'
 import { Billing, publishedPrices } from './billing.ts'
 import { feishuSettings } from '../sources/feishu.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
@@ -80,6 +82,8 @@ export class Runtime extends Service implements SourceHost {
   readonly billing: Billing
   readonly pipeline: PipelineChecks
   readonly pipelineWatch: PipelineWatch
+  /** The idle five-signal judgement the Executor asks before starting `P2`/`P3` work. */
+  readonly idlePool: IdleScheduler
   readonly watchdog: Watchdog
   readonly assessor: MasterAssessor
   readonly outbox: Outbox
@@ -145,6 +149,7 @@ export class Runtime extends Service implements SourceHost {
       this.executor = new DshExecutor({ context: ctx, get engine() { return runtime.engine }, store, get repository() { return setup.deployment.repository },
         effects, health: board.claim('worker'), machine,
         lifetime: this.lifetime, sessions, closing: () => this.closing(), paused: () => this.paused(), environment, sourceLink: link,
+        idleAdmission: (ticket, load) => this.idlePool.admission(ticket, load),
         repliedTo: trigger => repliedTo({ store, sources }, trigger) })
       this.activity = new Activity(ctx)
       this.editor = new Editor({ warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
@@ -152,6 +157,7 @@ export class Runtime extends Service implements SourceHost {
       this.billing = new Billing({ store, catalog: () => ctx.sessionController.modelCatalog(),
         prices: provider => publishedPrices(ctx, provider), warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       this.pipeline = new PipelineChecks({ settings: () => store.settings() })
+      this.idlePool = new IdleScheduler({ store })
       this.assessor = new MasterAssessor({ get engine() { return runtime.engine }, commands, get deployment() { return setup.deployment }, effects,
         settings: () => store.settings(), paused: () => this.paused(), threadContext: trigger => sources.threadContext(trigger),
         deliver: (id, text) => sessions.prompt(masterId, id, text, 'steer'), candidateCard: candidate => candidateCard(links, candidate) })
@@ -162,6 +168,7 @@ export class Runtime extends Service implements SourceHost {
         outbox, pipelineSkill: machine.pipelineSkill, swarmUrl: () => store.settings().executor.p4.swarmUrl,
         // Both follow the ticket's own delivery environment, falling back to the deployment's configured backend.
         pipelineFollowup: ticket => (ticket.execution?.backend ?? store.settings().executor.backend) === 'p4',
+        priorityAskMinutes: () => store.settings().executor.idle.priorityAskMin,
         prepareTicket: (ticket, outcome) => executor.prepare(ticket, outcome),
         reprepareTicket: (ticket, backend, target) => executor.rePrepare(ticket, backend, target), emit: event => {
           // Notify the main Session only about domain events it did not initiate itself.
@@ -186,6 +193,14 @@ export class Runtime extends Service implements SourceHost {
                 ctx.logger.warn('dsh-superagent: could not open a conversation for ticket %s: %s', ticket.id, String(error))
               })
             }
+            // A TAPD ticket asks its person for a priority before it may start. The question goes to the ticket's Feishu
+            // conversation; a TAPD ticket has none of its own, so the Source's intervention chat carries it.
+            if (ticket?.priorityAsk?.state === 'pending') {
+              const id = ticket.id
+              void sendPriorityCard({ store, sources, commands, warn: message => ctx.logger.warn('dsh-superagent: %s', message) }, ticket)
+                .then(message => { if (message) runtime.engine.priorityCardSent(id, message) })
+                .catch(error => ctx.logger.warn('dsh-superagent: could not record the priority card of ticket %s: %s', id, String(error)))
+            }
           }
           // Notify the ticket's conversations whenever it ends via a pull request.
           const ended = event.type === 'ticket.ended' ? store.tickets.get(event.data.ticketId) : undefined
@@ -207,6 +222,8 @@ export class Runtime extends Service implements SourceHost {
         paused: () => this.paused(), warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       const passes = this.passes = new Passes({ engine: { receive: trigger => engine.receive(trigger), evaluateDue }, effects,
         health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing(),
+        // The idle judgement reads a slot's free time; recording the load every pass keeps it current after the mainline ends.
+        observe: () => { const load = this.executor.load(); this.idlePool.observe(load.running, load.max) },
         reproject: () => this.executor.reproject() })
       this.sourceDeps = { store, engine, outbox, commands, sources, get ready() { return runtime.ready },
         get deployment() { return setup.deployment }, configured: () => setup.configured(),
