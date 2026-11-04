@@ -30,6 +30,30 @@ export const feishuClientLink = (url: string): string => url
  */
 export const isMessageLink = (url: string | undefined): url is string =>
   !!url && /\/client\/(?:thread|message)\/|[?&]position=/.test(url)
+/** Drops the parameters that point a Feishu AppLink at one message, keeping every other part of the link. */
+const withoutPosition = (url: string): string => {
+  if (!/^(?:https:\/\/applink\.(?:feishu\.cn|larksuite\.com)|feishu:\/\/applink|lark:\/\/applink)\//i.test(url)) return url
+  const [base = '', query = ''] = url.split('?')
+  const kept = query.split('&').filter(part => part && !/^(?:thread_position|position)=/.test(part))
+  return kept.length ? `${base}?${kept.join('&')}` : base
+}
+/**
+ * The AppLink that opens a Feishu thread at its newest message. Feishu's per-message links carry `thread_position` (a chat
+ * link its `position`), which lands in the middle of the conversation; the same link without it opens the topic at the
+ * latest message, where the person can read on. A chat link cannot address the topic at all, so the topic is named
+ * directly whenever the chat and thread ids are known. Only a card's own link keeps its position (see `questionUrl`).
+ */
+export function feishuTopicLink(input: { chatId?: string; threadId?: string; url?: string }): string | undefined {
+  const { chatId, threadId, url } = input
+  // A thread link already names its topic; only the position it points at has to go.
+  const unpositioned = url === undefined ? undefined : withoutPosition(url)
+  if (unpositioned && /\/client\/thread\/open/i.test(unpositioned)) return unpositioned
+  if (chatId && threadId) {
+    const brand = /(?:larksuite\.com|^lark:\/\/)/i.test(url ?? '') ? 'larksuite.com' : 'feishu.cn'
+    return `https://applink.${brand}/client/thread/open?open_chat_id=${encodeURIComponent(chatId)}&open_thread_id=${encodeURIComponent(threadId)}`
+  }
+  return unpositioned
+}
 /**
  * True when Feishu permanently rejects a reply because the target message was recalled, withdrawn, not found, or never
  * existed. Only a Feishu response carrying one of these errors means the target is gone; timeouts or crashes do not. The

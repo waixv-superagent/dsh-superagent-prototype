@@ -4,7 +4,6 @@ import type { ThreadFilter } from '../api.ts'
 import type { TextCache } from '../cache.ts'
 import { awaitingEval, channelLink, dayAgo, decisionView, newestFirst, page, snapshot, threadSummary, threadTitle, ticketLine,
   ticketSummary, triggerView, type ViewHost } from './records.ts'
-import { attribute } from './text.ts'
 
 export function threadList(host: ViewHost, filter: ThreadFilter, offset: number, limit: number) {
   const { store } = host
@@ -40,9 +39,11 @@ export function threadDetail(host: ViewHost, key: string, before: string | undef
   const more = triggers.length > limit
   const shown = more ? triggers.slice(1) : triggers
   const first = store.read.firstTrigger(key)
-  const url = attribute(thread.meta.url) ?? first?.url ?? (first?.channel ? channelLink(view, first.channel).url : undefined)
+  const summary = threadSummary(view, thread)
+  // The Thread's own link opens its topic's newest message; its chat link is only what is left when no link was recorded.
+  const url = summary.url ?? (first?.channel ? channelLink(view, first.channel).url : undefined)
   // `context` lists tickets whose Executor follows this thread for context only (messages reach them without granting authority).
-  return { ...threadSummary(view, thread), url, context: thread.context ?? [],
+  return { ...summary, url, context: thread.context ?? [],
     correlated: thread.correlated.map(other => {
       const value = store.threads.get(other)
       return { key: other, title: value ? threadTitle(store, value) : other }

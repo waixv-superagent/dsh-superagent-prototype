@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { KV } from '../src/kv.ts'
-import { isMessageLink } from '../src/sources/feishu-channel.ts'
+import { isMessageLink, feishuTopicLink } from '../src/sources/feishu-channel.ts'
 import { fillLinks, threadLink } from '../src/sources/feishu-loops.ts'
 import type { SourceContext } from '../src/sources/host.ts'
 
@@ -81,5 +81,24 @@ describe('Feishu message links', () => {
     expect(attention.om_answered?.url).toBe(message)
     expect((state.get(KV.feishu.cards) as Record<string, { url?: string }>).om_plan?.url).toBe(message)
     expect(describe).toHaveBeenCalledWith('feishu:oc_1:om_root', { url: message })
+  })
+})
+
+describe('Feishu topic links', () => {
+  const topic = 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1'
+  it('opens a topic at its newest message instead of the message a link names', () => {
+    expect(feishuTopicLink({ url: message })).toBe(topic)
+    // A chat link names no topic, so the topic is built from the chat and thread ids.
+    expect(feishuTopicLink({ chatId: 'oc_1', threadId: 'omt_1', url: chat })).toBe(topic)
+    // Lark keeps its own host.
+    expect(feishuTopicLink({ chatId: 'oc_1', threadId: 'omt_1',
+      url: 'https://applink.larksuite.com/client/chat/open?openChatId=oc_1' }))
+      .toBe('https://applink.larksuite.com/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1')
+    // Without a topic id a chat link still drops its position, so it opens the conversation at its newest message.
+    expect(feishuTopicLink({ url: `${chat}&position=8` })).toBe(chat)
+    // The client scheme is accepted too, so a link already converted by another view stays usable.
+    expect(feishuTopicLink({ url: 'feishu://applink/client/thread/open?open_thread_id=omt_1&thread_position=2' }))
+      .toBe('feishu://applink/client/thread/open?open_thread_id=omt_1')
+    expect(feishuTopicLink({})).toBeUndefined()
   })
 })
