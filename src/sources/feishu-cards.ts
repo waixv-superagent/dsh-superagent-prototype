@@ -5,10 +5,11 @@
  * replaces the card with the recorded answer.
  */
 import { z } from 'zod'
-import { pendingPlan, PRIORITY_LEVELS, type PlanDecision, type PriorityLevel } from '../core/index.ts'
+import { key, pendingPlan, PRIORITY_LEVELS, type PlanDecision, type PriorityLevel } from '../core/index.ts'
 import { KV } from '../kv.ts'
-import { attentionResolvedCard, attentionStaleCard, planCard, planChoices, priorityResolvedCard, priorityStaleCard, resolvedCard, reviseCard, staleCard,
+import { attentionResolvedCard, attentionStaleCard, pipelineResultCard, planCard, planChoices, priorityResolvedCard, priorityStaleCard, resolvedCard, reviseCard, staleCard,
   updateCard, type CardMessage } from './feishu-card.ts'
+import { feishuPostContent } from './feishu-text.ts'
 import type { SourceContext } from './host.ts'
 
 /** The fields of a card callback this plugin reads; `card_content` is large and unnecessary because the card is rebuilt. */
@@ -74,6 +75,7 @@ export function formNote(value: string | undefined): string {
  * actor may decide it.
  */
 export async function handleCardAction(ctx: SourceContext, action: CardAction): Promise<void> {
+  if ((ctx.state.get(KV.feishu.pipelineCards) ?? {})[action.message_id]) { await handlePipelineAction(ctx, action); return }
   const asked = attentionValue(action.action_value)
   if (asked) { await handleAttentionAction(ctx, action, asked); return }
   const priority = priorityValue(action.action_value)
@@ -110,6 +112,87 @@ export async function handleCardAction(ctx: SourceContext, action: CardAction): 
   try { ctx.decidePlan(ticket.id, decision, note, 'feishu', option) } catch { forget(); await replace(staleCard(ticket)); return }
   forget()
   await replace(resolvedCard(ticket, decision, note, option))
+}
+/** The values a form's multi-select carries under its `choice` field. */
+export function formChoices(value: string | undefined): string[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value) as { choice?: unknown }
+    const choice = parsed?.choice
+    const list = Array.isArray(choice) ? choice : typeof choice === 'string' ? [choice] : []
+    return list.filter((item): item is string => typeof item === 'string' && item.trim() !== '').map(item => item.trim())
+  } catch { return [] }
+}
+/** Which pipeline action a click asked for: the button's own value, or the form's submit button by name. */
+export function pipelineActionOf(action: Pick<CardAction, 'action_value' | 'action_name'>): 'reviewers' | 'send' | 'close' | 'rerun' | undefined {
+  const names = ['reviewers', 'send', 'close', 'rerun'] as const
+  try {
+    const parsed = JSON.parse(action.action_value ?? '') as { pipeline?: unknown }
+    const named = names.find(name => name === parsed?.pipeline)
+    if (named) return named
+  } catch { /* a form submit may carry no button value */ }
+  return action.action_name === 'submit_reviewers' ? 'reviewers' : action.action_name === 'submit_send' ? 'send' : undefined
+}
+/**
+ * Applies a click on a pipeline stage card. Choosing reviewers adds them to the Swarm review as required reviewers; 发送
+ * sends the editor package link to each chosen person or chat; 重跑 asks Swarm to rerun the failing checks; 关单 completes
+ * the submitted ticket. Only the ticket's actor, or a person the Policy allows here, may act; the card is replaced with
+ * what happened, and a refusal says why. A card whose ticket ended answers with that and does nothing.
+ */
+async function handlePipelineAction(ctx: SourceContext, action: CardAction): Promise<void> {
+  const cards = ctx.state.get(KV.feishu.pipelineCards) ?? {}
+  const ref = cards[action.message_id]
+  if (!ref) return
+  const ticket = ctx.tickets.get(ref.ticketId)
+  if (!ticket) return
+  if (!ctx.mayActOnPipeline(ticket.id, action.operator_id)) return
+  const kind = pipelineActionOf(action)
+  if (!kind) return
+  const replace = async (message: CardMessage): Promise<void> => {
+    if (!action.token) return
+    try { await updateCard({ commands: ctx.commands }, action.token, message) } catch { /* the card stays as it was */ }
+  }
+  const forget = (): void => {
+    const next = { ...ctx.state.get(KV.feishu.pipelineCards) ?? {} }
+    delete next[action.message_id]
+    ctx.state.set(KV.feishu.pipelineCards, next)
+  }
+  if (ticket.ended) { forget(); await replace(pipelineResultCard(ticket, { ok: false, heading: '已处理 · 工单已结束', line: '这张单已经结束，卡片不再操作。' })); return }
+  const choices = ctx.pipelineChoices()
+  const label = (list: readonly { label: string; value: string }[], value: string) => list.find(item => item.value === value)?.label ?? value
+  try {
+    if (kind === 'reviewers') {
+      const { done } = await ctx.pipelineAction(ticket.id, { kind: 'reviewers', users: formChoices(action.form_value) })
+      // The card stays: a person may add someone else later.
+      await replace(pipelineResultCard(ticket, { ok: true, heading: '已发到 Swarm · 待审核', line: `已加为审核人：${done.map(user => label(choices.reviewers, user)).join('、')}` }))
+      return
+    }
+    if (kind === 'rerun') {
+      const { done } = await ctx.pipelineAction(ticket.id, { kind: 'rerun' })
+      forget()
+      await replace(pipelineResultCard(ticket, { ok: true, heading: '已请求重跑', line: `重跑：${done.join('、') || '失败的检查'}；等新结果。` }))
+      return
+    }
+    if (kind === 'send') {
+      const allowed = new Set(choices.targets.map(item => item.value))
+      const targets = formChoices(action.form_value).filter(target => allowed.has(target))
+      if (!targets.length) throw new Error('没有选中名单里的人或群')
+      const link = ticket.pipeline?.artifact
+      if (!link) throw new Error('这次 autobuild 没有包链接')
+      const text = `编辑器包已出：[${ticket.title}](${link})`
+      for (const target of targets) {
+        await ctx.commands.lark(['im', '+messages-send', target.startsWith('oc_') ? '--chat-id' : '--user-id', target, '--msg-type', 'post',
+          '--content', feishuPostContent(text), '--idempotency-key', `pkg-${key('pkg', ticket.id, link, target).slice(0, 40)}`])
+      }
+      await replace(pipelineResultCard(ticket, { ok: true, heading: '编辑器包已发送', line: `已发给：${targets.map(target => label(choices.targets, target)).join('、')}。不再需要就点关单。` }))
+      return
+    }
+    await ctx.pipelineAction(ticket.id, { kind: 'close' })
+    forget()
+    await replace(pipelineResultCard(ticket, { ok: true, heading: '已关单', line: '工单已完成。' }))
+  } catch (error) {
+    await replace(pipelineResultCard(ticket, { ok: false, heading: '没有做成', line: error instanceof Error ? error.message : String(error) }))
+  }
 }
 /**
  * Applies a click on a TAPD ticket's priority card: the level is recorded as the person's, which settles the question and

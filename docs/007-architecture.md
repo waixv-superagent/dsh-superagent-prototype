@@ -318,6 +318,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/core/tickets.ts` | `Tickets`: the Ticket lifecycle, the Threads a Ticket follows, Subscriptions and Inputs |
 | `src/core/assignments.ts` | `Assignments`: the Executor's facts and its workers' Reports |
 | `src/core/replies.ts` | `Replies`: the Engine's Channel writes |
+| `src/core/pipeline-notice.ts` | The chat notice of each pipeline stage — green review, rerun, pre-submit smoke, blocker, submit, autobuild — as one-line text and the structured card a chat Source draws, with its reviewer, send, rerun and close actions |
 | `src/core/stage.ts` | `ticketStage` and `canRetry`: the Ticket stages of [003 Execution](003-execution.md) |
 | `src/core/waiting.ts` | `waitingOf`: who a Ticket waits for (person, pipeline, worker or nobody), the action that wait corresponds to, and the one real deadline it may have |
 | `src/core/plan.ts` | The P1 plan gate: a Ticket's phases, `Plan`, the fix/analysis/design templates, `planDecision` and the entrance a decision came through |
@@ -515,6 +516,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/panel-graph.spec.tsx` | The 概览 relation view: the timeline lanes and edges, the cloud, the only-related filter, both layouts' geometry, and a Ticket page's related Tickets |
 | `tests/panel-editor.spec.tsx` | The 概览 editor view: the editor/board switch, the holder in each state, short timeline lane names, working rows split by editor use with their tool and expandable trail, the waiting rail, and the empty states |
 | `tests/editor.spec.ts` | The editor occupancy derivation: a person's interactive editor, an agent's commandlet, a build, missing start times, a failed probe, and the cached row the panel reads |
+| `tests/feishu-pipeline-card.spec.ts` | Pipeline stage cards on Feishu: headline, links opened in the system browser, the reviewer, package, rerun and close actions, the text fallback, and each action's click |
+| `tests/pipeline-notice.spec.ts` | The pipeline stage notices: each stage's headline, lines, links and actions, distinct events per stage, and no reviewer or recipient choice unless configured |
 | `tests/pipeline-check.spec.ts` | The read-only pipeline checks: review ids and Jenkins targets, testrun and comment summaries, the review's state and version, the changelist state after a submit, console errors |
 | `tests/pipeline-watch.spec.ts` | The host's automatic follow-up: a new failure wakes the worker once, a green review asks once, the AI verdict gate, the attempt and stuck limits, vanished-review detection, and one broken ticket not stopping the rest |
 | `tests/watchdog.spec.ts` | The host's outage recovery: a passing failure's backoff and last try, the failures it never retries, the chain's count across the host's own retries and a person's, the main Session's retry, recreation and clearing, and the `watchdog` health entry |

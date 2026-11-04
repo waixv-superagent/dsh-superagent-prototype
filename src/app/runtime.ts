@@ -48,7 +48,7 @@ import { feishuSettings } from '../sources/feishu.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
 import { Activity } from './activity.ts'
-import { PipelineChecks } from './pipeline.ts'
+import { PipelineChecks, pipelineChoices } from './pipeline.ts'
 import { PipelineWatch } from './pipeline-watch.ts'
 import { Watchdog } from './watchdog.ts'
 import { StallWatch } from './stall-watch.ts'
@@ -180,6 +180,7 @@ export class Runtime extends Service implements SourceHost {
         outbox, pipelineSkill: machine.pipelineSkill, swarmUrl: () => store.settings().executor.p4.swarmUrl,
         // Both follow the ticket's own delivery environment, falling back to the deployment's configured backend.
         pipelineFollowup: ticket => (ticket.execution?.backend ?? store.settings().executor.backend) === 'p4',
+        pipelineChoices: () => pipelineChoices(store.settings()),
         priorityAskMinutes: () => store.settings().executor.idle.priorityAskMin,
         prepareTicket: (ticket, outcome) => executor.prepare(ticket, outcome),
         reprepareTicket: (ticket, backend, target) => executor.rePrepare(ticket, backend, target), emit: event => {
@@ -250,7 +251,8 @@ export class Runtime extends Service implements SourceHost {
         // A conversation control, such as the Feishu resume word, is a person's command; only a person the Policy lets
         // originate work may issue one, and it changes the same pause setting the panel writes.
         mayControl: trigger => trigger.human && !!allowedSender(store.settings(), trigger.actor),
-        pauseProcessing: paused => this.settings.pause(paused, 'command').then(result => result.paused) }
+        pauseProcessing: paused => this.settings.pause(paused, 'command').then(result => result.paused),
+        pipeline: this.pipeline }
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
         get repository() { return setup.deployment.repository },
         pipeline: this.pipeline, editor: this.editorScheduler, workspaceOf: ticket => this.executor.workspaceOf(ticket),

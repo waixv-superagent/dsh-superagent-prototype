@@ -4,10 +4,15 @@ import type { DshSuperagentKey } from './locales.ts'
 import type { T } from './text.ts'
 
 /** The part of a pipeline the panel reads; the full record also carries the follow-up's signatures and counters. */
-export type PipelineView = Pick<TicketPipeline, 'state' | 'manual' | 'step' | 'progress' | 'check' | 'stageUrl' | 'url' | 'reason'>
+export type PipelineView = Pick<TicketPipeline, 'state' | 'manual' | 'step' | 'progress' | 'check' | 'stageUrl' | 'url' | 'reason' | 'submitted'>
 
 /** The four steps the panel draws, in order: pre-approval checks, the person's review, the pre-submit smoke, the submit. */
 export const PIPELINE_TRACK: readonly PipelineStep[] = ['tests', 'review', 'smoke', 'merged']
+/** The track with the editor autobuild after the submit, for a pipeline that follows one. */
+export const AUTOBUILD_TRACK: readonly PipelineStep[] = [...PIPELINE_TRACK, 'autobuild']
+/** The track a pipeline draws: the autobuild step joins it once the change was submitted with an autobuild to follow. */
+export const pipelineTrack = (pipeline: Pick<TicketPipeline, 'step' | 'submitted'> | undefined): readonly PipelineStep[] =>
+  pipeline?.submitted || pipeline?.step === 'autobuild' ? AUTOBUILD_TRACK : PIPELINE_TRACK
 
 /**
  * The fine stage of a pipeline. A pipeline recorded before the stage existed has no `step`, so its last check sentence and
@@ -33,6 +38,7 @@ export function pipelineSmokeFailed (pipeline: PipelineView | undefined): boolea
 /** Where the pipeline stands, in words a card tag or a ticket fact can show. */
 export function pipelineStageLabel (t: T, pipeline: PipelineView | undefined): string {
   const step = pipelineStep(pipeline)
+  if (step === 'autobuild' && pipeline?.state !== 'merged') return t('pipelineStage.autobuild')
   if (pipeline?.state === 'blocked') {
     if (pipeline.manual) {
       if (step === 'review') return t('pipelineStage.review')
@@ -52,6 +58,7 @@ export function pipelineTrackIndex (step: PipelineStep | undefined): number {
     case 'smoke': return 2
     case 'ready':
     case 'merged': return 3
+    case 'autobuild': return 4
     default: return 0
   }
 }

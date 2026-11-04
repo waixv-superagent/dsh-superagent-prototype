@@ -78,6 +78,8 @@ export const KV = {
      * from Feishu (its id, or the topic it sits in) back into the ticket. Kept like outbox receipts, one small row each.
      */
     sent: family<FeishuSent, [message: string]>('feishu-sent:'),
+    /** Pipeline stage card `message_id` to the ticket it is about, so a click on its reviewer, send, rerun or close action finds it. */
+    pipelineCards: record<Record<string, { ticketId: string; at: string }>>('feishu-pipeline-cards'),
     /** Control messages (挂起/恢复) already applied, by message ID and time, so a history replay never toggles processing again. */
     controls: record<Record<string, string>>('feishu-controls'),
     seen: family<string[], [thread: string]>('thread-seen:'), initialized: family<boolean, [thread: string]>('thread-initialized:') },

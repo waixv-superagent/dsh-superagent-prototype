@@ -4,7 +4,7 @@ import { TicketNow } from './activity.tsx'
 import { ApiError, usePoll, type TicketPageView } from './api.ts'
 import { Button, DisclosureRow, Dot, Icon, Tag, type IconName } from './controls.tsx'
 import { decisionMark, reportDot, ticketMark } from './marks.ts'
-import { PIPELINE_TRACK, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackLabel, pipelineTrackState, type PipelineView } from './pipeline.ts'
+import { pipelineTrack, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackLabel, pipelineTrackState, type PipelineView } from './pipeline.ts'
 import { usePanel } from './provider.tsx'
 import { settingsRoute } from './route.ts'
 import { Earlier, ThreadLine, automatedRuns } from './rows.tsx'
@@ -415,7 +415,7 @@ function PipelineTrack ({ pipeline }: { pipeline: PipelineView }) {
   const blocked = pipeline.state === 'blocked' && !pipeline.manual
   const waiting = pipeline.state === 'blocked' && !!pipeline.manual
   return <ol className="dt-pipe-steps" aria-label={t('pipelineSteps')}>
-    {PIPELINE_TRACK.map((key, index) => {
+    {pipelineTrack(pipeline).map((key, index) => {
       const state = pipelineTrackState(step, index)
       return <li key={key} className="dt-pipe-step" data-state={state} data-tone={state === 'current'
         ? blocked ? 'danger' : waiting ? 'warning' : 'info' : undefined}
@@ -476,7 +476,7 @@ function PipelineGate({ ticket, onChanged }: { ticket: TicketPageView; onChanged
         await call('POST tickets/:id/pipeline/check', { id: ticket.id })
         notify(t('pipelineResumedNotice')); await onChanged()
       }}>{t('pipelineResume')}</Button>}
-      {stageUrl && <ActionLink href={stageUrl}>{t('pipelineOpenStage')}</ActionLink>}
+      {stageUrl && <ActionLink href={stageUrl}>{t(pipelineStep(pipeline) === 'autobuild' ? 'pipelineOpenAutobuild' : 'pipelineOpenStage')}</ActionLink>}
       {reviewHref && <ActionLink href={reviewHref}>{t('pipelineOpenReview')}</ActionLink>}
     </footer>
   </section>

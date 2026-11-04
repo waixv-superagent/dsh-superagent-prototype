@@ -13,7 +13,7 @@ export interface PipelineWatchHost {
   tickets: { open: () => Ticket[] }
   settings: () => Settings
   engine: EngineForPipeline
-  checks: Pick<PipelineChecks, 'review' | 'status' | 'changeState' | 'jenkins' | 'approvalBuild'>
+  checks: Pick<PipelineChecks, 'review' | 'status' | 'changeState' | 'jenkins' | 'approvalBuild' | 'autobuildBuild'>
   paused?: () => boolean
   /** A failed poll of one ticket is logged and does not stop the others. */
   warn?: (message: string) => void
@@ -31,6 +31,12 @@ const MAX_DETAIL = 3_500
 /** The counts a running review reports, shaped for the panel's compact progress line. */
 const progressOf = (status: PipelineStatus): PipelineProgress =>
   ({ pass: status.pass, running: status.running, fail: status.fail, total: status.total })
+
+/** Whether a submit waits for the editor autobuild: the job is set and Jenkins is readable. */
+export const autobuildFollowed = (settings: Settings): boolean => {
+  const p4 = settings.executor.p4
+  return !!(p4.autobuildJob.trim() && p4.jenkinsUrl.trim() && p4.jenkinsToken.trim())
+}
 
 /**
  * Polls and reports. `poll` checks every delivered p4 ticket once; `start` repeats it at the configured interval, so a
@@ -102,16 +108,21 @@ export class PipelineWatch {
   }
 
   private async observe (ticket: Ticket, settings: Settings, now: number): Promise<void> {
+    if (ticket.pipeline?.submitted) return this.autobuild(ticket, settings, now)
     const review = ticket.execution?.review
     const changelist = ticket.execution?.changelist
     const url = ticket.pipeline?.url
     const previousStep = ticket.pipeline?.step
+    // With an autobuild job, a submit leaves the ticket open for the editor build that includes it.
+    const autobuild = autobuildFollowed(settings)
+    const merged = (check: string, change?: number): PipelineObservation =>
+      ({ kind: 'merged', step: 'merged', check, ...(url ? { url } : {}), ...(change !== undefined ? { change } : {}), ...(autobuild ? { autobuild } : {}) })
     if (!review) {
       if (changelist === undefined) return
       const state = await this.host.checks.changeState(changelist)
       // A change with no review has no Swarm flow to draw: it only waits for its submit.
       if (state === 'pending') this.report(ticket, { kind: 'running', step: 'ready', check: 'CL 仍在 pending，等待提交', ...(url ? { url } : {}) })
-      else this.report(ticket, { kind: 'blocked', step: 'ready', check: 'CL 状态无法确认',
+      else this.report(ticket, { kind: 'blocked', step: 'ready', check: 'CL 状态无法确认', topic: 'reviewGone',
         reason: `本单没有记录 Swarm review，CL ${changelist} 在服务器上也不存在；请确认它是否已提交，或补一个 review。`, ...(url ? { url } : {}) })
       return
     }
@@ -119,7 +130,7 @@ export class PipelineWatch {
     if (!info) {
       // A submitted review disappears from this Swarm: the submit deletes the pending changelist, so `missing` is its trail.
       if (changelist === undefined) {
-        this.report(ticket, { kind: 'blocked', step: previousStep ?? 'tests', check: 'Swarm review 已不存在',
+        this.report(ticket, { kind: 'blocked', step: previousStep ?? 'tests', check: 'Swarm review 已不存在', topic: 'reviewGone',
           reason: `review 已不存在，且本单没有记录 CL；请确认是否已提交。`, ...(url ? { url } : {}) })
         return
       }
@@ -130,15 +141,16 @@ export class PipelineWatch {
           this.report(ticket, { kind: 'running', step: 'tests', check: '等待 Swarm review 可读', ...(url ? { url } : {}) })
           return
         }
-        this.report(ticket, { kind: 'blocked', step: previousStep ?? 'tests', check: 'Swarm review 已不存在',
+        this.report(ticket, { kind: 'blocked', step: previousStep ?? 'tests', check: 'Swarm review 已不存在', topic: 'reviewGone',
           reason: `review 已不存在，但 CL ${changelist} 仍 pending；请确认 review 状态。`, ...(url ? { url } : {}) })
         return
       }
-      this.report(ticket, { kind: 'merged', step: 'merged', check: 'CL 已提交入库', ...(url ? { url } : {}) })
+      this.report(ticket, merged('CL 已提交入库'))
       return
     }
     if (info.state === 'committed' || info.state === 'archived' || (info.state === 'approved' && info.commits.length > 0)) {
-      this.report(ticket, { kind: 'merged', step: 'merged', check: info.state === 'approved' ? 'review 已审核通过并提交' : `review ${info.state}`, ...(url ? { url } : {}) })
+      this.report(ticket, merged(info.state === 'approved' ? 'review 已审核通过并提交' : `review ${info.state}`,
+        info.commits.length ? Math.max(...info.commits) : undefined))
       return
     }
     if (info.state === 'approved') {
@@ -196,7 +208,7 @@ export class PipelineWatch {
     // No result yet. The review's current version says when checks should have appeared; an old one means they never did.
     const since = info.changedAt ? info.changedAt * 1000 : (Date.parse(ticket.pipeline?.at ?? '') || now)
     if (now - since > settings.executor.p4.stuckMinutes * 60_000) {
-      this.report(ticket, { kind: 'blocked', step: 'tests', check: '流水线没有结果',
+      this.report(ticket, { kind: 'blocked', step: 'tests', check: '流水线没有结果', topic: 'noResult',
         reason: `${settings.executor.p4.stuckMinutes} 分钟没有检查结果；请确认 Swarm 是否触发。`, ...(url ? { url } : {}) })
       return
     }
@@ -225,19 +237,51 @@ export class PipelineWatch {
         return
       }
       if (build?.state === 'failed') {
-        this.report(ticket, { kind: 'blocked', step: 'smoke', check: `提交前冒烟失败（#${build.number}）`,
+        this.report(ticket, { kind: 'blocked', step: 'smoke', check: `提交前冒烟失败（#${build.number}）`, topic: 'smokeFailed',
           reason: `Jenkins 提交前冒烟 #${build.number} 失败；查看构建日志，修复后重新 shelve 再提交。`,
           stageUrl: build.url, ...(url ? { url } : {}), signature: `${info.version}:smoke:fail` })
         return
       }
       if (build?.state === 'passed') {
         this.report(ticket, { kind: 'approved', step: 'ready', check: 'Jenkins 冒烟已通过，等待提交',
-          stageUrl: build.url, ...(url ? { url } : {}), signature: `${info.version}:approved` })
+          stageUrl: build.url, ...(url ? { url } : {}), signature: `${info.version}:approved:smoke:pass` })
         return
       }
     }
     this.report(ticket, { kind: 'approved', step: 'ready', check: 'Swarm 已审核通过，等待提交',
       ...(url ? { url } : {}), signature: `${info.version}:approved` })
+  }
+
+  /**
+   * The editor autobuild after a submit. The build that includes the submitted change is followed until it finishes: a
+   * running one is reported once, a passed one carries its package link to the person's card, a failed one its build. A
+   * submit no build picked up within `autobuildMinutes` asks the person instead of waiting forever.
+   */
+  private async autobuild (ticket: Ticket, settings: Settings, now: number): Promise<void> {
+    const submitted = ticket.pipeline!.submitted!
+    const url = ticket.pipeline?.url
+    // A passed build waits only for the person's send or close; nothing about it changes on Jenkins.
+    if (ticket.pipeline?.state === 'blocked' && ticket.pipeline.observed?.endsWith(':passed')) return
+    // A deployment that stopped following autobuilds lets its open submits finish the way they did before.
+    if (!autobuildFollowed(settings)) {
+      this.report(ticket, { kind: 'autobuild', result: 'timeout', check: '已不再跟进 autobuild，确认后可关单', signature: 'off', ...(url ? { url } : {}) })
+      return
+    }
+    const at = Date.parse(submitted.at) || now
+    const build = await this.host.checks.autobuildBuild({ ...(submitted.change !== undefined ? { change: submitted.change } : {}), at })
+    if (!build) {
+      if (now - at > settings.executor.p4.autobuildMinutes * 60_000) {
+        this.report(ticket, { kind: 'autobuild', result: 'timeout', signature: 'timeout', ...(url ? { url } : {}),
+          check: `入库 ${settings.executor.p4.autobuildMinutes} 分钟仍没有 autobuild 构建包含它` })
+      }
+      return
+    }
+    const name = `autobuild #${build.number}`
+    const common = { stageUrl: build.url, ...(url ? { url } : {}) }
+    if (build.state === 'running') this.report(ticket, { kind: 'autobuild', result: 'running', check: `${name} 构建中`, signature: `${build.number}:running`, ...common })
+    else if (build.state === 'passed') this.report(ticket, { kind: 'autobuild', result: 'passed', check: `${name} 已出编辑器包`, signature: `${build.number}:passed`,
+      artifact: build.artifact, ...common })
+    else this.report(ticket, { kind: 'autobuild', result: 'failed', check: `${name} 构建失败`, signature: `${build.number}:failed`, ...common })
   }
 
   /** Wake a worker for a failure, unless the automatic attempts are used up; a repeated signature only waits. */
@@ -250,7 +294,7 @@ export class PipelineWatch {
       ...(observation.progress ? { progress: observation.progress } : {}),
       ...(observation.stageUrl ? { stageUrl: observation.stageUrl } : {}) }
     if (fixes >= settings.executor.p4.fixAttempts) {
-      this.report(ticket, { kind: 'blocked', check: observation.check,
+      this.report(ticket, { kind: 'blocked', check: observation.check, topic: 'attempts',
         reason: `连续 ${fixes} 次自动修复仍失败；请人工处理。`,
         signature: `attempts:${signature}`, ...extra, ...(observation.url ? { url: observation.url } : {}) })
       return
@@ -278,7 +322,7 @@ export class PipelineWatch {
       ...(ticket.pipeline?.stageUrl ? { stageUrl: ticket.pipeline.stageUrl } : {}) }
     const minutes = settings.executor.p4.stuckMinutes
     if (acted && now - acted > minutes * 60_000) {
-      this.report(ticket, { kind: 'blocked', check: '失败后没有新的流水线结果',
+      this.report(ticket, { kind: 'blocked', check: '失败后没有新的流水线结果', topic: 'stuck',
         reason: `${minutes} 分钟没有新结果；请重跑或确认是否可忽略。`,
         signature: `stuck:${ticket.pipeline?.observed ?? 'unknown'}`, ...extra, ...(url ? { url } : {}) })
       return

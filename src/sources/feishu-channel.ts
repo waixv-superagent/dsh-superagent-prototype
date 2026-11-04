@@ -3,7 +3,7 @@ import type { OutboundMessage } from '../core/index.ts'
 import { KV } from '../kv.ts'
 import { CliError } from '../infra/commands.ts'
 import { checkedImText } from '../infra/text.ts'
-import { attentionCard, messageIdOf, messageLink } from './feishu-card.ts'
+import { attentionCard, messageIdOf, messageLink, pipelineStageCard } from './feishu-card.ts'
 import { rememberSent, threadIdOf, ticketPanelLink, withTicketFooter } from './feishu-sent.ts'
 import { releaseReceipt } from './feishu-receipt.ts'
 import { jsonForCmd, feishuPostContent } from './feishu-text.ts'
@@ -114,6 +114,25 @@ export async function sendFeishu(host: ChannelHost, message: OutboundMessage, co
     }
   }
   const reply = ['im', '+messages-reply', '--message-id', messageId, '--msg-type', 'post', '--content', feishuPostContent(text), '--reply-in-thread', '--idempotency-key', message.id]
+  // A pipeline stage is a card with its links and actions; a card Feishu refuses falls back to the one-line text below.
+  if (message.pipeline) {
+    try {
+      const sent = await host.commands.lark<unknown>(['im', '+messages-reply', '--message-id', messageId, '--msg-type', 'interactive',
+        '--content', jsonForCmd(pipelineStageCard(message.pipeline, checked).card), '--reply-in-thread', '--idempotency-key', message.id])
+      const id = messageIdOf(sent)
+      remember(sent)
+      if (id && (message.pipeline.reviewers || message.pipeline.targets || message.pipeline.close || message.pipeline.rerun)) {
+        const keep = Date.now() - CARD_KEEP_MS * 4
+        const cards = Object.fromEntries(Object.entries(host.state.get(KV.feishu.pipelineCards) ?? {})
+          .filter(([key, ref]) => key === id || Date.parse(ref.at) >= keep))
+        host.state.set(KV.feishu.pipelineCards, { ...cards, [id]: { ticketId: message.pipeline.ticketId, at: new Date().toISOString() } })
+      }
+      await releaseReceipt(host, messageId)
+      return 'sent'
+    } catch (error) {
+      if (gone(error)) { await releaseReceipt(host, messageId); return 'gone' }
+    }
+  }
   let outcome: 'sent' | 'gone' = 'sent'
   try { remember(await host.commands.lark(reply)) }
   catch (error) {

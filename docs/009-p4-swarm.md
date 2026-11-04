@@ -22,6 +22,11 @@ A Ticket's backend comes from where its work belongs, not from a per-ticket ques
 | `p4.jenkinsUser` | Jenkins account for that read; empty uses `p4.user` or `P4USER` |
 | `p4.jenkinsToken` | Jenkins API token for that read. It is stored only in this installation's settings, used by the host-side check, redacted from its result, and never written to a prompt, a log or the repository |
 | `p4.postApprovalJob` | Jenkins job Swarm triggers when a review is approved; its build is the pre-submit smoke the host reads for the smoke stage. Empty disables that stage. Default `PostApproval-Entry` |
+| `p4.reviewers` | Reviewer choices on the review-waiting card: `{ label, user }` with the p4 account a pick adds to the review as a required reviewer. Empty shows no picker |
+| `p4.autobuildJob` | Jenkins job that builds the editor after a submit. Set, a submitted change stays open at step `autobuild` until its build passed and a person sent the package or closed the Ticket. Empty completes the Ticket at the submit, as before |
+| `p4.autobuildArtifact` | The package link of a passed autobuild, with `<build>`, `<cl>` and `<url>` filled in; empty uses the build page |
+| `p4.autobuildTargets` | People (`ou_…`) and chats (`oc_…`) the package card may send to, as `{ label, id }` |
+| `p4.autobuildMinutes` | Minutes after the submit with no autobuild including it before the card says so. Default 120 |
 | `p4.followupSeconds` | Seconds between the host's polls of an open review; `0` disables automatic follow-up. Default 60 |
 | `p4.fixAttempts` | How many times a failing pipeline wakes its worker to fix it before a person is asked. Default 3 |
 | `p4.stuckMinutes` | Minutes without a new review version or check result before the pipeline counts as stuck. Default 45 |
@@ -101,11 +106,11 @@ The states it derives, in order:
 | --- | --- | --- |
 | A check `fail`, or an AI verdict that is not 通过 | `failure` | A new signature wakes the worker with the failing check titles, their Jenkins error lines and the AI verdict. The same signature is not handed over twice. |
 | `testStatus = pass` and the AI verdict is 通过 (or absent) | `review` | The pipeline goes blocked+manual with `Swarm 已通过，待人工审核`, and one message reads `Swarm - <id> 已通过，待人工审核。` with the id linked to the review. The AI's remaining suggestions are mentioned, not treated as a failure. |
-| `state = approved`, no commits yet, and a running build of `p4.postApprovalJob` | `approved` (step `smoke`) | `已审核通过 · Jenkins 冒烟中（#N）`, one message `Swarm - <id> 已审核通过，Jenkins 冒烟中。`; the build's URL is the stage link and polling continues. Swarm itself reports only the pre-approval checks, so this build is read from Jenkins by its `ReviewId` parameter. |
-| `state = approved`, no commits yet, and that build passed | `approved` (step `ready`) | `Jenkins 冒烟已通过，等待提交`, one message `Swarm - <id> 已审核通过，等待提交。` |
+| `state = approved`, no commits yet, and a running build of `p4.postApprovalJob` | `approved` (step `smoke`) | `已审核通过 · Jenkins 冒烟中（#N）`, one card `已审核通过 · presubmit 冒烟中`; the build's URL is the stage link and polling continues. Swarm itself reports only the pre-approval checks, so this build is read from Jenkins by its `ReviewId` parameter. |
+| `state = approved`, no commits yet, and that build passed | `approved` (step `ready`) | `Jenkins 冒烟已通过，等待提交`, one card `presubmit 通过 · 待提交` |
 | `state = approved`, no commits yet, and that build failed | `blocked` (step `smoke`) | `提交前冒烟失败（#N）`; a person reads the build log and fixes or reruns it. |
 | `state = approved`, no commits yet, and no readable smoke build | `approved` (step `ready`) | `Swarm 已审核通过，等待提交`, the old approval fact; one message `Swarm - <id> 已审核通过，等待提交。` with the id linked; polling continues. |
-| `state = committed`/`archived`, or `approved` with commits | `merged` | The ticket completes as `verification.by: pipeline`, and no check reopens it. The GitHub Source already posts its own concise "PR 已合并" message for a pull request, so the pipeline posts nothing extra. |
+| `state = committed`/`archived`, or `approved` with commits | `merged` | The chat gets one 提交成功 card. Without `p4.autobuildJob` the ticket completes as `verification.by: pipeline`, and no check reopens it; with one, it stays open at step `autobuild` (`pipeline.submitted` records the submit) until the autobuild that includes the change passed and a person sent or closed it. |
 | Review `404` and the changelist is gone (`p4 describe -S` says no such changelist) | `merged` | Submitting deletes the pending changelist, so a missing one after a known review is the submit's trail. |
 | Review `404` but the changelist is still pending | `blocked` | The review disappeared without a submit; a person must check it. A grace period covers the first five minutes after delivery, when Swarm may not serve the new review yet. |
 | A failure unchanged after the worker's last action for `p4.stuckMinutes` | `blocked` | A reshelve with no content change opens no review version, so the person decides instead of the worker looping; the worker can also ask Swarm to rerun the same version. |
@@ -115,6 +120,26 @@ The states it derives, in order:
 A failure is internal work, so it sends no chat message: the worker gets a text Input with the failing checks and Jenkins
 errors and fixes them in its workspace. Messages are queued only for facts a person acts on (a green review, an approval, a
 blocker, the submit), once per event, with a deterministic id so a repeated poll never repeats the message.
+
+### Stage cards in chat
+
+Each of those messages is a card on Feishu (`src/core/pipeline-notice.ts` builds it, `pipelineStageCard` in
+`src/sources/feishu-card.ts` draws it), with the one-line text as the fallback when Feishu refuses a card. The headline
+names the stage and its colour its state: blue running, green passed, orange waiting for a person, red failed. Its links
+(review, Jenkins build, package) open in the system browser, where Swarm and Jenkins can ask for a login.
+
+| Stage | Card | Action |
+| --- | --- | --- |
+| Green review | 检查已通过 · 待人工审核, with the check counts | With `p4.reviewers`, pick reviewers and 发到 Swarm: `POST <reviewApi>/reviews/<id>/participants` adds them as required reviewers |
+| Rerun requested | 检查重跑中, once per request | — |
+| Stuck failure / no result | 检查卡住 · 需要重跑 / 检查没有结果 | 重跑检查 asks Swarm to rerun the failing checks, as `orchestrator_pipeline_rerun` does, and resumes following |
+| Smoke running / passed / failed | 已审核通过 · presubmit 冒烟中 / presubmit 通过 · 待提交 / presubmit 失败, each with its build | — |
+| Submit | 提交成功, with the submitted CL | — |
+| Autobuild running / passed / failed / no build | autobuild 构建中 / 出包成功 / 失败 / 没有结果 | Passed: pick people or chats and 发送编辑器包 (one message each, with the package link); 关单 completes the Ticket |
+
+Only the Ticket's own requester, or a person the Policy allows on Feishu, can use these actions; a reviewer or recipient
+not in the configured list is ignored. The card is replaced with what happened, or with Swarm's reason when it refused.
+Each stage of each review version is announced once, so the passed smoke and the plain approval are separate events.
 
 A worker that finds the code unchanged and the failure flaky can ask Swarm to rerun the current version instead of reshelving
 an unchanged changelist: `orchestrator_pipeline_rerun` calls `POST <reviewApi>/reviews/<id>/testruns/<testrun>/run` for every
@@ -163,7 +188,7 @@ review conversation.
 1. Accept a Ticket with `backend = p4` and check that its directory is a workspace: `p4 -c "$DSH_SUPERAGENT_P4_CLIENT" opened` runs, and the synced files are the configured revision.
 2. Make a trivial change and deliver it: a changelist exists, `p4 describe -S <CL>` shows it still `*pending*` with its shelved files, `p4 opened -c <CL>` still lists the files (nothing was reverted), the review exists in Swarm, and `p4 changes -s submitted` shows nothing new. The Ticket's stage is now `pipeline / running` and its local check is pending in parallel.
 3. Let a check fail: the host wakes the worker once with the failing check and its Jenkins error lines; the chat receives no failure message. Fixing the content and reshelving opens the next review version; a reshelve with no content change does not, so a flaky failure is rerun with `orchestrator_pipeline_rerun` (no new version), and after `p4.stuckMinutes` the Ticket asks a person instead.
-4. Green checks: the chat receives one "Swarm 已通过，待人工审核" message and the Ticket waits as `pipeline / blocked`; no repeat message on later polls. A person's approval moves it to "Swarm 已审核通过，等待提交", or, with `p4.postApprovalJob` readable, to the pre-submit smoke stage (`已审核通过 · Jenkins 冒烟中`); the submit ends the Ticket silently rather than adding another chat message.
+4. Green checks: the chat receives one "Swarm 已通过，待人工审核" message and the Ticket waits as `pipeline / blocked`; no repeat message on later polls. A person's approval moves it to "Swarm 已审核通过，等待提交", or, with `p4.postApprovalJob` readable, to the pre-submit smoke stage (`已审核通过 · Jenkins 冒烟中`); the submit posts one 提交成功 card and ends the Ticket, or, with `p4.autobuildJob`, waits for the autobuild card.
 5. Have a person submit the changelist: `p4 describe -S <CL>` reports no such changelist, the review closes, and the Ticket completes with `verification.by: pipeline` (or keeps a person's earlier local check as `by: person`).
 6. Have a person return the local check on a delivered Ticket: it goes back to `implement` with their note, and a later delivery starts a new pipeline round. Comments on the review still reach no Ticket, so item 3 of section 6 remains unimplemented.
 

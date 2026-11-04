@@ -439,7 +439,7 @@ export type PipelineState = 'running' | 'blocked' | 'merged'
  * pre-submit smoke Jenkins runs after approval, and the submit itself. The panel draws these as one four-step track, so a
  * person reads a ticket by stage rather than by parsing the last check sentence.
  */
-export type PipelineStep = 'tests' | 'review' | 'smoke' | 'ready' | 'merged'
+export type PipelineStep = 'tests' | 'review' | 'smoke' | 'ready' | 'merged' | 'autobuild'
 /** How many pre-approval checks a running review reports, so the panel can show `8/11` instead of just "running". */
 export interface PipelineProgress { pass: number; running: number; fail: number; total: number }
 /**
@@ -475,6 +475,35 @@ export interface TicketPipeline {
   fixAt?: string
   /** When a worker last asked Swarm to rerun checks, so a failure the rerun has not replaced yet is not a new failure. */
   rerunAt?: string
+  /**
+   * The submit, once it happened while an autobuild still has to report: the ticket stays open at step `autobuild` until the
+   * build passes and a person sends its package or closes the ticket. `change` is the submitted changelist when Swarm named it.
+   */
+  submitted?: { at: string; change?: number }
+  /** The autobuild's package link, which the person's "send" click forwards. */
+  artifact?: string
+}
+/**
+ * The structured content of one pipeline notice, so a chat Source can draw it as a card: a headline, one or two short lines,
+ * the links to open and the actions a person may take there. `text` on the message stays the fallback.
+ */
+export interface PipelineCard {
+  ticketId: string
+  /** The ticket's title, the card's subtitle. */
+  title: string
+  /** `info` while it runs, `success` when a stage passed, `waiting` when a person acts, `danger` for a failure. */
+  tone: 'info' | 'success' | 'waiting' | 'danger'
+  heading: string
+  lines: string[]
+  links: { label: string; url: string }[]
+  /** The review's reviewer choices on a review-waiting card; the value is the p4 account a click adds. */
+  reviewers?: { label: string; value: string }[]
+  /** The people and chats an autobuild package may be sent to; the value is a Feishu `ou_`/`oc_` id. */
+  targets?: { label: string; value: string }[]
+  /** Whether the card offers 关单, which ends the ticket as completed. */
+  close?: boolean
+  /** Whether the card offers 重跑, which asks Swarm to rerun the current version's failing checks. */
+  rerun?: boolean
 }
 /**
  * One fact the host observed about a delivered change. A `failure` carries the detail a worker needs to fix it; `review`
@@ -487,8 +516,19 @@ export type PipelineObservation =
   | { kind: 'review'; check: string; url?: string; signature?: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string }
   | { kind: 'approved'; check: string; url?: string; signature?: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string }
   | { kind: 'failure'; check: string; url?: string; signature: string; detail: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string }
-  | { kind: 'blocked'; check: string; reason: string; url?: string; signature?: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string }
-  | { kind: 'merged'; check?: string; url?: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string }
+  | { kind: 'blocked'; check: string; reason: string; url?: string; signature?: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string
+    /** What kind of wait it is, for the notice's headline; absent reads as a generic manual blocker. */
+    topic?: PipelineBlockTopic }
+  | { kind: 'merged'; check?: string; url?: string; step?: PipelineStep; progress?: PipelineProgress; stageUrl?: string
+    /** The submitted changelist, when Swarm named it. */
+    change?: number
+    /** True when the deployment follows an autobuild after the submit: the ticket then stays open at step `autobuild`. */
+    autobuild?: boolean }
+  /** The autobuild after a submit: running, passed with its package link, failed, or not started within the wait. */
+  | { kind: 'autobuild'; result: 'running' | 'passed' | 'failed' | 'timeout'; check: string; signature: string; url?: string
+    stageUrl?: string; artifact?: string; step?: PipelineStep; progress?: PipelineProgress }
+/** Why a pipeline waits for a person: no result at all, a failure that got no new result, the fix attempts used up, a failed pre-submit, or a vanished review. */
+export type PipelineBlockTopic = 'noResult' | 'stuck' | 'attempts' | 'smokeFailed' | 'reviewGone'
 /** How many days a completed ticket stays on the board before it is archived. */
 export const COMPLETED_RETENTION_DAYS = 7
 /** Whether a completed ticket is past its board retention and should be treated as archived. */
