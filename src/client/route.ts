@@ -63,10 +63,15 @@ const ROUTE_KEY = 'dsh-superagent/route'
 export interface Location { route: Route; stack: Route[]; group?: SettingsGroup | undefined }
 export const lastSettingsGroup = ({ route, group }: Location): SettingsGroup => route.page === 'settings' ? route.query.group
   : group ?? 'source'
-/** `?view=board` (or the legacy `?page=overview`) opens the duty-desk board directly, as the Feishu status card links to it. */
+/**
+ * `?view=board` (or the legacy `?page=overview`) opens the duty-desk board directly, as the Feishu status card links to it;
+ * `?ticket=<id>` opens that ticket's page, as each bot message a ticket sends in Feishu links back to it.
+ */
 function linkedRoute(): Route | undefined {
   if (typeof window === 'undefined') return undefined
   const params = new URLSearchParams(window.location.search)
+  const ticket = params.get('ticket')?.trim()
+  if (ticket && /^[0-9a-f]{32}$/i.test(ticket)) return { page: 'execution', id: ticket.toLowerCase() }
   if (params.get('view') === 'board' || params.get('page') === 'overview') return { page: 'editor', query: { view: 'board' } }
   return undefined
 }

@@ -34,6 +34,8 @@ const FeishuConfigSchema = FeishuBotSchema.extend({
   topicChat: z.string().regex(/^(oc_[a-zA-Z0-9]+)?$/).default(''),
   activeTopicHours: z.number().int().min(0).max(168).default(24),
   ackEmoji: z.enum(['OnIt', 'Typing', 'THINKING', 'DONE', 'SMILE', 'none']).default('OnIt'),
+  /** The panel address a person opens from Feishu, such as https://<host>; a ticket's bot messages link its page there. Empty adds no link. */
+  panelUrl: z.string().trim().regex(/^(https?:\/\/[^\s?#]+)?$/, 'http(s)://host[:port][/path]').max(200).default(''),
 }).strict().refine(config => !config.topicChat
   || config.chats.some(chat => chat.chatId === config.topicChat && chat.listen === 'all'),
   { message: 'The topic chat must be listed in chats with "All"', path: ['topicChat'] })
@@ -60,6 +62,8 @@ export const feishuKind: SourceKind<FeishuConfig> = {
       hint: { zh: 'P1 方案确认、P4 交付确认这类需要人拍板的卡片发到这个私聊；留空时发到工单来源的私聊。', en: 'Cards that need a person\'s decision, such as the P1 plan and P4 delivery gates, go to this private chat; empty uses the direct chat a ticket started in.' } },
     { key: 'topicChat', type: 'text', label: { zh: '话题群', en: 'Topic chat' }, pattern: '(oc_[a-zA-Z0-9]+)?',
       hint: { zh: '一个话题群（chat_mode=topic），且在上面的群列表里设为“全部消息”。工单被接下后，机器人会在该群开一个以工单简述命名的话题，工单的后续回复和卡片发到话题里；留空保持现状。', en: 'A topic chat (chat_mode=topic) listed above with "All". After a ticket is accepted, the bot opens a topic named after the ticket brief and sends the ticket\'s later replies and cards there; empty keeps the current behavior.' } },
+    { key: 'panelUrl', type: 'text', label: { zh: '面板地址', en: 'Panel address' }, pattern: '(https?://[^\\s?#]+)?',
+      hint: { zh: '在飞书外部浏览器能打开的面板地址，如 https://<主机>。填了之后，机器人为工单发的每条消息末尾带「工单 xxxxxxxx ↗」，点开就是这张工单的面板页；留空不加链接。', en: 'The panel address a browser outside Feishu can open, such as https://<host>. When set, each message the bot sends for a ticket ends with a 工单 xxxxxxxx ↗ link to that ticket\'s panel page; empty adds no link.' } },
     { key: 'activeTopicHours', type: 'number', advanced: true, min: 0, max: 168, label: { zh: '话题活跃时长 / 小时', en: 'Active topic lifetime / hours' },
       hint: { zh: '一条 @ 机器人的消息（或私聊）之后，同一个话题里多久之内的后续消息不再需要 @ 也算对机器人的请求；0 表示关闭。', en: 'After a message that mentions the bot (or a direct message), later messages in the same topic count as requests without a mention for this long; 0 turns it off.' } },
     { key: 'ackEmoji', type: 'select', advanced: true, label: { zh: '收到消息时的表情', en: 'Receipt reaction' },

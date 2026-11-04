@@ -10,7 +10,7 @@ import type { Commands } from '../infra/commands.ts'
 import { KV } from '../kv.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import { messageLink, priorityCard, sendCard, type PriorityFacts } from '../sources/feishu-card.ts'
-import { notifyChat } from './plan.ts'
+import { notifyChat, panelLinkOf } from './plan.ts'
 import type { Store } from './store.ts'
 
 /** How long a priority card's message id is remembered for its button callback; the card's delayed-update token lasts 30 minutes. */
@@ -49,9 +49,10 @@ export async function notifyPriority(host: PriorityHost, ticket: Ticket): Promis
   try {
     // The bug's Trigger is the ticket's origin, so its meta (short id, status and TAPD priority) gives the card its facts.
     const origin = host.store.triggers.get(ticket.origin.triggerId)
-    const message = await sendCard(host, chat, priorityCard(ticket, ask, priorityFacts(origin)),
+    const message = await sendCard(host, chat, priorityCard(ticket, ask, priorityFacts(origin), panelLinkOf(host, ticket.id)),
       `priority-${key('priority', ticket.id, ask.at)}`, replyTo)
     if (message) {
+      host.store.set(KV.feishu.sent(message), { ticketId: ticket.id, chatId: chat, at: new Date().toISOString() })
       const url = await messageLink(host, message).catch(() => undefined)
       const keep = Date.now() - CARD_KEEP_MS
       const cards = Object.fromEntries(Object.entries(host.store.get(KV.feishu.priorityCards) ?? {})

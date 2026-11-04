@@ -14,7 +14,7 @@ Opening the panel answers three questions, in this order:
 
 The tabs follow the workflow: **Overview**, **Agent status**, **Source**, **Trigger**, **Eval**, **Execution**, and **Settings**. Overview is the editor board; Agent status is the duty desk. Until repository and account setup succeeds, Overview shows what is missing and links to the relevant setting.
 
-A `?view=board` query on the panel URL opens the duty-desk board directly, before the page this tab remembered; `?page=overview` is the legacy alias for the same board. The Feishu status card uses it as its tap target.
+A `?view=board` query on the panel URL opens the duty-desk board directly, before the page this tab remembered; `?page=overview` is the legacy alias for the same board. The Feishu status card uses it as its tap target. `?ticket=<id>` opens that Ticket's page the same way; when the Feishu Source names a **Panel address**, every message the bot sends for a Ticket (replies, plan, priority and question cards) ends with a `工单 xxxxxxxx ↗` link to it. The link is added after the IM word limit is checked, so it never takes words from the message.
 
 | Tab | Shows |
 | --- | --- |
@@ -49,6 +49,8 @@ Ticket details show the execution history built from its Assignments, Inputs and
 The header search finds Triggers by text, id, Feishu message id or a stored link, such as a GitHub comment URL. It searches once typing pauses (or on Enter), and its type filters narrow the results to Tickets, Threads or Triggers, with **All** (全部) as the default. Each row names its kind and Source together, such as 工单 · 飞书, so a Ticket and a Feishu message no longer read as the same thing. A Feishu link missing from the original message becomes searchable only after the host reads it during the current process lifetime.
 
 The ticket finder on Agent status searches titles, ticket ids, changelists, reviews, Thread ids, actors and summaries. It waits for two characters, queries numbers (ticket ids and CLs) immediately, and shows why each hit matched. Archived Tickets stay searchable and are marked **Archived**; the card shows the first eight characters of a ticket id.
+
+Both searches also find the way back from Feishu. Paste the id of a bot message (`om_…`, recorded for each message the bot sends for a Ticket) or of a person's message, a topic link (`omt_…`), a direct-chat message link (`…/chat/open?openChatId=oc_…&position=…`) or a chat id (`oc_…`): the Tickets it leads to come first, most specific first — the message, then its topic, then the whole chat. A chat id, or a link to a message the host never saw, lists every Ticket of that chat, which in a direct chat is every Ticket started there.
 
 Search also finds Threads by references such as `#12` or a GitHub URL, and Tickets by title, a matching Thread, or their worker Session id (`worker-<ticketId>`, the id alone, or the tail a truncated session label shows). A Ticket without a started Assignment has no Session and stays reachable by its title or Thread.
 

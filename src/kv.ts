@@ -7,6 +7,7 @@ import type { BillingSnapshot } from './app/billing.ts'
 import type { SettingsVersion } from './app/store.ts'
 import type { SettingsSave } from './policy.ts'
 import type { ReceiptReaction } from './sources/feishu-receipt.ts'
+import type { FeishuSent } from './sources/feishu-sent.ts'
 import type { Retry } from './sources/github.ts'
 
 /** Key of a KV record whose value has type `V`; a plain string represents an untyped key. */
@@ -69,6 +70,11 @@ export const KV = {
     attentionCards: record<Record<string, { ticketId: string; attentionId: string; at: string; url?: string }>>('feishu-attention-cards'),
     /** Priority card `message_id` to the ticket and the priority question it asks, so a button click records the level. */
     priorityCards: record<Record<string, { ticketId: string; askAt: string; url?: string }>>('feishu-priority-cards'),
+    /**
+     * A message the bot sent for a ticket, by its `message_id`: the reverse index that turns a bot message a person copied
+     * from Feishu (its id, or the topic it sits in) back into the ticket. Kept like outbox receipts, one small row each.
+     */
+    sent: family<FeishuSent, [message: string]>('feishu-sent:'),
     /** Control messages (挂起/恢复) already applied, by message ID and time, so a history replay never toggles processing again. */
     controls: record<Record<string, string>>('feishu-controls'),
     seen: family<string[], [thread: string]>('thread-seen:'), initialized: family<boolean, [thread: string]>('thread-initialized:') },

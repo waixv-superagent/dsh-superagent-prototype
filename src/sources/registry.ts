@@ -94,7 +94,8 @@ export class SourceRegistry implements SourceScope {
   async send(message: OutboundMessage, host: ChannelHost): Promise<'sent' | 'gone' | 'waiting'> {
     const kind = this.kinds.get(message.channel.source)
     if (!kind) return 'waiting'
-    return kind.channel ? kind.channel.send(host, message) : 'gone'
+    // The channel also reads its Source's settings, such as the panel address a Feishu message links its ticket with.
+    return kind.channel ? kind.channel.send(host, message, this.resolve(kind, this.settings().sources[kind.kind]).config) : 'gone'
   }
   link(channel: ChannelRef, links: ChannelLinks): ChannelLink {
     const link = this.kinds.get(channel.source)?.channel?.link(channel.address, links)
