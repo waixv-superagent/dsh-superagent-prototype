@@ -77,14 +77,19 @@ function linkedRoute(): Route | undefined {
   if (params.get('view') === 'board' || params.get('page') === 'overview') return { page: 'editor', query: { view: 'board' } }
   return undefined
 }
+/** Validate a stored location (sessionStorage or a browser history entry), or undefined when its route is unknown. */
+export function parseLocation(value: unknown): Location | undefined {
+  const stored = (value ?? {}) as { route?: unknown; stack?: unknown; group?: unknown }
+  const route = parseRoute(stored.route)
+  const stack = Array.isArray(stored.stack) ? stored.stack as unknown[] : []
+  return route ? { route, stack: stack.flatMap(item => parseRoute(item) ?? []), group: pick(SETTINGS_GROUPS, stored.group) } : undefined
+}
 export function initialLocation(): Location {
   const linked = linkedRoute()
   if (linked) return { route: linked, stack: [] }
   try {
-    const stored = JSON.parse(sessionStorage.getItem(ROUTE_KEY) ?? 'null') as { route?: unknown; stack?: unknown; group?: unknown } | null
-    const route = parseRoute(stored?.route)
-    const stack = Array.isArray(stored?.stack) ? stored.stack as unknown[] : []
-    if (route) return { route, stack: stack.flatMap(item => parseRoute(item) ?? []), group: pick(SETTINGS_GROUPS, stored?.group) }
+    const location = parseLocation(JSON.parse(sessionStorage.getItem(ROUTE_KEY) ?? 'null'))
+    if (location) return location
   } catch (error) {
     // Route memory is a convenience; an unreadable value falls back to HOME.
     void error
@@ -93,4 +98,30 @@ export function initialLocation(): Location {
 }
 export function remember(location: Location): void {
   try { sessionStorage.setItem(ROUTE_KEY, JSON.stringify(location)) } catch (failure) { void failure /* Route memory is a convenience. */ }
+}
+
+/**
+ * The panel's own key in `history.state`. Each panel navigation is a browser history entry holding the location it shows and
+ * its position, so the browser's Back/Forward and a mouse's side buttons step through panel pages. The URL is left as it is,
+ * and other keys of the entry's state are kept, as the host may own them.
+ */
+const HISTORY_KEY = 'dshSuperagent'
+export interface HistoryEntry { location: Location; index: number }
+/** The panel entry a browser history state holds, or undefined for an entry the panel did not write. */
+export function historyEntry(state: unknown): HistoryEntry | undefined {
+  const own = (state && typeof state === 'object' ? (state as Record<string, unknown>)[HISTORY_KEY] : undefined) as
+    { location?: unknown; index?: unknown } | undefined
+  const location = parseLocation(own?.location)
+  return location && typeof own?.index === 'number' && Number.isSafeInteger(own.index) && own.index >= 0
+    ? { location, index: own.index } : undefined
+}
+/** Record `location` as a new history entry (`push`) or as the current one (`replace`); a refused write leaves navigation in-panel. */
+export function writeHistory(mode: 'push' | 'replace', location: Location, index: number): void {
+  if (typeof window === 'undefined') return
+  try {
+    const current = window.history.state as unknown
+    const state = { ...current && typeof current === 'object' ? current : {}, [HISTORY_KEY]: { location, index } }
+    if (mode === 'push') window.history.pushState(state, '')
+    else window.history.replaceState(state, '')
+  } catch (failure) { void failure /* History is a convenience; the panel's own stack still navigates. */ }
 }
