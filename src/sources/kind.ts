@@ -52,7 +52,7 @@ export interface SourceChannel<C> {
    * Sends a message idempotently by ID; returns `'gone'` when the target conversation no longer accepts replies.
    * @throws when delivery failed but may succeed on a later retry.
    */
-  send(host: ChannelHost, message: OutboundMessage): Promise<'sent' | 'gone'>
+  send(host: ChannelHost, message: OutboundMessage, config: C): Promise<'sent' | 'gone'>
   /** Returns the URL and label for `address`; `url` is empty when `links` lack the required deployment info. */
   link(address: Record<string, string>, links: ChannelLinks): ChannelLink
 }

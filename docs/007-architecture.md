@@ -378,6 +378,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/views/records.ts` | The rows the views share: Triggers, Tickets, Threads, Decisions and Channel links, and `ownersOf`, the owners of follow-ups as one request reads them |
 | `src/app/views/tickets.ts` | The Ticket lists by stage, a Ticket's page, the Mandate basis facts and the Executor's load |
 | `src/app/views/threads.ts` | The Thread lists, a Thread's timeline, the search and the Decision list |
+| `src/app/views/trace.ts` | The way back from Feishu: the tickets a pasted bot or person message id, topic link, direct-chat message link or chat id leads to, most specific first |
 | `src/app/views/sources.ts` | The Source status: each Source instance's state, its last day's counts, and what it filtered and dropped in that day |
 | `src/app/views/settings.ts` | The settings page's view: each block with its revision, each Source's settings with its kind's form, and the execution environment |
 | `src/app/views/overview.ts` | The overview: Tickets that need a person, problems, the last day's flow and the Executor's load |
@@ -405,6 +406,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/feishu-control.ts` | Pauses or resumes processing from a Feishu conversation (`挂起`, `恢复`): it runs before the Engine, so the resume word gets through while paused, answers in the same thread, and records no Trigger; only a person on the Policy's allowed list may switch processing |
 | `src/sources/feishu-loops.ts` | The Feishu loops: the message and card-action event consumers, history recovery, chat names and polling of subscribed topics |
 | `src/sources/feishu-channel.ts` | The Feishu Channel: topic replies, `sent` or `gone` |
+| `src/sources/feishu-sent.ts` | The ticket link a bot message ends with (`?ticket=` on the configured panel address), the record of each bot message sent for a ticket (`KV.feishu.sent`), and the Feishu ids a pasted text names |
 | `src/sources/feishu-topic.ts` | Opens a ticket's Feishu topic: the root message carries the ticket brief, short id and original message link, the ticket's replies move there (`Ticket.replyChannel`, `Tickets.retarget`), and the original thread gets a back-link to the topic |
 | `src/sources/feishu-card.ts` | Feishu interactive cards: the decision-brief P1 plan card, the direction form, the recorded answer, the text fallback and `sendCard` to a chat or into a thread |
 | `src/sources/feishu-text.ts` | The text both a Feishu reply and a card share: the cmd-safe rewrite and the post-content JSON |
@@ -496,6 +498,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/feishu-cards.spec.ts` | A card callback decides its own plan through the button or form, answers a stale card, and ignores anyone but the ticket actor |
 | `tests/feishu-channel.spec.ts` | The outbound reply payload: Markdown as one post content JSON with no literal newline, the reply's thread and idempotency arguments, the question card's own message link, and the client scheme that skips the browser landing page |
 | `tests/feishu-links.spec.ts` | Message links versus chat links and topic links: a Thread keeping the opening message's AppLink, asking Feishu for its root, falling back to the chat, opening the topic at its newest message while cards keep their position, and the pass that fills cards and Threads stored before their message link was known |
+| `tests/feishu-trace.spec.ts` | Finding a ticket from Feishu: the ticket link on replies and cards outside the word limit, the record of the bot's own message, and the search from a bot message id, a person's message, a direct-chat link, a topic link or a chat id |
 | `tests/feishu-topic.spec.ts` | Opening a ticket's Feishu topic: the root brief and link, the retargeted reply channel and thread, the back-link in the original thread, a failed link lookup, idempotence, and the config requiring a receive-all topic chat |
 | `tests/plan-host.spec.ts` | Where a plan card goes: the ticket's topic reply channel, the configured private chat, the direct chat a ticket started in, and what a send failure reports |
 | `tests/priority.spec.ts` | Priority and idle: level parsing, source defaults and stickiness, P0 only from a person, TAPD's suggestion, the five-signal judgement and its windows, the idle scheduler's hold/admit answers and daily budget, the priority card and its button parsing, and the Executor holding a pending-question launch without failing it |

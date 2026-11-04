@@ -8,6 +8,7 @@ import type { Store } from '../store.ts'
 import { channelLink, decisionView, delivered, newestFirst, page, snapshot, threadSummary, threadTitle, ticketLine, ticketSummary,
   type Snapshot, type ViewHost } from './records.ts'
 import { markdown, preview } from './text.ts'
+import { feishuTrace } from './trace.ts'
 
 export type BasisFact =
   | { name: 'addressed'; value: 'mention' | 'direct' } | { name: 'followup' } | { name: 'admission'; value: AdmissionCell } | { name: 'observation' }
@@ -60,7 +61,7 @@ export function ticketList(host: ViewHost, stage: 'open' | TicketStage['stage'] 
 }
 export type TicketListView = ReturnType<typeof ticketList>
 /** Why a search hit matched, in data the panel can label without guessing: the field and the concrete value it saw. */
-export type TicketMatch = { field: 'id' | 'changelist' | 'review' | 'title' | 'summary' | 'thread' | 'actor'; text: string }
+export type TicketMatch = { field: 'id' | 'changelist' | 'review' | 'title' | 'summary' | 'thread' | 'actor' | 'feishu'; text: string }
 export type TicketSearchHit = { ticket: ReturnType<typeof ticketSummary>; match: TicketMatch; archived?: true }
 /**
  * Finds Tickets by what a person remembers: an id, a changelist, a review, a title or summary phrase, a Thread, or the
@@ -77,11 +78,16 @@ export function ticketSearch(host: ViewHost, query: string, limit = 8) {
   const terms = lower.split(/\s+/).filter(Boolean)
   const cl = /^(?:cl\s*)?#?(\d{4,})$/i.exec(value)?.[1]
   const reviewNumber = /(?:^|\/)(\d{3,})\/?$/.exec(value)?.[1]
+  // A Feishu message, topic or chat a person pasted leads straight to its tickets: the bot's own message first, then the
+  // topic, then the chat; the hit shows the Feishu id it matched.
+  const traced = new Map(feishuTrace(store, value).map(hit => [hit.ticket.id, hit]))
   const best = (ticket: Ticket): { score: number; match: TicketMatch } | undefined => {
     let found: { score: number; match: TicketMatch } | undefined
     const consider = (score: number, field: TicketMatch['field'], text: string) => {
       if (!found || score > found.score) found = { score, match: { field, text } }
     }
+    const trace = traced.get(ticket.id)
+    if (trace) consider(trace.via === 'message' ? 950 : trace.via === 'topic' ? 850 : 650, 'feishu', trace.id)
     if (ticket.id.toLowerCase() === bare || bare.length >= 6 && ticket.id.toLowerCase().startsWith(bare)) {
       consider(1000, 'id', `#${ticket.id.slice(0, 8)}`)
     }

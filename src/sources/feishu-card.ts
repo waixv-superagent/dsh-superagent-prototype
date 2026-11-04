@@ -14,6 +14,13 @@ export interface CardHost { readonly commands: Pick<Commands, 'lark'> }
 export interface CardMessage { card: Record<string, unknown>; text: string }
 /** The short ticket id a card shows, as the panel links it: the first eight characters of the full id. */
 const shortId = (ticket: Pick<Ticket, 'id'>): string => ticket.id.slice(0, 8)
+/**
+ * The card's way back to its ticket: one small line that opens the ticket's panel page. Built without markdown, whose
+ * angle-bracket rewrite and link titling must not touch the URL.
+ */
+const ticketLinkText = (ticketId: string, link: string): string => `[工单 ${shortId({ id: ticketId })} ↗](${link})`
+const ticketLinkLine = (ticketId: string, link: string): Record<string, unknown> =>
+  ({ tag: 'markdown', content: ticketLinkText(ticketId, link), text_size: 'notation' })
 /** The plan's lines by label; a card shows the lines the worker wrote and `—` for one it left out (the gate refuses those). */
 const linesOf = (text: string, template: PlanTemplate = 'fix'): Map<string, string> => new Map(planLines(text, template).map(line => [line.label, line.text]))
 /** A bare URL's display title: what it is, not the address, while the link still opens the URL. */
@@ -164,7 +171,8 @@ const deadlineText = (deadline: string): string => new Date(deadline).toLocaleSt
  * buttons (the standard three when it wrote none). The text fallback carries the key lines and the labels in full, since only
  * a person who cannot see the card reads it.
  */
-export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 'text' | 'template' | 'question' | 'options' | 'deadline' | 'sections'>): CardMessage {
+export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 'text' | 'template' | 'question' | 'options' | 'deadline' | 'sections'>,
+  ticketLink?: string): CardMessage {
   const template = planTemplate(plan)
   const lines = linesOf(plan.text, template)
   const get = (label: string): string => lines.get(label) ?? ''
@@ -202,6 +210,7 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
           columns: choices.map((choice, index) => ({ tag: 'column', elements: [
             decisionButton(choice.label, buttonType(choice.decision), choice.decision, index)] })),
         },
+        ...ticketLink ? [ticketLinkLine(ticket.id, ticketLink)] : [],
       ],
     },
   }
@@ -212,6 +221,7 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
     '通过后：开始实现，按验证方案验证，再交给你确认交付；不会直接 submit。',
     `选项：${choices.map(choice => choice.description ? `${choice.label}（${choice.description}）` : choice.label).join(' ｜ ')}`,
     custom ? '卡片按这次对话的语境用了自定义分块。' : `证据（${layout.fold.join('/')}）在卡片折叠与工单面板里。`, PLAN_REPLY_HINT].join('\n'))
+    + (ticketLink ? `\n${ticketLinkText(ticket.id, ticketLink)}` : '')
   return { card, text }
 }
 /**
@@ -292,7 +302,8 @@ export const priorityLabel = (level: PriorityLevel): string => `${PRIORITY_LABEL
  * deadline after which the `P2` default applies and the ticket joins the idle pool. A short chat reply (`p0`–`p3`, 紧急,
  * 不急, 排期) answers it as well, so the card is a question with defaults, not a notification.
  */
-export function priorityCard(ticket: Pick<Ticket, 'id' | 'title'>, ask: Pick<PriorityAsk, 'deadline'>, facts: PriorityFacts = {}): CardMessage {
+export function priorityCard(ticket: Pick<Ticket, 'id' | 'title'>, ask: Pick<PriorityAsk, 'deadline'>, facts: PriorityFacts = {},
+  ticketLink?: string): CardMessage {
   const suggested = facts.suggestion ? `**建议** ${priorityLabel(facts.suggestion)}${facts.reason ? `：${facts.reason}` : ''}` : ''
   const source = [facts.shortId ? `TAPD ${facts.shortId}` : '', facts.status ? `状态 ${facts.status}` : '',
     facts.tapdPriority ? `TAPD 优先级 ${facts.tapdPriority}` : ''].filter(Boolean).join(' · ')
@@ -316,6 +327,7 @@ export function priorityCard(ticket: Pick<Ticket, 'id' | 'title'>, ask: Pick<Pri
         { tag: 'hr', margin: '4px 0px 0px 0px' },
         markdown(`⏳ ${deadlineText(ask.deadline)} 前不回复默认 **P2**，进闲时池等系统有空时处理；之后也能随时改。直接回 \`p0\` / \`p1\` / \`p2\` / \`p3\` 也一样。`,
           { text_size: 'notation' }),
+        ...ticketLink ? [ticketLinkLine(ticket.id, ticketLink)] : [],
       ],
     },
   }
@@ -323,7 +335,7 @@ export function priorityCard(ticket: Pick<Ticket, 'id' | 'title'>, ask: Pick<Pri
     ...source ? [source] : [], ...suggested ? [suggested.replace(/\*\*/g, '')] : [],
     `选项：${PRIORITY_LEVELS.map(priorityLabel).join(' ｜ ')}`,
     `${deadlineText(ask.deadline)} 前不回复默认 P2，进闲时池；之后也能随时改。`,
-    '回 p0 / p1 / p2 / p3，或 紧急 / 不急 / 排期。'].join('\n'))
+    '回 p0 / p1 / p2 / p3，或 紧急 / 不急 / 排期。'].join('\n')) + (ticketLink ? `\n${ticketLinkText(ticket.id, ticketLink)}` : '')
   return { card, text }
 }
 /** The card that replaces a priority question once it is answered, so the chat record says where the ticket now stands. */
@@ -354,7 +366,8 @@ export function priorityStaleCard(ticketId: string): CardMessage {
  * plain chat reply reaches the same ticket. A click carries the attention id, so a card whose question was replaced never
  * answers the newer one.
  */
-export function attentionCard(question: string, attentionId: string, options: readonly string[], ticketId?: string, sections?: readonly QuestionSection[]): CardMessage {
+export function attentionCard(question: string, attentionId: string, options: readonly string[], ticketId?: string, sections?: readonly QuestionSection[],
+  ticketLink?: string): CardMessage {
   const body = sections?.filter(section => !section.fold) ?? []
   const folded = sections?.filter(section => section.fold) ?? []
   const card = {
@@ -379,12 +392,13 @@ export function attentionCard(question: string, attentionId: string, options: re
           }] })),
         },
         markdown('点一个就行；也可以直接在对话里回复。', { text_size: 'notation' }),
+        ...ticketLink && ticketId ? [ticketLinkLine(ticketId, ticketLink)] : [],
       ],
     },
   }
   const text = textSafe([`要你选：${question}`, ...sections?.map(section => blockText(section.label, section.text)) ?? [],
     `可选项：${options.map((option, index) => `${index + 1}. ${option}`).join(' ｜ ')}`,
-    '点卡片或直接回复都可以。'].join('\n'))
+    '点卡片或直接回复都可以。'].join('\n')) + (ticketLink && ticketId ? `\n${ticketLinkText(ticketId, ticketLink)}` : '')
   return { card, text }
 }
 /** The card that replaces a question once a person clicked one of its choices. */

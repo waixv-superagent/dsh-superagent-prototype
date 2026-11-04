@@ -3,6 +3,7 @@ import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
 import type { Decision, Thread, Trigger } from '../core/index.ts'
 import type { Dropped, Receipt, TimelinePlace } from './store.ts'
 import { PARKED } from './effects.ts'
+import { KV } from '../kv.ts'
 
 export function storeReads(db: DatabaseSync) {
   const values = <T>(sql: string, ...parameters: SQLInputValue[]): T[] => db.prepare(sql).all(...parameters).map(row => JSON.parse(String(row.value)) as T)
@@ -78,5 +79,23 @@ export function storeReads(db: DatabaseSync) {
     ? values('SELECT value FROM thread WHERE subscribed = ? ORDER BY rowid', source)
     // Force the partial index so SQLite does not scan the entire table in rowid order.
     : values('SELECT value FROM thread INDEXED BY thread_subscribed WHERE subscribed IS NOT NULL ORDER BY rowid'),
+  /**
+   * Threads a Feishu id leads to, for the way back from a pasted message or link: the thread of the message `om_` (its own
+   * Trigger), every thread holding a message of the topic `omt_`, or every thread of the chat `oc_` (its sub-threads too).
+   */
+  feishuThreads: (by: 'message' | 'topic' | 'chat', id: string, limit = 200): Thread[] => {
+    if (by === 'chat') {
+      const prefix = `feishu:${id.replace(/[\\%_]/g, match => `\\${match}`)}`
+      return values("SELECT value FROM thread WHERE key = ? OR key LIKE ? ESCAPE '\\' ORDER BY rowid DESC LIMIT ?", `feishu:${id}`, `${prefix}:%`, limit)
+    }
+    const path = by === 'message' ? '$.meta.messageId' : '$.meta.threadId'
+    return values<Thread>(`SELECT DISTINCT h.value FROM trigger t JOIN trigger_thread x ON x.id = t.id JOIN thread h ON h.key = x.thread
+      WHERE json_extract(t.value, '$.source') = 'feishu' AND json_extract(t.value, '${path}') = ? LIMIT ?`, id, limit)
+        .concat(by === 'topic' ? values<Thread>("SELECT value FROM thread WHERE json_extract(value, '$.meta.threadId') = ? LIMIT ?", id, limit) : [])
+  },
+  /** The bot messages recorded for tickets (`KV.feishu.sent`) in a topic or a chat, newest first. */
+  feishuSent: (by: 'topic' | 'chat', id: string, limit = 200): { ticketId: string }[] => values(`SELECT value FROM kv
+    WHERE key LIKE ? AND json_extract(value, '${by === 'topic' ? '$.threadId' : '$.chatId'}') = ?
+    ORDER BY json_extract(value, '$.at') DESC LIMIT ?`, `${KV.feishu.sent.prefix}%`, id, limit),
   }
 }

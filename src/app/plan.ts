@@ -9,6 +9,7 @@ import type { Commands } from '../infra/commands.ts'
 import { KV } from '../kv.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import { planCard, messageLink, sendCard } from '../sources/feishu-card.ts'
+import { ticketPanelLink } from '../sources/feishu-sent.ts'
 import type { Store } from './store.ts'
 
 /** How long a plan card's message id is remembered for its button callback; the card's delayed-update token lasts 30 minutes. */
@@ -21,6 +22,11 @@ export interface PlanHost {
   warn(message: string): void
 }
 
+/** The ticket's panel page when the Feishu Source names a panel address, for the link a card carries back to its ticket. */
+export function panelLinkOf(host: { sources: Pick<SourceRegistry, 'instance'> }, ticketId: string): string | undefined {
+  const panelUrl = host.sources.instance<{ panelUrl?: string }>('feishu')?.config?.panelUrl?.trim()
+  return panelUrl ? ticketPanelLink(panelUrl, ticketId) : undefined
+}
 /** Where intervention cards go: the configured private chat, else the direct chat a trigger came from, else none. */
 export function notifyChat(store: Pick<Store, 'settings' | 'triggers'>, ticket: Pick<Ticket, 'origin'>): string | undefined {
   const config = store.settings().sources.feishu?.config ?? {}
@@ -45,9 +51,10 @@ export async function notifyPlan(host: PlanHost, ticket: Ticket): Promise<string
   const replyTo = channel?.address.messageId
   if (!chat) { host.warn(`Ticket ${ticket.id}: no Feishu conversation for its plan card; set a private chat in the Feishu Source`); return undefined }
   try {
-    const message = await sendCard(host, chat, planCard(ticket, plan), `plan-${key('plan', ticket.id, plan.at)}`, replyTo)
+    const message = await sendCard(host, chat, planCard(ticket, plan, panelLinkOf(host, ticket.id)), `plan-${key('plan', ticket.id, plan.at)}`, replyTo)
     // Remember which plan the card asks about, so its buttons can decide without matching a chat thread, and drop old entries.
     if (message) {
+      host.store.set(KV.feishu.sent(message), { ticketId: ticket.id, chatId: chat, at: new Date().toISOString() })
       // The card's own link, so the panel's answer button opens the question instead of the chat's newest message.
       const url = await messageLink(host, message).catch(() => undefined)
       const keep = Date.now() - CARD_KEEP_MS

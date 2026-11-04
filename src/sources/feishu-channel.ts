@@ -4,6 +4,7 @@ import { KV } from '../kv.ts'
 import { CliError } from '../infra/commands.ts'
 import { checkedImText } from '../infra/text.ts'
 import { attentionCard, messageIdOf, messageLink } from './feishu-card.ts'
+import { rememberSent, threadIdOf, ticketPanelLink, withTicketFooter } from './feishu-sent.ts'
 import { releaseReceipt } from './feishu-receipt.ts'
 import { jsonForCmd, feishuPostContent } from './feishu-text.ts'
 import { feishuTriggerId } from './feishu-trigger.ts'
@@ -70,18 +71,32 @@ const gone = (error: unknown): boolean => error instanceof CliError && (error.co
  * bot held on that message: the reply itself is the acknowledgement. A retryable failure keeps the receipt, since the Outbox
  * delivers that reply again.
  */
-export async function sendFeishu(host: ChannelHost, message: OutboundMessage): Promise<'sent' | 'gone'> {
+export async function sendFeishu(host: ChannelHost, message: OutboundMessage, config: { panelUrl?: string } = {}): Promise<'sent' | 'gone'> {
   const messageId = message.channel.address.messageId
   if (!messageId) throw new Error('Missing Feishu reply target')
-  const text = checkedImText(message.text)
+  const checked = checkedImText(message.text)
+  const panelUrl = config.panelUrl?.trim() ?? ''
+  // The ticket link goes on after the limit check, so the footer never takes words from the message itself.
+  const text = withTicketFooter(checked, panelUrl, message.ticketId)
+  const chatId = message.channel.address.chatId ?? ''
+  /** Keeps the way back from the bot's message to its ticket, for the panel's search. */
+  const remember = (output: unknown): void => {
+    const id = messageIdOf(output)
+    const ticketId = message.ticketId ?? message.attention?.ticketId
+    if (!id || !ticketId || !chatId) return
+    const threadId = threadIdOf(output)
+    rememberSent(host.state, KV.feishu.sent(id), { ticketId, chatId, at: new Date().toISOString(), ...threadId ? { threadId } : {} })
+  }
   // A question with choices is a card: the click answers it without a chat round-trip. A card Feishu rejects falls back to
   // the plain text reply, so the question still reaches the person.
   if (message.attention) {
     try {
       const sent = await host.commands.lark<unknown>(['im', '+messages-reply', '--message-id', messageId, '--msg-type', 'interactive',
-        '--content', jsonForCmd(attentionCard(message.text, message.attention.attentionId, message.attention.options, message.attention.ticketId, message.attention.sections).card),
+        '--content', jsonForCmd(attentionCard(message.text, message.attention.attentionId, message.attention.options, message.attention.ticketId, message.attention.sections,
+          panelUrl ? ticketPanelLink(panelUrl, message.attention.ticketId) : undefined).card),
         '--reply-in-thread', '--idempotency-key', message.id])
       const id = messageIdOf(sent)
+      remember(sent)
       if (id) {
         // The card's own link is what the panel's answer button opens, so it lands on the question rather than the chat.
         const url = await messageLink(host, id).catch(() => undefined)
@@ -100,7 +115,7 @@ export async function sendFeishu(host: ChannelHost, message: OutboundMessage): P
   }
   const reply = ['im', '+messages-reply', '--message-id', messageId, '--msg-type', 'post', '--content', feishuPostContent(text), '--reply-in-thread', '--idempotency-key', message.id]
   let outcome: 'sent' | 'gone' = 'sent'
-  try { await host.commands.lark(reply) }
+  try { remember(await host.commands.lark(reply)) }
   catch (error) {
     if (!gone(error)) throw error
     outcome = 'gone'

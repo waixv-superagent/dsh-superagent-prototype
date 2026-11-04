@@ -4,6 +4,7 @@ import type { ThreadFilter } from '../api.ts'
 import type { TextCache } from '../cache.ts'
 import { awaitingEval, channelLink, dayAgo, decisionView, newestFirst, page, snapshot, threadSummary, threadTitle, ticketLine,
   ticketSummary, triggerView, type ViewHost } from './records.ts'
+import { feishuTrace } from './trace.ts'
 
 export function threadList(host: ViewHost, filter: ThreadFilter, offset: number, limit: number) {
   const { store } = host
@@ -85,7 +86,12 @@ export function search(host: ViewHost, query: string, links: Pick<TextCache, 'en
     ...view.threadsOf(ticket.id).map(thread => thread.key)]
   const matches = (ticket: Ticket) => reaches(ticket).some(key => named.threads.includes(key))
     || ticket.title.toLowerCase().includes(lower) || matchesSession(ticket, lower)
-  const tickets = store.tickets.list().filter(matches).sort(newestFirst).slice(0, 10).map(ticketSummary)
+  // A pasted Feishu message, topic or chat leads to its tickets first, most specific first (see `feishuTrace`); a chat
+  // id lists every ticket of that chat, so this list is not capped at ten for it.
+  const traced = feishuTrace(store, value).map(hit => hit.ticket)
+  const known = new Set(traced.map(ticket => ticket.id))
+  const others = store.tickets.list().filter(ticket => !known.has(ticket.id) && matches(ticket)).sort(newestFirst)
+  const tickets = [...traced, ...others].slice(0, Math.max(10, traced.length)).map(ticketSummary)
   // Omit automated triggers from threads already included in `threads`.
   const shownThreads = new Set(threads.map(thread => thread.key))
   const item = (trigger: Trigger) => {
