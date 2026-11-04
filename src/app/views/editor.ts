@@ -2,6 +2,8 @@
 import { completedArchived, ticketStage, type Ticket } from '../../core/index.ts'
 import { mcpToolName, type Activity, type ActivityView } from '../activity.ts'
 import type { EditorBuild, EditorView } from '../editor.ts'
+import { engineSummary, type EditorEngineState } from '../editor-mcp.ts'
+import { DRAIN_GRACE_MS, ordered, personBlock, type EditorEvent, type EditorJob, type EditorPurpose, type EditorSchedule } from '../editor-schedule.ts'
 import { delivered, newestFirst, snapshot, type ViewHost } from './records.ts'
 import { ticketRow } from './tickets.ts'
 
@@ -33,6 +35,8 @@ export interface EditorWorkingRow {
   usesEditor: boolean
   /** The display badge: uses, provably does not, or the page has no opinion. */
   use: EditorUse
+  /** Where the Ticket stands with the editor scheduler: holding it for a purpose, or waiting at a position. */
+  lease?: { state: 'holding'; purpose: EditorPurpose; note: string; since: string } | { state: 'queued'; purpose: EditorPurpose; position: number }
 }
 
 /** How a worker's current tool relates to the editor; unknown when it is between tools or not a shell command. */
@@ -86,7 +90,7 @@ export interface EditorBuildView extends EditorBuild {
 export interface EditorTimelineBand {
   id: string
   /** Who or what the span represents: the holder, a worker assignment, or the tool it is in. */
-  tone: 'person' | 'agent' | 'unknown' | 'run' | 'idle' | 'build' | 'test' | 'tool'
+  tone: 'person' | 'agent' | 'unknown' | 'run' | 'idle' | 'build' | 'test' | 'tool' | 'lease' | 'wait'
   from: string
   to: string
   /** Tool name for a tool span; Tickets are named by their row. */
@@ -133,12 +137,52 @@ function clamp(at: string | undefined | null, from: number, to: number): number 
 }
 
 /**
- * The last-hour timeline: one lane for the editor process and one lane per working Ticket, built only from recorded
+ * The lease spans of the last hour per Ticket, from the scheduler's own events: a grant opens one, the release, expiry or
+ * end closes it, and a lease still held runs to now. A wait is drawn from its queue time to its grant or to now.
+ */
+function leaseSpans(schedule: EditorSchedule | undefined, fromMs: number, nowMs: number): Map<string, EditorTimelineBand[]> {
+  const spans = new Map<string, EditorTimelineBand[]>()
+  if (!schedule) return spans
+  const push = (ticketId: string, band: EditorTimelineBand) => { spans.set(ticketId, [...spans.get(ticketId) ?? [], band]) }
+  const open = new Map<string, { at: number; purpose?: EditorPurpose }>()
+  const waits = new Map<string, number>()
+  const close = (ticketId: string, at: number) => {
+    const start = open.get(ticketId)
+    if (!start) return
+    open.delete(ticketId)
+    const from = Math.max(start.at, fromMs)
+    if (at > from) push(ticketId, { id: `${ticketId}-lease-${start.at}`, tone: 'lease', from: iso(from), to: iso(at), label: start.purpose })
+  }
+  const closeWait = (ticketId: string, at: number) => {
+    const start = waits.get(ticketId)
+    if (start === undefined) return
+    waits.delete(ticketId)
+    const from = Math.max(start, fromMs)
+    if (at > from) push(ticketId, { id: `${ticketId}-wait-${start}`, tone: 'wait', from: iso(from), to: iso(at) })
+  }
+  for (const item of schedule.events) {
+    const at = Date.parse(item.at)
+    if (!Number.isFinite(at)) continue
+    for (const ticketId of item.ticketIds ?? []) {
+      if (item.kind === 'queued' && !waits.has(ticketId)) waits.set(ticketId, at)
+      if (item.kind === 'granted') { closeWait(ticketId, at); open.set(ticketId, { at, ...item.purpose ? { purpose: item.purpose } : {} }) }
+      if (item.kind === 'released' || item.kind === 'expired' || item.kind === 'ended') close(ticketId, at)
+      if (item.kind === 'cancelled') closeWait(ticketId, at)
+    }
+  }
+  for (const ticketId of [...open.keys()]) close(ticketId, nowMs)
+  const waiting = new Set(schedule.queue.flatMap(request => request.ticketIds))
+  for (const ticketId of [...waits.keys()]) if (waiting.has(ticketId)) closeWait(ticketId, nowMs)
+  return spans
+}
+
+/** * The last-hour timeline: one lane for the editor process and one lane per working Ticket, built only from recorded
  * start/end times and the live tool's elapsed time. It shows what happened, not an estimate of what comes next.
  */
 function timeline(nowMs: number, editor: EditorView | null, staged: { ticket: Ticket; stage: ReturnType<typeof ticketStage> }[],
-  activity: Map<string, ActivityView>): EditorTimeline {
+  activity: Map<string, ActivityView>, schedule?: EditorSchedule): EditorTimeline {
   const fromMs = nowMs - TIMELINE_MS
+  const leases = leaseSpans(schedule, fromMs, nowMs)
   const to = iso(nowMs)
   const editorBands: EditorTimelineBand[] = []
   if (editor?.since && (editor.holder === 'person' || editor.holder === 'agent')) {
@@ -163,6 +207,7 @@ function timeline(nowMs: number, editor: EditorView | null, staged: { ticket: Ti
       const running = assignment.state === 'running' && !assignment.endedAt && !assignment.idleAt
       bands.push({ id: assignment.id, tone: running ? 'run' : 'idle', from: iso(start), to: iso(end) })
     }
+    bands.push(...leases.get(ticket.id) ?? [])
     const tool = live.live ? live.tool : null
     if (tool) {
       const start = clamp(iso(nowMs - tool.elapsed), fromMs, nowMs)
@@ -180,8 +225,57 @@ function timeline(nowMs: number, editor: EditorView | null, staged: { ticket: Ti
   return { from: iso(fromMs), to, editor: editorBands, workers, hidden: rows.length - workers.length }
 }
 
+/** The scheduler's facts the page shows: who holds the editor and for what, who waits, the jobs, and ue-mcp's reading. */
+export interface EditorScheduleView {
+  holder: { kind: 'agent' | 'job' | 'person'; purpose: EditorPurpose; note: string; since: string; expiresAt: string | null
+    tickets: { id: string; title: string }[]; jobId?: string; draining: { at: string; reason: string; overdue: boolean } | null } | null
+  queue: { id: string; position: number; purpose: EditorPurpose; note: string; at: string; person: boolean; front: boolean
+    tickets: { id: string; title: string }[]; jobId?: string }[]
+  /** Running and queued jobs first, then the latest ended ones. */
+  jobs: (EditorJob & { tickets: { id: string; title: string }[] })[]
+  /** Newest first, at most 12. */
+  events: (EditorEvent & { tickets: { id: string; title: string }[] })[]
+  /** Why agents are held back right now, or null when one may take it. */
+  blocked: 'claimed' | 'editor' | 'unknown' | null
+  /** A person let agents use the editor that is open; the page offers to take it back. */
+  yielded: boolean
+  engine: (EditorEngineState & { summary: { tone: 'ok' | 'busy' | 'blocked' | 'off'; text: string } }) | null
+}
+
+/** The scheduler's part of the page, with Ticket titles resolved so the panel never shows a bare id. */
+export function scheduleView(host: ViewHost, schedule: EditorSchedule, editor: EditorView | null, engine: EditorEngineState | null,
+  nowMs = Date.now()): EditorScheduleView {
+  const named = (ids: readonly string[]) => ids.map(id => ({ id, title: host.store.tickets.get(id)?.title ?? `#${id.slice(0, 8)}` }))
+  const lease = schedule.lease
+  const holder: EditorScheduleView['holder'] = lease ? {
+    kind: lease.holder.kind, purpose: lease.purpose, note: lease.note, since: lease.acquiredAt, expiresAt: lease.expiresAt,
+    tickets: named(lease.holder.kind === 'agent' ? [lease.holder.ticketId] : lease.holder.kind === 'job' ? lease.holder.ticketIds : []),
+    ...lease.holder.kind === 'job' ? { jobId: lease.holder.jobId } : {},
+    draining: lease.draining ? { ...lease.draining, overdue: nowMs - Date.parse(lease.draining.at) > DRAIN_GRACE_MS } : null,
+  } : null
+  const queue = ordered(schedule.queue).map((request, index) => ({ id: request.id, position: index + 1, purpose: request.purpose,
+    note: request.note, at: request.at, person: !!request.person, front: !!request.front, tickets: named(request.ticketIds),
+    ...request.jobId ? { jobId: request.jobId } : {} }))
+  const open = schedule.jobs.filter(job => job.state === 'queued' || job.state === 'running')
+  const ended = schedule.jobs.filter(job => job.state !== 'queued' && job.state !== 'running').slice(-6).reverse()
+  return { holder, queue, jobs: [...open, ...ended].map(job => ({ ...job, tickets: named(job.ticketIds) })),
+    events: schedule.events.slice(-12).reverse().map(item => ({ ...item, tickets: named(item.ticketIds ?? []) })),
+    blocked: personBlock(schedule, editor), yielded: !!schedule.yielded,
+    engine: engine ? { ...engine, summary: engineSummary(engine) } : null }
+}
+
+/** Where one Ticket stands with the scheduler, for its working row. */
+function ticketStanding(schedule: EditorSchedule, ticketId: string): EditorWorkingRow['lease'] | undefined {
+  const lease = schedule.lease
+  if (lease?.holder.kind === 'agent' && lease.holder.ticketId === ticketId) return { state: 'holding', purpose: lease.purpose, note: lease.note, since: lease.acquiredAt }
+  if (lease?.holder.kind === 'job' && lease.holder.ticketIds.includes(ticketId)) return { state: 'holding', purpose: lease.purpose, note: lease.note, since: lease.acquiredAt }
+  const index = ordered(schedule.queue).findIndex(request => request.ticketIds.includes(ticketId))
+  return index >= 0 ? { state: 'queued', purpose: ordered(schedule.queue)[index]!.purpose, position: index + 1 } : undefined
+}
+
 export function editorPage(host: ViewHost, activity: Pick<Activity, 'read'>, editor: EditorView | null,
-  executor: EditorExecutorLoad = { running: 0, queued: 0, maxWorkers: 0 }) {
+  executor: EditorExecutorLoad = { running: 0, queued: 0, maxWorkers: 0 },
+  scheduler?: { schedule: EditorSchedule; engine: EditorEngineState | null }) {
   const { store } = host
   const view = snapshot(host)
   const nowMs = Date.now()
@@ -200,8 +294,11 @@ export function editorPage(host: ViewHost, activity: Pick<Activity, 'read'>, edi
     const live = read(ticket)
     activityById.set(ticket.id, live)
     const queued = stage.stage === 'working' && stage.action === 'queued'
-    const use = editorUse(live)
-    return { index, row: { ticket: ticketRow(view, ticket), activity: live, queued, usesEditor: use === 'uses', use } }
+    const standing = scheduler ? ticketStanding(scheduler.schedule, ticket.id) : undefined
+    // Holding the lease is the strongest evidence a Ticket uses the editor; the tool guess only fills in without one.
+    const use = standing?.state === 'holding' ? 'uses' : editorUse(live)
+    return { index, row: { ticket: ticketRow(view, ticket), activity: live, queued, usesEditor: use === 'uses', use,
+      ...standing ? { lease: standing } : {} } }
   }).sort((left, right) => Number(right.row.activity.live) - Number(left.row.activity.live)
     || Number(left.row.queued) - Number(right.row.queued)
     || right.row.ticket.updatedAt.localeCompare(left.row.ticket.updatedAt) || left.index - right.index)
@@ -220,8 +317,9 @@ export function editorPage(host: ViewHost, activity: Pick<Activity, 'read'>, edi
         const deliveredAt = Date.parse(ticket.verification?.at ?? ticket.ended?.at ?? '')
         return Number.isFinite(deliveredAt) && deliveredAt <= buildStart
       }).map(ticket => ticket.id) : [] } : null
-  return { editor, build, working, person, verification, executor,
-    timeline: timeline(nowMs, editor, staged, activityById),
+  const schedule = scheduler ? scheduleView(host, scheduler.schedule, editor, scheduler.engine, nowMs) : null
+  return { editor, build, working, person, verification, executor, schedule,
+    timeline: timeline(nowMs, editor, staged, activityById, scheduler?.schedule),
     counts: { working: working.length, queued: working.filter(row => row.queued).length, person: person.length,
       verification: verification.length } }
 }

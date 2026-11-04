@@ -327,7 +327,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/core/errors.ts` | `UserError` and `USER_ERRORS` |
 | `src/core/reasons.ts` | `Reason`, `REASONS` and `reasonText`: why the core recorded a Decision or set a Trigger aside, by code |
 | `src/core/ids.ts` | `key`: ids derived from their inputs, equal for equal inputs |
-| `src/core/kind.ts` | Ticket kinds (docs/020): `classifyTicket`, the order router, Source, then title rule, and `ticketKind`, which derives one for an older ticket |
+| `src/core/kind.ts` | Ticket kinds (docs/021): `classifyTicket`, the order router, Source, then title rule, and `ticketKind`, which derives one for an older ticket |
 | `src/core/memory.ts` | `MemoryRepositories`: the Store's repositories in memory, in the Store's order and with its nested rollback, for domain tests |
 | `src/core/index.ts` | The core's exports |
 | `src/app/runtime.ts` | The Runtime, the composition root, with its start and stop |
@@ -353,6 +353,9 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/session-recovery.ts` | Session store recovery: the bounded reopen attempts for a Session DSH cannot open, `SessionUnavailable` when it stays unreadable, and the backoff between attempts |
 | `src/app/worker-tools.ts` | The worker capability face: the tools a worker cannot work without, `missingWorkerTools`, and `MissingWorkerTools`, which the Executor reports blocked |
 | `src/app/activity.ts` | The worker Sessions' live state for the ticket page: the current tool call, a bounded trail of the latest calls, and when the state last changed. It keeps no reasoning, token totals or speed; `GET tickets/:id/activity` reads it |
+| `src/app/editor-schedule.ts` | The shared editor's schedule as pure data (docs/021): the lease with purpose and expiry, the wait queue in grant order (a person's claim, waits moved forward, then first come), host-run jobs with batched builds per workspace, recent events, and a person's claim, yield, preempt, front and cancel |
+| `src/app/editor-scheduler.ts` | `EditorScheduler`: persists the schedule in `KV.editor.schedule`, grants the editor on every change and a 15 s tick, runs the configured build, restart and test commands with logs under `<stateDir>/editor-jobs`, and tells workers of grants, yield requests and job ends |
+| `src/app/editor-mcp.ts` | ue-mcp's view of the editor from its bridge files beside the `.uproject`: phase, blocking dialog, stall, slow task, compiles, the request in flight and live bridges, with a stale snapshot marked as such |
 | `src/app/editor.ts` | The editor occupancy probe: derives who holds `UnrealEditor`/`UnrealEditor-Cmd` from the operating system's process table, with the holder, activity, start time and pid; the panel reads a cached row |
 | `src/app/delivery.ts` | `AgentDelivery`: delivers a message to a DeepSeek Harness agent once per request id, also across a restored Session |
 | `src/app/retry-health.ts` | `RetryHealth`: which Sessions wait on a model budget retry, for the `models` health entry |
@@ -482,6 +485,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/http.spec.ts` | The same-origin and loopback checks, the status of each kind of failure, the body limit, path parameters and queries |
 | `tests/settings.spec.ts` | Settings saves that race a model or account check, a Policy sync that a save outran, and the refusals of the pause, a sync and a block |
 | `tests/views.spec.ts` | What the management views derive from the Store, such as the Thread a dropped message belongs to and the question link the answer button opens |
+| `tests/editor-schedule.spec.ts` | The editor schedule: grants, queueing, heartbeats and expiry, a person's editor and claim outranking agents, front and cancel, batched builds per workspace, command placeholders and summaries, ue-mcp bridge files, and the scheduler running a batched job and recovering an interrupted one |
 | `tests/editor.spec.ts` | Editor occupancy: `deriveEditor` and `parseEditorProcesses` over a process table, and the `Editor` cache's interval, holder and unreadable-probe states |
 | `tests/p4.spec.ts` | The p4 delivery backend: its settings defaults, the workspace it prepares, and the execution variables it adds |
 | `tests/delivery-targets.spec.ts` | Delivery targets: the configured repository and depot, their spellings, the Source's default, and the target a Ticket records |
@@ -587,7 +591,7 @@ Existing main Sessions on `standard` also need explicit timeouts for foreground 
 
 ### Executor tools
 
-Each Executor has six application tools:
+Each Executor has these application tools:
 
 | Tool | Purpose |
 | --- | --- |
@@ -597,6 +601,7 @@ Each Executor has six application tools:
 | `orchestrator_thread_unrelated` | Drop an unrelated attached Thread, hand back its owned follow-ups and tell the main Session why |
 | `orchestrator_thread_follow` | Subscribe to a related Thread for context and tell the main Session |
 | `orchestrator_trigger_handback` | Hand back a message once, with a reason carried by its candidate |
+| `orchestrator_editor` | Acquire, heartbeat and release the shared editor's lease, have the host run a build, restart or test, or read the schedule (docs/021) |
 
 A hand-back returns `queued: false` if another Ticket still owns the message, or this Ticket never owned it. For example, a bot message went to Eval independently.
 

@@ -183,6 +183,21 @@ export const StallConfigSchema = z.object({
   queuedMinutes: z.number().int().min(5).max(480).default(30),
   notify: z.boolean().default(true),
 }).strict()
+/**
+ * The shared editor the host schedules for Tickets (docs/021). Empty commands leave that kind of job unavailable, so
+ * workers keep running their own build or test under a lease. Placeholders: `<project>` is the `.uproject`, `<dir>` the
+ * Ticket's workspace, `<filter>` a test job's automation filter. The host runs them; a Session never supplies one.
+ */
+export const EditorConfigSchema = z.object({
+  /** The `.uproject` the editor opens; ue-mcp's bridge status is read beside it. Empty turns the bridge reading off. */
+  project: z.string().trim().max(400).default(''),
+  /** The project's own compile entry, such as `<dir>\Development\Project\SunGame\Build\BatchFiles\Compile\CompileSunGame.bat`. */
+  build: z.string().trim().max(1000).default(''),
+  /** Restarts the editor, such as ue-mcp's `editor.restart_editor` through its CLI. */
+  restart: z.string().trim().max(1000).default(''),
+  /** Runs one automation filter headless; `<filter>` is replaced by the worker's filter. */
+  test: z.string().trim().max(1000).default(''),
+}).strict()
 /** Executor settings: worker model, concurrency, ticket directory root (empty defaults to `<stateDir>/work`), `prepare` command, blocked commands, and the delivery backend. */
 export const ExecutorConfigSchema = z.object({
   model: RoleModelSchema.nullable().default(null),
@@ -199,6 +214,7 @@ export const ExecutorConfigSchema = z.object({
   stall: StallConfigSchema.default(() => StallConfigSchema.parse({})),
   /** The task center's workspaces: empty means one implicit directory per ticket under `directory` or `<stateDir>/work`. */
   workspaces: z.array(WorkspaceSchema).default([]),
+  editor: EditorConfigSchema.default(() => EditorConfigSchema.parse({})),
 }).strict()
 export const SourceInstanceSchema = z.object({ enabled: z.boolean().default(true), config: z.record(z.string(), z.unknown()).default({}) }).strict()
 export const SettingsSchema = z.object({

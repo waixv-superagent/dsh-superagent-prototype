@@ -102,6 +102,8 @@ export interface PanelServer {
   build?: ApiResponse<'GET editor'>['build']
   /** Replaces the Editor page's answer; by default it is derived from the lanes, `editor` and `activity` above. */
   editorPage?: () => ApiResponse<'GET editor'>
+  /** The scheduler's part of the Editor page; null for a host without a scheduler. */
+  schedule?: ApiResponse<'GET editor'>['schedule']
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; verification: TicketRow[]; working: TicketRow[]; idle: TicketRow[]; pipeline: TicketRow[]; ended: TicketRow[]
@@ -213,7 +215,7 @@ const editorPageView = (): ApiResponse<'GET editor'> => {
     return { ticket, activity, queued: ticket.stage === 'working' && ticket.action === 'queued', usesEditor: use === 'uses', use }
   }).sort((left, right) => Number(right.activity.live) - Number(left.activity.live) || Number(left.queued) - Number(right.queued))
   const person = server.person.filter(ticket => !(ticket.stage === 'person' && ticket.action === 'verify'))
-  return { editor: server.editor, build: server.build ?? null, working, person, verification: server.verification,
+  return { editor: server.editor, build: server.build ?? null, working, person, verification: server.verification, schedule: server.schedule ?? null,
     executor: { running: working.filter(row => !row.queued).length, queued: working.filter(row => row.queued).length,
       maxWorkers: server.settings.executor.maxWorkers },
     timeline: editorTimeline(),
@@ -460,6 +462,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     return ticket.actions.rework ? { reworking: true }
       : refuse(400, 'This ticket is not waiting for local verification', { code: 'notVerifying', values: {} })
   } },
+  'POST editor/act': { body: true, answer: () => ({ done: true as const }) },
   'POST executor/pause': { body: true, answer: ({ body }) => {
     server.settings = { ...server.settings, paused: body.paused }
     server.revisions.pause = (server.revisions.pause ?? 0) + 1

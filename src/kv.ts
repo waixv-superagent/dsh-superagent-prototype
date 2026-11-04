@@ -4,6 +4,7 @@
  */
 import type { PromptVersion } from './app/prompts.ts'
 import type { BillingSnapshot } from './app/billing.ts'
+import type { EditorSchedule } from './app/editor-schedule.ts'
 import type { SettingsVersion } from './app/store.ts'
 import type { SettingsSave } from './policy.ts'
 import type { ReceiptReaction } from './sources/feishu-receipt.ts'
@@ -35,6 +36,8 @@ export const KV = {
   runtime: { masterId: record<string>('master-id') },
   /** Billing: the rolling model-spend window the board's strip reads across host restarts. */
   billing: { snapshot: record<BillingSnapshot>('billing-snapshot') },
+  /** EditorScheduler: the shared editor's lease, wait queue, host-run jobs and recent events (docs/021). */
+  editor: { schedule: record<EditorSchedule>('editor-lease') },
   /** Sessions: prompt revisions each Session has worked under, ordered oldest first; the last entry (`.at(-1)`) is its active revision. */
   sessions: { prompts: family<number[], [session: string]>('session-prompts:') },
   /** Schema 11 migration: legacy main-Session queues imported into the effect table. */

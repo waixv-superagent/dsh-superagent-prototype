@@ -361,7 +361,7 @@ function failures(): Map<string, string> {
 }
 
 it('collects both roles\' tools, prompts, skills and inputs', () => {
-  expect([...toolsOf('worker').keys()].sort()).toEqual(['orchestrator_ack', 'orchestrator_phase',
+  expect([...toolsOf('worker').keys()].sort()).toEqual(['orchestrator_ack', 'orchestrator_editor', 'orchestrator_phase',
     'orchestrator_pipeline', 'orchestrator_pipeline_check', 'orchestrator_pipeline_rerun', 'orchestrator_plan',
     'orchestrator_read', 'orchestrator_redispatch', 'orchestrator_report', 'orchestrator_thread_follow',
     'orchestrator_thread_unrelated', 'orchestrator_trigger_handback'])

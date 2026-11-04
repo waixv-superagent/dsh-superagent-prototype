@@ -10,8 +10,9 @@ describe('deriveEditor', () => {
     expect(deriveEditor([], at)).toEqual({ holder: 'none', activity: 'unknown', since: null, pid: null, build: null, at })
   })
   it('treats an interactive editor as a person and keeps its process and start time', () => {
+    // The process list goes with the row, so the scheduler can tell an editor an agent started from a person's.
     expect(deriveEditor([process(86916, 'unrealeditor')], at)).toEqual({ holder: 'person', activity: 'editing',
-      since: '2026-11-02T14:30:29.0000000Z', pid: 86916, build: null, at })
+      since: '2026-11-02T14:30:29.0000000Z', pid: 86916, build: null, at, editors: [process(86916, 'unrealeditor')] })
   })
   it('treats a headless commandlet as an agent', () => {
     expect(deriveEditor([process(7, 'unrealeditor-cmd')], at)).toMatchObject({ holder: 'agent', activity: 'editing', pid: 7 })

@@ -24,8 +24,11 @@ type Delivery = 'injected' | 'pending'
 export interface Api {
   'GET state': { response: StateView }
   'GET overview': { response: OverviewView }
-  /** Who holds the editor, which Tickets are working with their live tool, and what waits on a person; read-only. */
+  /** Who holds the editor and for what, the queue and the host-run jobs, ue-mcp's view, the working Tickets, and what waits on a person. */
   'GET editor': { response: EditorPageView }
+  /** A person claims or yields the shared editor, asks its holder to yield, reorders or drops a wait, or stops a job. */
+  'POST editor/act': { body: { action: 'claim' | 'yield' } | { action: 'preempt'; reason?: string }
+    | { action: 'front' | 'cancel' | 'cancel-job'; id: string }; response: { done: true } }
   'GET search': { query: { q: string }; response: SearchView }
   'GET sources': { response: SourceStatusView[] }
   'GET settings': { response: SettingsView }

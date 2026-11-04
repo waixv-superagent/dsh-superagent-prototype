@@ -1,13 +1,15 @@
 /**
  * Editor page: who holds the Unreal Editor, which Tickets are working with their live tool, and what waits on a person.
- * It only reports facts the host already holds; it never starts, stops or hands over the editor.
+ * The scheduler card is the one place a person acts on it: claim it, let agents use an open editor, ask the holder to yield,
+ * or reorder the queue. Nothing here kills a person's editor.
  */
 import { useState } from 'react'
 import { usePoll, type EditorPageView, type EditorRow, type EditorTicketRow, type EditorTimelineBand,
   type EditorTimelineRow, type EditorTimelineView, type TicketRow } from './api.ts'
+import type { ApiRequest } from '../app/api.ts'
 import { Button, Tag } from './controls.tsx'
 import { ticketMark } from './marks.ts'
-import { usePanel } from './provider.tsx'
+import { useAction, usePanel } from './provider.tsx'
 import type { BoardFocus, Route } from './route.ts'
 import type { T } from './text.ts'
 import { LoadState, When } from './widgets.tsx'
@@ -107,6 +109,7 @@ function Hero({ data }: { data: EditorPageView }) {
 
 /** The label a band can show inside its span; Tickets are named by their lane, so their bands stay unlabeled. */
 function bandLabel(t: T, band: EditorTimelineBand): string {
+  if (band.tone === 'lease') return band.label ? t(`editorPurpose.${band.label}` as 'editorPurpose.build') : t('editorTimelineLease')
   if (band.label) return band.label
   switch (band.tone) {
     case 'person': return t('editorTimelinePerson')
@@ -115,6 +118,7 @@ function bandLabel(t: T, band: EditorTimelineBand): string {
     case 'build': return t('editorTimelineBuild')
     case 'test': return t('editorTimelineTest')
     case 'tool': return t('editorTimelineTool')
+    case 'wait': return t('editorTimelineWait')
     default: return ''
   }
 }
@@ -164,7 +168,8 @@ function Timeline({ timeline }: { timeline: EditorTimelineView }) {
   const legend: { tone: EditorTimelineBand['tone']; label: string }[] = [
     { tone: 'person', label: t('editorTimelinePerson') }, { tone: 'agent', label: t('editorTimelineAgent') },
     { tone: 'run', label: t('editorTimelineRun') }, { tone: 'build', label: t('editorTimelineBuild') },
-    { tone: 'test', label: t('editorTimelineTest') },
+    { tone: 'test', label: t('editorTimelineTest') }, { tone: 'lease', label: t('editorTimelineLease') },
+    { tone: 'wait', label: t('editorTimelineWait') },
   ]
   return <section className="dt-editor-timeline" aria-labelledby="dt-editor-timeline-title">
     <header className="dt-editor-timeline-head">
@@ -233,6 +238,9 @@ function WorkingRow({ row }: { row: EditorTicketRow }) {
         {!queued && use !== 'unknown' && <span className="dt-editor-badge" data-uses={use === 'uses' || undefined}
           data-use={use} title={t('editorUsesEditorHint')}>
           {use === 'uses' ? t('editorUsesEditor') : t('editorNoEditor')}</span>}
+        {row.lease && <Tag tone={row.lease.state === 'holding' ? 'warning' : 'outline'} title={row.lease.state === 'holding' ? row.lease.note : undefined}>
+          {row.lease.state === 'holding' ? t('editorRowHolding', { purpose: purposeLabel(t, row.lease.purpose) })
+            : t('editorRowQueued', { purpose: purposeLabel(t, row.lease.purpose), position: row.lease.position })}</Tag>}
       </div>
       <p className="dt-editor-run-meta">
         <span className="dt-mono">{shortId(ticket.id)}</span>
@@ -333,18 +341,127 @@ function Waiting({ data }: { data: EditorPageView }) {
   </section>
 }
 
+type Schedule = NonNullable<EditorPageView['schedule']>
+type Purpose = Schedule['queue'][number]['purpose']
+const purposeLabel = (t: T, purpose: Purpose) => t(`editorPurpose.${purpose}`)
+const ticketNames = (tickets: { id: string; title: string }[]) => tickets.map(ticket => ticket.title).join('、')
+
+/** The lease's holder in one sentence: whose Ticket, doing what, since when; or why agents are held back. */
+function holderSentence(t: T, schedule: Schedule): string {
+  const holder = schedule.holder
+  if (holder?.kind === 'person') return t('editorLeasePerson')
+  if (holder) return t('editorLeaseHolder', { tickets: ticketNames(holder.tickets) || t('editorLeaseHostJob'),
+    purpose: purposeLabel(t, holder.purpose), time: clock(holder.since) })
+  return schedule.blocked === 'editor' ? t('editorLeaseBlockedEditor') : schedule.blocked === 'unknown' ? t('editorLeaseBlockedUnknown')
+    : t('editorLeaseFree')
+}
+
+/**
+ * The scheduler card: the lease holder and its purpose, ue-mcp's reading of the editor, the wait queue in grant order,
+ * and the jobs the host runs. A person's controls sit here because this is where they see who they would interrupt.
+ */
+function ScheduleCard({ schedule, reload }: { schedule: Schedule; reload: () => Promise<void> }) {
+  const { t, call, navigate } = usePanel()
+  const act = useAction((body: ApiRequest<'POST editor/act'>['body']) => call('POST editor/act', { body }), { reload })
+  const holder = schedule.holder
+  const engine = schedule.engine
+  const personHolds = holder?.kind === 'person'
+  const personWaits = schedule.queue.some(request => request.person)
+  const ticket = (item: { id: string; title: string }) => <button key={item.id} type="button" className="dt-editor-run-title"
+    onClick={() => navigate(ticketRoute(item.id))}>{item.title}</button>
+  return <section className="dt-editor-schedule" aria-labelledby="dt-editor-schedule-title" data-holder={holder?.kind ?? (schedule.blocked ? 'blocked' : 'free')}>
+    <header className="dt-editor-schedule-head">
+      <div>
+        <h3 id="dt-editor-schedule-title" className="dt-editor-col-title">{t('editorScheduleTitle')}</h3>
+        <p className="dt-editor-schedule-holder">{holderSentence(t, schedule)}</p>
+        {holder && holder.kind !== 'person' && <p className="dt-editor-run-meta">
+          {holder.note && <span className="dt-editor-schedule-note" title={holder.note}>{holder.note}</span>}
+          {holder.expiresAt && <span>{t('editorLeaseUntil', { time: clock(holder.expiresAt) })}</span>}
+          {holder.draining && <Tag tone={holder.draining.overdue ? 'danger' : 'warning'} title={holder.draining.reason}>
+            {holder.draining.overdue ? t('editorLeaseDrainOverdue') : t('editorLeaseDraining')}</Tag>}
+        </p>}
+      </div>
+      <div className="dt-editor-schedule-actions">
+        {personHolds || personWaits
+          ? <Button variant="outline" size="sm" disabled={act.busy} onClick={() => { void act.run({ action: 'yield' }) }}>{t('editorActRelease')}</Button>
+          : schedule.blocked === 'editor'
+            ? <Button variant="outline" size="sm" disabled={act.busy} onClick={() => { void act.run({ action: 'yield' }) }}
+              title={t('editorActYieldHint')}>{t('editorActYield')}</Button>
+            : <Button variant="outline" size="sm" disabled={act.busy} onClick={() => { void act.run({ action: 'claim' }) }}
+              title={t('editorActClaimHint')}>{t('editorActClaim')}</Button>}
+        {schedule.yielded && !personHolds && <Button variant="ghost" size="sm" disabled={act.busy}
+          onClick={() => { void act.run({ action: 'claim' }) }}>{t('editorActTakeBack')}</Button>}
+        {holder && holder.kind !== 'person' && !holder.draining && <Button variant="ghost" size="sm" disabled={act.busy}
+          onClick={() => { void act.run({ action: 'preempt', reason: t('editorActPreemptReason') }) }}>{t('editorActPreempt')}</Button>}
+      </div>
+    </header>
+    {engine && <p className="dt-editor-engine" data-tone={engine.summary.tone} title={engine.detail}>
+      <span className="dt-editor-engine-label">{t('editorEngineLabel')}</span>
+      <span>{engine.summary.text}</span>
+      {engine.bridges.length > 0 && <span className="dt-editor-engine-meta">{t('editorEngineBridges', { count: engine.bridges.length })}</span>}
+      {engine.writtenAt && <span className="dt-editor-engine-meta"><When at={engine.writtenAt} /></span>}
+    </p>}
+    <div className="dt-editor-schedule-body">
+      <div>
+        <h4 className="dt-editor-working-group">{t('editorQueueTitle')}<span className="dt-editor-working-group-count">{schedule.queue.length}</span></h4>
+        {schedule.queue.length ? <ol className="dt-editor-queue">{schedule.queue.map(request => <li key={request.id} className="dt-editor-queue-item"
+          data-person={request.person || undefined}>
+          <span className="dt-editor-queue-pos">{request.position}</span>
+          <div className="dt-editor-run-main">
+            <div className="dt-editor-run-head">
+              {request.person ? <span>{t('editorQueuePerson')}</span> : request.tickets.map(ticket)}
+              <Tag tone="outline">{purposeLabel(t, request.purpose)}</Tag>
+              {request.front && <Tag tone="info">{t('editorQueueFront')}</Tag>}
+            </div>
+            <p className="dt-editor-run-meta">
+              {request.note && <span className="dt-editor-schedule-note" title={request.note}>{request.note}</span>}
+              <span>{t('editorQueueSince')} <When at={request.at} /></span>
+            </p>
+          </div>
+          {!request.person && <span className="dt-editor-queue-actions">
+            {request.position > 1 && <Button variant="ghost" size="sm" disabled={act.busy}
+              onClick={() => { void act.run({ action: 'front', id: request.id }) }}>{t('editorActFront')}</Button>}
+            <Button variant="ghost" size="sm" disabled={act.busy}
+              onClick={() => { void act.run({ action: 'cancel', id: request.id }) }}>{t('editorActCancel')}</Button>
+          </span>}
+        </li>)}</ol> : <p className="dt-editor-working-empty">{t('editorQueueEmpty')}</p>}
+      </div>
+      <div>
+        <h4 className="dt-editor-working-group">{t('editorJobsTitle')}<span className="dt-editor-working-group-count">{schedule.jobs.length}</span></h4>
+        {schedule.jobs.length ? <ul className="dt-editor-jobs">{schedule.jobs.map(job => <li key={job.id} className="dt-editor-job" data-state={job.state}>
+          <div className="dt-editor-run-head">
+            <span className="dt-editor-job-kind">{purposeLabel(t, job.kind)}</span>
+            <Tag tone={job.state === 'succeeded' ? 'success' : job.state === 'failed' || job.state === 'interrupted' ? 'danger'
+              : job.state === 'running' ? 'info' : 'outline'}>{t(`editorJobState.${job.state}`)}</Tag>
+            {job.tickets.length > 1 && <Tag tone="info" title={ticketNames(job.tickets)}>{t('editorJobBatched', { count: job.tickets.length })}</Tag>}
+            {job.state === 'running' && <Button variant="ghost" size="sm" disabled={act.busy}
+              onClick={() => { void act.run({ action: 'cancel-job', id: job.id }) }}>{t('editorActStopJob')}</Button>}
+          </div>
+          <p className="dt-editor-run-meta">
+            {job.tickets.slice(0, 3).map(ticket)}
+            {job.filter && <span className="dt-mono" title={job.filter}>{job.filter}</span>}
+            <span><When at={job.endedAt ?? job.startedAt ?? job.createdAt} /></span>
+          </p>
+          {job.summary && <p className="dt-editor-run-summary" title={job.command}>{job.summary}</p>}
+        </li>)}</ul> : <p className="dt-editor-working-empty">{t('editorJobsEmpty')}</p>}
+      </div>
+    </div>
+  </section>
+}
+
 export function EditorPage() {
   const { t, call } = usePanel()
-  const { data, error } = usePoll(() => call('GET editor'), [])
+  const { data, error, reload } = usePoll(() => call('GET editor'), [])
   if (!data) return <LoadState error={error} loading />
   return <>
     {error && <LoadState error={error} loading={false} />}
     <Hero data={data} />
+    {data.schedule && <ScheduleCard schedule={data.schedule} reload={reload} />}
     {data.timeline && <Timeline timeline={data.timeline} />}
     <div className="dt-editor-grid">
       <Working data={data} />
       <Waiting data={data} />
     </div>
-    <p className="dt-editor-foot">{t('editorReadOnlyNote')}</p>
+    <p className="dt-editor-foot">{t(data.schedule ? 'editorScheduleNote' : 'editorReadOnlyNote')}</p>
   </>
 }

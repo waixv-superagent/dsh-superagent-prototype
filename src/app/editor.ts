@@ -54,6 +54,8 @@ export interface EditorView {
   readonly at: string
   /** A person-facing reason the state is unknown; never used to decide anything. */
   readonly detail?: string
+  /** Every editor process the probe saw, so the scheduler can tell an editor an agent started from a person's. */
+  readonly editors?: readonly EditorProcess[]
 }
 
 /**
@@ -91,7 +93,7 @@ export function deriveEditor(processes: readonly EditorProcess[], at: string): E
   const interactive = editors.find(process => process.name === INTERACTIVE_EDITOR)
   const started = editors.map(process => process.started).filter((value): value is string => !!value).sort()[0] ?? null
   const representative = interactive ?? editors[0]!
-  return { holder: interactive ? 'person' : 'agent', activity, since: started, pid: representative.pid, build, at }
+  return { holder: interactive ? 'person' : 'agent', activity, since: started, pid: representative.pid, build, at, editors }
 }
 
 /**

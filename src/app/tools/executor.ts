@@ -12,6 +12,8 @@ import type { Store } from '../store.ts'
 import { reportRelay, threadFollowedNotice } from '../notices.ts'
 import type { Sessions } from '../sessions.ts'
 import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
+import { EDITOR_JOB_KINDS, EDITOR_PURPOSES, MAX_LEASE_MS, ordered } from '../editor-schedule.ts'
+import type { EditorScheduler } from '../editor-scheduler.ts'
 
 export interface ExecutorToolsHost {
   readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'submitPlan' | 'advancePhase' | 'redispatchTicket'
@@ -26,6 +28,29 @@ export interface ExecutorToolsHost {
   /** Sends a submitted P1 plan to the person who decides it, and returns the card's message id when it went out. */
   notifyPlan(ticket: Ticket): Promise<string | undefined>
   sendReplies(): Promise<void>
+  /** The shared editor's scheduler; absent on a host built without it. */
+  readonly editor?: EditorScheduler
+  /** The directory a ticket's worker runs in, which a host-run job builds or tests. */
+  workspaceOf(ticket: Ticket): string
+}
+
+/** What a worker reads about the editor: who holds it and for what, its place in the queue, the jobs, and ue-mcp's view. */
+function editorStatusFor(scheduler: EditorScheduler, ticketId: string) {
+  const schedule = scheduler.read()
+  const lease = schedule.lease
+  const mine = scheduler.standing(ticketId)
+  const engine = scheduler.engine()
+  return {
+    you: mine.state === 'holding' ? { holding: true, expires_at: mine.lease.expiresAt, draining: mine.lease.draining ?? null }
+      : mine.state === 'queued' ? { queued: mine.position } : { holding: false },
+    holder: lease ? { kind: lease.holder.kind, purpose: lease.purpose, note: lease.note, since: lease.acquiredAt,
+      tickets: lease.holder.kind === 'agent' ? [lease.holder.ticketId] : lease.holder.kind === 'job' ? lease.holder.ticketIds : [] } : null,
+    queue: ordered(schedule.queue).map((request, index) => ({ position: index + 1, purpose: request.purpose, tickets: request.ticketIds,
+      ...request.person ? { person: true } : {}, ...request.jobId ? { job: request.jobId } : {} })),
+    jobs: schedule.jobs.filter(job => job.ticketIds.includes(ticketId)).slice(-5),
+    ...engine ? { engine: { phase: engine.phase, modal: engine.modal, handler: engine.handler, slow_task: engine.slowTask,
+      compiling: engine.compiling, stale: engine.stale, ...engine.detail ? { detail: engine.detail } : {} } } : {},
+  }
 }
 
 export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
@@ -236,6 +261,56 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
         const rerun = await host.pipeline.rerun(target)
         const updated = host.engine.rerunPipeline(ticketId)
         return { ...rerun, pipeline: updated.pipeline?.state }
+      },
+    }),
+    tool({
+      name: 'orchestrator_editor',
+      description: 'Hold to build, restart, test or open the shared UE editor; release after; yield to people.',
+      schema: z.object({
+        op: z.enum(['acquire', 'heartbeat', 'release', 'run', 'status']),
+        purpose: z.enum(EDITOR_PURPOSES).optional(),
+        note: z.string().optional(),
+        min: z.number().optional(),
+        wait: z.number().optional(),
+        filter: z.string().optional(),
+      }).strict(),
+      execute: async (args, signal) => {
+        const scheduler = host.editor
+        if (!scheduler) throw new Error('this host has no editor scheduler')
+        const current = host.store.tickets.get(ticketId)
+        if (!current || !liveTicket(current)) throw new Error('Ticket ended; do not resume it')
+        // The scheduler clamps the lease to its bounds; a wait longer than 15 minutes would hold the worker's turn too long.
+        const ttlMs = args.min ? Math.min(Math.max(1, args.min), MAX_LEASE_MS / 60_000) * 60_000 : undefined
+        const waitMs = Math.min(900, Math.max(0, args.wait ?? 0)) * 1000
+        const shown = () => editorStatusFor(scheduler, ticketId)
+        switch (args.op) {
+          case 'acquire': {
+            if (!args.purpose) throw new Error('acquire needs purpose: build, restart, test or use')
+            const first = scheduler.acquire({ ticketId, purpose: args.purpose, ...args.note ? { note: args.note } : {}, ...ttlMs ? { ttlMs } : {} })
+            const result = first.state === 'granted' ? first : await scheduler.waitFor(() => {
+              const now = scheduler.standing(ticketId)
+              return now.state === 'holding' ? now : undefined
+            }, waitMs, signal) ?? first
+            return { ...result.state === 'granted' || result.state === 'holding' ? { state: 'granted' } : { state: 'queued',
+              position: (scheduler.standing(ticketId) as { position?: number }).position }, ...shown() }
+          }
+          case 'heartbeat': return { state: 'granted', lease: scheduler.heartbeat(ticketId, ttlMs, args.note) }
+          case 'release': scheduler.release(ticketId, args.note); return { state: 'released', ...shown() }
+          case 'run': {
+            const kind = EDITOR_JOB_KINDS.find(value => value === args.purpose)
+            if (!kind) throw new Error('run needs purpose build, restart or test')
+            const directory = host.workspaceOf(current)
+            const { job, merged } = scheduler.submit(ticketId, kind, directory, args.filter)
+            const ended = await scheduler.waitFor(() => {
+              const value = scheduler.job(job.id)
+              return value && value.state !== 'queued' && value.state !== 'running' ? value : undefined
+            }, waitMs, signal)
+            const value = ended ?? scheduler.job(job.id) ?? job
+            return { job: value, merged, ...ended ? { log_tail: scheduler.logTail(job.id, 3000) } : {},
+              ...ended ? {} : { note: 'The job is not done yet; its end reaches you as a message.' } }
+          }
+          case 'status': return shown()
+        }
       },
     }),
     tool({
