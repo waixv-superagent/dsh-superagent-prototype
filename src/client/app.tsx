@@ -1,6 +1,7 @@
 /** Root panel shell: header with global search and glossary, top-level navigation tabs, and active route view. */
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { SearchView } from './api.ts'
+import { PageBoundary } from './boundary.tsx'
 import { Button, Dot, Icon, Input, Modal, Pill, SegmentedControl, SegmentedTabs } from './controls.tsx'
 import type { DeploymentForm } from './deployment.tsx'
 import { EditorPage } from './editor.tsx'
@@ -11,8 +12,8 @@ import { ticketMark } from './marks.ts'
 import { GLOSSARY, GLOSSARY_VALUES, en, zh, type DshSuperagentKey } from './locales.ts'
 import { OverviewPage } from './overview.tsx'
 import { PanelProvider, usePanel, usePanelData } from './provider.tsx'
-import { HOME, TABS, initialLocation, lastSettingsGroup, remember, routeLabel, settingsRoute, type BoardFocus, type HomeView,
-  type Location, type Route, type Tab } from './route.ts'
+import { HOME, TABS, historyEntry, initialLocation, lastSettingsGroup, remember, routeLabel, settingsRoute, writeHistory,
+  type BoardFocus, type HomeView, type Location, type Route, type Tab } from './route.ts'
 import { SettingsPage } from './settings.tsx'
 import { SourceStatus } from './source.tsx'
 import { actorName, errorText, reasonLabel, valueLabel, type T, readableMarkers } from './text.ts'
@@ -196,11 +197,27 @@ function HomePage({ view, focus }: { view?: HomeView; focus?: BoardFocus }) {
   </>
 }
 
-function Pages({ route, openTab, deploymentForm }: { route: Route; openTab: (tab: Tab) => void; deploymentForm: DeploymentForm }) {
+/**
+ * Which page a route shows: its tab, the record it opens and, on 概览, the view. Filters and paging leave it as it is, so they
+ * keep a page's state and play no transition; a new key remounts the page and plays one.
+ */
+export const pageKey = (route: Route): string => route.page === 'editor' ? `editor:${route.query?.view ?? 'board'}`
+  : route.page === 'settings' ? 'settings' : `${route.page}:${route.id ?? ''}`
+/** How a page enters: deeper (forward), returning (back), beside (another tab), or without motion (a reload, the first page). */
+type Motion = 'forward' | 'back' | 'tab' | 'none'
+
+function Pages({ route, motion, openTab, deploymentForm }: { route: Route; motion: Motion; openTab: (tab: Tab) => void
+  deploymentForm: DeploymentForm }) {
   const { t } = usePanel()
   const { state, error, reload } = usePanelData()
   // Keep the active tab scrolled into view on narrow screens when routes change via links.
   useEffect(() => { document.getElementById(`dt-tab-${route.page}`)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }) }, [route.page])
+  const key = pageKey(route)
+  // A page opened deeper or beside starts at its top, as a browser page does; stepping back keeps the offset it had.
+  const scroller = useRef<HTMLDivElement>(null)
+  const entering = useRef(motion)
+  entering.current = motion
+  useEffect(() => { if (entering.current !== 'back') scroller.current?.scrollTo?.({ top: 0 }) }, [key])
   const waiting = error ? <p className="dt-error" role="alert">{error.message}</p> : <p className="dt-hint">{t('loading')}</p>
   const page = (() => {
     switch (route.page) {
@@ -216,31 +233,105 @@ function Pages({ route, openTab, deploymentForm }: { route: Route; openTab: (tab
         deploymentForm={deploymentForm} /> : waiting
     }
   })()
-  return <div className="dt-page">
+  return <div ref={scroller} className="dt-page">
     <div className="dt-column">
       <Header masterId={state?.masterId} />
       {error && state && <p className="dt-error" role="status">{error.message}</p>}
       <SegmentedTabs className="dt-tabs" label={t('pagesLabel')} value={route.page} onChange={openTab}
         items={TABS.map(value => ({ value, label: t(`tab.${value}`), id: `dt-tab-${value}`, panelId: 'dt-page' }))} />
-      <main id="dt-page" role="tabpanel" aria-labelledby={`dt-tab-${route.page}`} className="dt-main">{page}</main>
+      <main id="dt-page" role="tabpanel" aria-labelledby={`dt-tab-${route.page}`} className="dt-main">
+        {/* Keyed by page, so a new page remounts with its entrance and a crash stays inside the page it happened on. */}
+        <div key={key} className="dt-route" data-motion={motion}>
+          <PageBoundary t={t} resetKey={key} onHome={key === 'editor:board' ? undefined : () => openTab('editor')}>
+            {page}
+          </PageBoundary>
+        </div>
+      </main>
     </div>
   </div>
 }
 
-/** Root panel component managing route history and shared panel state. */
+/** The mouse buttons a browser reports for a mouse's side buttons: Back (3) and Forward (4). */
+const MOUSE_BACK = 3, MOUSE_FORWARD = 4
+/**
+ * Root panel component managing route history and shared panel state.
+ *
+ * Each navigation is also a browser history entry (see `writeHistory`), so the browser's Back/Forward, a mouse's side buttons
+ * and the page's own Back button all step through the same entries; `popstate` is the one place a step lands. The DSH shell
+ * may not turn the side buttons into history steps itself, so the panel does it and cancels the browser's own handling.
+ */
 export function App({ t, openSession, deploymentForm }: AppProps) {
-  const [location, setLocation] = useState(initialLocation)
-  useEffect(() => { remember(location) }, [location])
-  // Preserve the last opened settings group across navigation so the Settings tab reopens at it.
-  const move = useCallback((next: (current: Location) => Pick<Location, 'route' | 'stack'>) =>
-    setLocation(current => ({ ...next(current), group: lastSettingsGroup(current) })), [])
+  const [mount] = useState(() => {
+    const opened = initialLocation()
+    // A panel that remounts on an entry it wrote (after the Conversation was shown) continues from that entry's position; when it
+    // opens elsewhere than that entry (a worker Session's Ticket link), the new page is one step further, so Back returns there.
+    const own = typeof window === 'undefined' ? undefined : historyEntry(window.history.state)
+    const moved = !!own && JSON.stringify(own.location.route) !== JSON.stringify(opened.route)
+    const location = moved ? { ...opened, stack: [...own.location.stack, own.location.route].slice(-20) } : opened
+    return { location, index: !own ? 0 : moved ? own.index + 1 : own.index, motion: 'none' as Motion,
+      mode: moved ? 'push' as const : 'replace' as const }
+  })
+  const [view, setView] = useState<{ location: Location; index: number; motion: Motion }>(mount)
+  const current = useRef(view)
+  current.current = view
+  // The mount's own entry is written once, after render, so a render that is replayed writes nothing twice.
+  useEffect(() => { writeHistory(mount.mode, mount.location, mount.index) }, [mount])
+  useEffect(() => { remember(view.location) }, [view.location])
+  useEffect(() => {
+    const onPop = (event: PopStateEvent) => {
+      const entry = historyEntry(event.state)
+      // An entry the panel did not write (before its first one) is the host's; the panel stays where it is.
+      if (!entry) return
+      setView(previous => ({ location: entry.location, index: entry.index,
+        motion: entry.index < previous.index ? 'back' : entry.index > previous.index ? 'forward' : 'none' }))
+    }
+    const side = (event: MouseEvent) => event.button === MOUSE_BACK || event.button === MOUSE_FORWARD
+    // Cancelling both halves stops a browser that navigates on the press or on the release from stepping a second time.
+    const onDown = (event: MouseEvent) => { if (side(event)) event.preventDefault() }
+    const onUp = (event: MouseEvent) => {
+      if (!side(event)) return
+      event.preventDefault()
+      // On the panel's first page, Back would leave DSH Web for whatever the tab showed before it; the browser's own Back still can.
+      if (event.button === MOUSE_BACK) { if (current.current.index > 0) window.history.back() }
+      else window.history.forward()
+    }
+    window.addEventListener('popstate', onPop)
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+  /** Moves to the location `next` computes; `push` adds a history entry, `replace` rewrites the current one. */
+  const move = useCallback((mode: 'push' | 'replace', next: (location: Location) => Pick<Location, 'route' | 'stack'>,
+    motion: Motion) => {
+    const { location, index } = current.current
+    // Preserve the last opened settings group across navigation so the Settings tab reopens at it.
+    const target: Location = { ...next(location), group: lastSettingsGroup(location) }
+    const position = mode === 'push' ? index + 1 : index
+    writeHistory(mode, target, position)
+    current.current = { location: target, index: position, motion }
+    setView(current.current)
+  }, [])
   /** Navigates to `route`; `replace` swaps the current entry (filters, paging) instead of pushing a back step. */
-  const navigate = useCallback((route: Route, replace = false) => move(current => ({ route,
-    stack: replace ? current.stack : [...current.stack, current.route].slice(-20) })), [move])
-  const back = useCallback(() => move(current => ({ route: current.stack.at(-1) ?? HOME, stack: current.stack.slice(0, -1) })), [move])
-  const openTab = useCallback((tab: Tab) => move(current => ({ stack: [], route: tab === 'settings'
-    ? settingsRoute(lastSettingsGroup(current)) : { page: tab, id: undefined } })), [move])
+  const navigate = useCallback((route: Route, replace = false) => move(replace ? 'replace' : 'push', location => ({ route,
+    stack: replace ? location.stack : [...location.stack, location.route].slice(-20) }), replace ? 'none' : 'forward'), [move])
+  const back = useCallback(() => {
+    // A pushed page's previous entry shows the last route of its stack, which the Back button names; stepping the browser back
+    // there keeps the button, the browser and the mouse on the same entries. A page with no stack (a tab) returns home in place.
+    const { location, index } = current.current
+    if (location.stack.length > 0 && index > 0 && historyEntry(window.history.state)) { window.history.back(); return }
+    move('replace', location => ({ route: location.stack.at(-1) ?? HOME, stack: location.stack.slice(0, -1) }), 'back')
+  }, [move])
+  const openTab = useCallback((tab: Tab) => move('push', location => ({ stack: [], route: tab === 'settings'
+    ? settingsRoute(lastSettingsGroup(location)) : { page: tab, id: undefined } }), 'tab'), [move])
+  const { location, motion } = view
   return <PanelProvider t={t} openSession={openSession} navigate={navigate} back={back} backLabel={routeLabel(t, location.stack.at(-1) ?? HOME)}>
-    <Pages route={location.route} openTab={openTab} deploymentForm={deploymentForm} />
+    {/* The outer boundary keeps a crash in the header or tabs recoverable; each page has its own inside. */}
+    <PageBoundary t={t} resetKey={pageKey(location.route)} onHome={() => openTab('editor')}>
+      <Pages route={location.route} motion={motion} openTab={openTab} deploymentForm={deploymentForm} />
+    </PageBoundary>
   </PanelProvider>
 }

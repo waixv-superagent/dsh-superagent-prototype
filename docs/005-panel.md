@@ -27,6 +27,10 @@ A `?view=board` query on the panel URL opens the duty-desk board directly, befor
 | Execution | Executor state, Pause processing, and Tickets filtered by Open, Pending, To verify, Unverified, Working, Waiting for a Trigger or Ended. Ticket details show a local-verification gate for delivered work and a pipeline gate for a change followed into the mainline or delivered as a pull request awaiting approval — a merged pipeline is history, so a Ticket a person's later message resumed shows no pipeline gate again — plus actions, authorization, waiting Inputs, Subscriptions and Assignments. A running Ticket leads with a compact **Now** block: the current tool, its latest progress report and who acts next — never a reasoning stream or token speed. The p4 settings also hold the Jenkins URL, account and API token used by the read-only pipeline check; the token is redacted from tool results and never written to prompts, logs or commits |
 | Settings | Sources, Eval, Execution, Prompts and Deployment. Each group includes its save history |
 
+### Moving between pages
+
+Every page the panel opens is a browser history entry, so the browser's Back and Forward, a mouse's side buttons and a page's own **Back** button all step through the same pages; a filter or paging change replaces its entry instead of adding one, and the mouse's Back button does nothing on the panel's first page rather than leave DSH Web. The URL does not change, and a deep link still opens the page it names. A new page enters with a short slide (from the right when going deeper, from the left when going back, upward for another tab); a filter change keeps the page in place without motion, and the system's reduced-motion setting turns every transition off. A page that fails to render shows the error with **Retry** and **Back to overview** instead of a blank panel; the header and tabs stay usable, and leaving the page clears the error, so no browser reload is needed.
+
 ### Reading individual records
 
 A dropped message links to its Ticket, or to its Thread when it has no Ticket. The Source page explains whether its conversation disappeared or the Source stopped listening to it.
