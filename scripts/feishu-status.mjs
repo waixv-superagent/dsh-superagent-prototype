@@ -277,9 +277,24 @@ function metricsElement (counts) {
   }
 }
 
+/** 飞书客户端识别的“跳到系统浏览器打开”参数：桌面端 V7.7+、移动端 V7.11+，优先级高于用户的链接打开方式设置。 */
+const BROWSER_PARAMS = ['lk_jump_to_browser', 'lk_mobile_jump_to_browser']
+
+/**
+ * 给看板地址补上飞书的跳浏览器参数：飞书内嵌 webview 不弹 Basic 认证框，看板在里面打不开。
+ * 已有的 query 与 hash 保持不变，参数已在则不重复；解析不了的地址原样返回。
+ */
+export function browserLink (url) {
+  let parsed
+  try { parsed = new URL(url) } catch { return url }
+  for (const name of BROWSER_PARAMS) if (!parsed.searchParams.has(name)) parsed.searchParams.append(name, 'true')
+  return parsed.href
+}
+
 /**
  * 拼一张 Card 2.0 卡片。数字和固定短句之外，展开明细里会带工单名和活跃时间，所以这张卡只能发到私密会话。
- * `lastOkAt` 用于掉线时告诉人最后一次成功读到状态是什么时候；`link` 是整卡点击跳转的看板地址。
+ * `lastOkAt` 用于掉线时告诉人最后一次成功读到状态是什么时候；`link` 是整卡点击跳转的看板地址，
+ * 卡片上会带飞书的跳浏览器参数，让它在系统浏览器而不是飞书内嵌 webview 里打开。
  */
 export function composeCard (snapshot, { now = new Date(), lastOkAt = null, link = '' } = {}) {
   const status = stateOf(snapshot, now)
@@ -320,7 +335,7 @@ export function composeCard (snapshot, { now = new Date(), lastOkAt = null, link
     }
   }
   const href = typeof link === 'string' ? link.trim() : ''
-  if (href) card.card_link = { url: href }
+  if (href) card.card_link = { url: browserLink(href) }
   return { card, title: status.title, template: status.template, kind: status.kind, summary }
 }
 
@@ -576,7 +591,7 @@ function usage () {
     '  --panel-url <url>    本机面板地址，默认 http://127.0.0.1:3082',
     '  --lark-cli <path>    lark-cli 或 bot 包装脚本，默认 lark-cli',
     '  --state-file <path>  状态文件，默认 ~/.dsh/state/superagent/feishu-status.json',
-    '  --link-url <url>     卡片点击跳转的看板地址；不传则卡片不可点（建议 <面板>/?view=board）',
+    '  --link-url <url>     卡片点击跳转的看板地址，会在系统浏览器打开；不传则卡片不可点（建议 <面板>/?view=board）',
     '  --print-card         只打印卡片 JSON，不发送',
     '  --help               显示这段帮助',
     '',
