@@ -58,16 +58,17 @@ describe('P1 plan card', () => {
     expect(front).toContain('**问题**')
     expect(front).toContain('**推荐**')
     expect(front).not.toContain('**选项**')
-    expect(front).toContain('**选项说明**')
-    // Each button keeps its short label; the consequence is a line above them, not a 24-character compromise.
-    expect(front).toContain('改动小，少一个缓存层')
-    expect(front).toContain('多一天，但彻底')
+    // Each choice is its own full-width line: the button keeps its short label and its consequence sits right under it.
+    const rows = elements.filter(item => item.tag === 'column_set')
+    expect(rows).toHaveLength(2)
+    const cells = rows.map(row => row.columns![0]!.elements as unknown as { tag: string; width?: string; text?: { content: string }; content?: string }[])
+    expect(cells.map(cell => cell[0]!.text!.content)).toEqual(['A 复用控件', 'B 新控件'])
+    expect(cells.every(cell => cell[0]!.width === 'fill')).toBe(true)
+    expect(cells.map(cell => cell[1]!.content)).toEqual(['改动小，少一个缓存层', '多一天，但彻底'])
     const panel = elements.find(item => item.tag === 'collapsible_panel')!
     expect(JSON.stringify(panel)).toContain('**选项**')
     expect(JSON.stringify(panel)).toContain('**证据**')
     expect(text).toContain('A 复用控件（改动小，少一个缓存层）')
-    expect((card.body as { elements: Element[] }).elements.filter(item => item.tag === 'column_set').at(-1)!.columns!
-      .map(column => (column.elements[0] as unknown as { text: { content: string } }).text.content)).toEqual(['A 复用控件', 'B 新控件'])
   })
   it('leads an analysis card with the finding and folds its evidence, so no fix line is invented', () => {
     const analysis = `问题：翻页为什么会闪
@@ -98,7 +99,8 @@ describe('P1 plan card', () => {
     expect(JSON.stringify(panel)).toContain('**验证方案**')
     expect(JSON.stringify(panel)).not.toContain('第二句也在正文里。')
     const subtitle = (card.header as { subtitle: { content: string } }).subtitle.content
-    expect(Array.from(subtitle.split(' · 工单')[0]!).length).toBeLessThanOrEqual(40)
+    // The subtitle stays one line on a 375px phone, so it never pushes the buttons down.
+    expect(Array.from(subtitle.split(' · 工单')[0]!).length).toBeLessThanOrEqual(14)
     // The card's own wording adds nothing cmd.exe would re-read.
     expect(JSON.stringify(planCard(ticket, { text: PLAN, deadline: '2026-09-24T00:00:00Z' }).card)).not.toMatch(/[<>&|^!%]/)
   })
@@ -218,8 +220,9 @@ describe('P1 plan card', () => {
     const body = JSON.stringify(revise)
     expect(body).toContain('"tag":"form"')
     expect(body).toContain('"name":"note"')
-    expect(body).toContain('"input_type":"text"')
-    expect(body).not.toContain('multiline_text')
+    // The input is a chat box: several lines, growing with the text, and a return is a new line.
+    const input = JSON.parse(body).body.elements.find((item: Element) => item.tag === 'form').elements[0]
+    expect(input).toMatchObject({ input_type: 'multiline_text', rows: 3, auto_resize: true, max_rows: 8, width: 'fill' })
     expect(body).toContain('submit_revise')
     expect(body).toContain('先上 A 还是先上 B？')
     expect(body).toContain('原方案')
@@ -229,6 +232,40 @@ describe('P1 plan card', () => {
     expect(JSON.stringify(resolvedCard(ticket, 'revise', '走 B').card)).toContain('走 B')
     expect(JSON.stringify(resolvedCard(ticket, 'stop').card)).toContain('已停止')
     expect(JSON.stringify(staleCard(ticket).card)).toContain('已处理')
+  })
+  it('shows a three-line direction as three lines once it is recorded', () => {
+    const note = '先别动 AvatarList\n改成复用前重设纹理\n再补一例翻页测试'
+    const { card, text } = resolvedCard(ticket, 'revise', note)
+    const elements = (card.body as { elements: Element[] }).elements
+    const quoted = elements.find(item => item.tag === 'column_set')!.columns![0]!.elements[0] as unknown as { content: string }
+    expect(quoted.content).toBe(note)
+    expect(quoted.content.split('\n')).toHaveLength(3)
+    expect(text).toContain(note)
+    // A one-line direction stays in the sentence, as before.
+    const single = resolvedCard(ticket, 'revise', '走 B')
+    expect((single.card.body as { elements: Element[] }).elements.some(item => item.tag === 'column_set')).toBe(false)
+    expect(JSON.stringify(single.card)).toContain('已把新方向交给 worker：走 B')
+  })
+  it('keeps short labels on one row and gives every longer label its own full-width line on a phone', () => {
+    const row = (labels: string[]): Element[] => (attentionCard('选哪个？', 'att-1', labels).card.body as { elements: Element[] }).elements
+      .filter(item => item.tag === 'column_set')
+    expect(row(['通过', '改一下', '停'])).toHaveLength(1)
+    expect(row(['通过', '改一下', '停'])[0]!.flex_mode).toBe('trisect')
+    expect(row(['先上 A', '先上 B'])[0]!.flex_mode).toBe('bisect')
+    // Five Chinese characters in thirds, or four choices, is what the ellipsis used to cut.
+    const long = row(['按此复盘', '调整一下范围', '先停'])
+    expect(long).toHaveLength(3)
+    for (const line of long) {
+      expect(line.columns).toHaveLength(1)
+      expect((line.columns![0]!.elements[0] as unknown as { width: string }).width).toBe('fill')
+    }
+    expect(row(['甲', '乙', '丙', '丁'])).toHaveLength(4)
+    const plan = (planCard(ticket, { text: PLAN, options: [
+      { label: '批准，开工', decision: 'approve' }, { label: '换个方向', decision: 'revise' }, { label: '先停', decision: 'stop' },
+    ] }).card.body as { elements: Element[] }).elements.filter(item => item.tag === 'column_set')
+    expect(plan).toHaveLength(3)
+    expect(plan.map(line => (line.columns![0]!.elements[0] as unknown as { behaviors: { value: unknown }[] }).behaviors[0]!.value))
+      .toEqual([{ v: 1, decision: 'approve', choice: 0 }, { v: 1, decision: 'revise', choice: 1 }, { v: 1, decision: 'stop', choice: 2 }])
   })
   it('asks the worker question with the choices it wrote, and records the clicked label', () => {
     const message = planCard(ticket, { text: PLAN, question: '先上 A 还是先上 B？', options: [
