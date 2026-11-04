@@ -32,6 +32,19 @@ export interface SnapshotWatchdog {
   gaveUp: boolean
   missing: boolean
 }
+/** The last hour's spend as the board's billing strip counts it; null when the host serves no billing. */
+export interface SnapshotBilling {
+  /** gateway: the gateway's settled bill; estimate: priced from published lists; tokens: no price, only a token count. */
+  source: 'gateway' | 'estimate' | 'tokens'
+  cost: number | null
+  /** The gateway has not settled every minute yet, so the amount is a lower bound. */
+  partial: boolean
+  tokens: number
+  requests: number
+  windowMinutes: number
+  /** The gateway account's remaining share of this period, 0–100; null when it could not be read. */
+  quotaPercent: number | null
+}
 export interface Snapshot {
   online: boolean
   error?: string
@@ -44,6 +57,8 @@ export interface Snapshot {
   watchdog: SnapshotWatchdog | null
   counts: SnapshotCounts | null
   tickets: SnapshotTickets | null
+  /** Absent in a hand-built snapshot from before the usage line; treated as null. */
+  billing?: SnapshotBilling | null
   executor: SnapshotExecutor | null
 }
 export interface CardView {
@@ -77,6 +92,10 @@ export interface RunOptions {
 
 export function parseArgs (argv: string[]): { options: Record<string, string>; flags: Set<string> }
 export function snapshotOf (overview: unknown, state: unknown): Snapshot
+export function billingOf (billing: unknown): SnapshotBilling | null
+export function billingLine (billing: SnapshotBilling | null | undefined): string
+export function moneyText (value: number): string
+export function tokensText (value: number): string
 export function offlineSnapshot (error: unknown): Snapshot
 export function clock (value: string | Date, seconds?: boolean): string
 export function idleMood (now: Date): string

@@ -82,6 +82,60 @@ function ticketsOf (value) {
   return Array.isArray(value) ? value.map(ticketOf).filter(Boolean) : []
 }
 
+/**
+ * 看板计费条的口径（src/client/overview.tsx 的 BillingStrip）：网关已结算的账单优先，读不到时用标注“估算”的公开价目估算，
+ * 都没有价格时只数 token。老服务端没有 billing 字段时返回 null，卡片不显示这一行。
+ */
+export function billingOf (billing) {
+  if (!billing || typeof billing !== 'object') return null
+  const finite = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+  const settled = billing.settled && typeof billing.settled === 'object' && finite(billing.settled.cost) !== null ? billing.settled : undefined
+  const total = billing.total && typeof billing.total === 'object' ? billing.total : {}
+  const quota = billing.quota && typeof billing.quota === 'object' ? finite(billing.quota.remainingPercent) : null
+  const estimate = finite(total.cost)
+  return {
+    source: settled ? 'gateway' : estimate !== null ? 'estimate' : 'tokens',
+    cost: settled ? settled.cost : estimate,
+    partial: settled ? settled.complete === false : false,
+    tokens: Math.trunc(finite(total.tokens) ?? 0),
+    requests: Math.trunc((settled ? finite(settled.requests) : finite(total.requests)) ?? 0),
+    windowMinutes: Math.trunc(finite(billing.windowMinutes) || 60),
+    quotaPercent: quota === null ? null : Math.min(100, quota)
+  }
+}
+
+/** 和看板一样的金额写法；小于一分时不写 `<`（cmd 安全过滤会删掉它），改成“不足”。 */
+export function moneyText (value) {
+  if (value === 0) return '¥0.00'
+  return value < 0.01 ? '不足 ¥0.01' : `¥${value.toFixed(2)}`
+}
+
+/** 和看板一样的 token 简写。 */
+export function tokensText (value) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
+  return String(value)
+}
+
+/** 状态卡上的一行用量：「近 1 小时 金额（来源）· 本周余量 / 请求数」。 */
+export function billingLine (billing) {
+  if (!billing) return ''
+  const window = billing.windowMinutes % 60 === 0 ? `近 ${billing.windowMinutes / 60} 小时` : `近 ${billing.windowMinutes} 分钟`
+  if (billing.requests === 0 && !billing.cost && billing.tokens === 0) {
+    return billing.quotaPercent === null ? `${window}没有请求` : `${window}没有请求 · ${quotaText(billing.quotaPercent)}`
+  }
+  const amount = billing.source === 'tokens'
+    ? `${tokensText(billing.tokens)} tokens（未计价）`
+    : `${moneyText(billing.cost)}${billing.partial ? '+' : ''}（${billing.source === 'gateway' ? '网关账单' : '估算'}）`
+  const tail = billing.quotaPercent !== null ? quotaText(billing.quotaPercent) : `${billing.requests} 次请求`
+  return `${window} ${amount} · ${tail}`
+}
+
+/** 本周余量；不到一成时加个提醒符号，对应看板上变红的余量条。 */
+function quotaText (percent) {
+  return `${percent < 10 ? '⚠️ ' : ''}本周余量 ${Math.round(percent)}%`
+}
+
 /** 把管理 API 的 state/overview 归一成卡片需要的数字；缺字段按 0 处理，形状可选是为了测试样本可以很小。 */
 export function snapshotOf (overview, state) {
   const count = (value) => Array.isArray(value) ? value.length : 0
@@ -118,6 +172,7 @@ export function snapshotOf (overview, state) {
       person: ticketsOf(overview?.person),
       pipeline: ticketsOf(overview?.pipeline)
     },
+    billing: billingOf(overview?.billing),
     executor: {
       running: number(executor.running),
       queued: number(executor.queued),
@@ -129,7 +184,7 @@ export function snapshotOf (overview, state) {
 /** 连不上管理 API 时的快照：不猜数字，只保留“掉线”这个事实。 */
 export function offlineSnapshot (error) {
   return { online: false, error: String(error?.message ?? error), paused: false, runtime: 'unknown', setupProblem: false, problems: 0, stalled: 0, watchdog: null,
-    counts: null, tickets: null, executor: null }
+    counts: null, tickets: null, billing: null, executor: null }
 }
 
 /** 本地时间的 HH:MM；无效时间返回 `—`。 */
@@ -323,6 +378,9 @@ export function composeCard (snapshot, { now = new Date(), lastOkAt = null, link
   }
   const summary = summaryOf(snapshot, status, now)
   const elements = [metricsElement(counts)]
+  // 用量紧跟在三个数字下面，和看板上计费条在看板列之上的位置一致。
+  const usage = snapshot.online ? billingLine(snapshot.billing) : ''
+  if (usage) elements.push({ tag: 'markdown', content: usage, text_align: 'center', text_size: 'notation' })
   const panel = detailPanel(snapshot, now)
   if (panel) elements.push(panel)
   elements.push({ tag: 'markdown', content: note, text_align: 'center', text_size: 'notation' })
