@@ -126,8 +126,7 @@ export function ThreadPage({ id, target }: { id: string; target?: string }) {
     await reload()
   }
   return <>
-    <PageHead title={readableMarkers(t, data.title)}>{data.url && <ActionLink href={data.url}>{t('openOriginal')}</ActionLink>}
-      {data.chatUrl && <ActionLink href={data.chatUrl} icon="message">{t('openFeishuChat')}</ActionLink>}</PageHead>
+    <PageHead title={readableMarkers(t, data.title)}>{data.url && <ActionLink href={data.url}>{t('openOriginal')}</ActionLink>}</PageHead>
     {error && <LoadState error={error} loading={false} />}
     <div className="dt-row-meta dt-status-line">
       <span>{valueLabel(t, 'source', data.source)}</span><span>{t('threadLatest',
