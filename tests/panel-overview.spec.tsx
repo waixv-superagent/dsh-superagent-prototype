@@ -51,6 +51,9 @@ it('shows the charging provider and the rolling hour directly above the board, w
   expect(strip?.querySelector('.dt-billing-provider')?.textContent).toBe('kurogames')
   expect(strip?.querySelector('.dt-billing-model')?.textContent).toBe('DeepSeek V4.1 Flash')
   expect(strip?.querySelector('.dt-billing-money')?.textContent).toBe('¥1.23')
+  expect(strip?.querySelector('.dt-billing-money')?.getAttribute('data-source')).toBe('estimate')
+  expect(strip?.querySelector('.dt-billing-source')?.textContent).toBe(zh.billingEstimate)
+  expect(strip?.querySelector('.dt-billing-quota')).toBeNull()
   expect(strip?.querySelector('.dt-billing-window-label')?.textContent).toBe(zh.billingWindow)
   expect(strip?.querySelectorAll('.dt-billing-bar')).toHaveLength(60)
   expect(all('.dt-billing-now .dt-tag').map(tag => tag.textContent)).toEqual(['执行走 DeepSeek Account'])
@@ -71,6 +74,39 @@ it('keeps an unpriced route visible by its tokens instead of inventing a money f
   expect(document.querySelector('.dt-billing-provider')?.textContent).toBe('DeepSeek Account')
   expect(document.querySelector('.dt-billing-provider')?.hasAttribute('data-unpriced')).toBe(true)
   expect(document.querySelector('.dt-billing-total')?.textContent).toBe('12.3k tokens')
+})
+
+it('leads with the gateway\'s settled hour and the quota left, with the per-minute bars drawn from the bill', async () => {
+  const at = Date.now()
+  const buckets = server.billing.buckets.map((bucket, index) => ({ at: bucket.at, cost: index === 58 ? 2 : index === 59 ? 0.5 : 0,
+    requests: index >= 58 ? 3 : 0 }))
+  server.billing = { ...server.billing,
+    settled: { source: 'gateway', provider: 'ai-gateway', cost: 40.12, requests: 321, tokens: 9_000_000, buckets, complete: true },
+    quota: { source: 'gateway', limit: 3000, used: 2800, remaining: 200, remainingPercent: 200 / 3000 * 100, periodEnd: at + 86_400_000, at } }
+  await mount()
+  await openOverview()
+  const strip = document.querySelector('.dt-billing')
+  expect(strip?.querySelector('.dt-billing-money')?.textContent).toBe('¥40.12')
+  expect(strip?.querySelector('.dt-billing-money')?.getAttribute('data-source')).toBe('gateway')
+  expect(strip?.querySelector('.dt-billing-source')?.textContent).toBe(zh.billingSettled)
+  expect(strip?.querySelector('.dt-billing-requests')?.textContent).toBe('321 次请求')
+  expect(strip?.querySelector('.dt-billing-quota-value')?.textContent).toBe('7%')
+  expect(strip?.querySelector('.dt-billing-quota')?.getAttribute('data-tone')).toBe('danger')
+  const bars = all('.dt-billing-bar')
+  expect(bars).toHaveLength(60)
+  expect((bars[58] as HTMLElement).style.height).toBe('100%')
+  expect((bars[59] as HTMLElement).style.height).toBe('25%')
+  expect(bars.filter(bar => bar.hasAttribute('data-latest'))).toEqual([bars[59]])
+  expect(bars[59]?.getAttribute('title')).toContain('¥0.50')
+})
+
+it('marks a partly read gateway hour as a lower bound', async () => {
+  server.billing = { ...server.billing, settled: { source: 'gateway', provider: 'ai-gateway', cost: 3, requests: 4, tokens: 10,
+    buckets: server.billing.buckets.map(bucket => ({ at: bucket.at, cost: 0, requests: 0 })), complete: false } }
+  await mount()
+  await openOverview()
+  expect(document.querySelector('.dt-billing-money')?.textContent).toBe('¥3.00+')
+  expect(document.querySelector('.dt-billing-money')?.getAttribute('title')).toBe(zh.billingSettledPartial)
 })
 
 
