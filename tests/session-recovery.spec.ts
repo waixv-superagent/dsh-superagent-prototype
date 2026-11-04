@@ -27,7 +27,7 @@ it('reopens a worker Session that fails to load twice, then starts it once the s
   expect(stored.repairs).toBeUndefined()
 })
 
-it('reports the Assignment blocked with the store error when the Session stays unreadable, keeping the history', async () => {
+it('reports the Assignment failed with the store error when the Session stays unreadable, keeping the history', async () => {
   const h = await started()
   const fallback = h.resolveDefault
   h.controller.resolveAgent.mockImplementation(async (id: string) => String(id).startsWith('worker-')
@@ -36,10 +36,12 @@ it('reports the Assignment blocked with the store error when the Session stays u
   const { ticket } = await h.acceptedTicket(feishu('2', '@bot 修一下回归'))
   await h.runtime.idle()
   const report = h.runtime.store.tickets.get(ticket.id)!.assignments.at(-1)!.report!
-  expect(report.state).toBe('blocked')
+  // A corrupt store is not a passing failure: the Assignment fails at once with the repair hint instead of retrying without limit.
+  expect(report.state).toBe('failed')
   expect(report.summary).toContain('could not be opened after retrying')
   expect(report.summary).toContain('SessionPersistenceCorruptionError')
   expect(report.summary).toContain('stored history was kept')
+  expect(report.summary).toContain('does not retry this automatically')
 })
 
 it('stops the host even when the session store cannot flush, leaving the log for the next open', async () => {
