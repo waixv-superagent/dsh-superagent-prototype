@@ -40,6 +40,7 @@ import { Passes } from './passes.ts'
 import { Setup } from './setup.ts'
 import { Editor } from './editor.ts'
 import { notifyPlan as sendPlanCard } from './plan.ts'
+import { Billing, publishedPrices } from './billing.ts'
 import { feishuSettings } from '../sources/feishu.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
@@ -76,6 +77,7 @@ export class Runtime extends Service implements SourceHost {
   readonly executor: DshExecutor
   readonly activity: Activity
   readonly editor: Editor
+  readonly billing: Billing
   readonly pipeline: PipelineChecks
   readonly pipelineWatch: PipelineWatch
   readonly watchdog: Watchdog
@@ -135,6 +137,7 @@ export class Runtime extends Service implements SourceHost {
         toolsHealth: board.claim('worker-tools', { state: 'starting', detail: 'No worker Session has started yet' }),
         masterId, lifetime: this.lifetime, wroteInSession: (id, text) => this.engine.wroteInSession(id, text),
         closing: () => this.closing(), environment,
+        restoreBilling: (id, events) => this.billing.restore(id, events),
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }
       this.settings = new Settings({ store, sources, engine: { policyChanged }, health: board, context: ctx, lifetime: this.lifetime, sessions,
@@ -145,6 +148,9 @@ export class Runtime extends Service implements SourceHost {
         repliedTo: trigger => repliedTo({ store, sources }, trigger) })
       this.activity = new Activity(ctx)
       this.editor = new Editor({ warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
+      // The board's billing strip reads actual Session usage; the host only fetches the routes' published price lists.
+      this.billing = new Billing({ store, catalog: () => ctx.sessionController.modelCatalog(),
+        prices: provider => publishedPrices(ctx, provider), warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       this.pipeline = new PipelineChecks({ settings: () => store.settings() })
       this.assessor = new MasterAssessor({ get engine() { return runtime.engine }, commands, get deployment() { return setup.deployment }, effects,
         settings: () => store.settings(), paused: () => this.paused(), threadContext: trigger => sources.threadContext(trigger),
@@ -259,6 +265,9 @@ export class Runtime extends Service implements SourceHost {
       return
     }
     this.sessions.install()
+    // Every managed Session's model messages feed the rolling spend, including a worker's subagent calls.
+    this.disposers.push(this.ctx.on('session/event', (session, event) => this.billing.observe(session.id, event)))
+    this.billing.start()
     this.executor.install()
     await this.sessions.ensure(this.masterId, this.machine.stateDir, MASTER_TITLE, 'orchestrator')
     for (const id of this.settings.syncable()) await this.settings.sync(id).catch(() => { /* sync() records its failure in health. */ })
@@ -273,8 +282,8 @@ export class Runtime extends Service implements SourceHost {
   }
   private httpHost(): HttpHost {
     const runtime = this
-    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog } = this
-    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, health, machine, masterId, ready, sourceLinks, watchdog,
+    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing } = this
+    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, billing, health, machine, masterId, ready, sourceLinks, watchdog,
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
@@ -284,6 +293,7 @@ export class Runtime extends Service implements SourceHost {
   stop(): Promise<void> { return this.stopping ??= this.shutdown() }
   private async shutdown(): Promise<void> {
     this.closingFlag = true; const passes = this.passes.stop(); const watch = this.pipelineWatch.stop(); const watchdog = this.watchdog.stop()
+    this.billing.stop()
     this.stopped.abort()
     try {
       this.assessor.stop()

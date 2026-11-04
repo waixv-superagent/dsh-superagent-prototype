@@ -222,6 +222,14 @@ Limits:
 - The expandable detail carries Ticket titles, so keep the card in a private chat. The card's JSON also cannot carry literal `<` or `>` (the CLI runs through `cmd.exe`); the script escapes titles and uses no inline HTML.
 - If the machine or its network is down, the script is down too, and the card keeps its last state. A red card means "the service stopped answering while the scheduler still runs"; a machine-level signal needs an observer outside the machine.
 
+### Billing strip
+
+The Overview board shows, directly above its lanes, which model route is charging now and what the rolling hour cost. The host reads every managed Session's `assistant/message` usage event, keeps one minute-granular hour of it, and prices each model from that route's own published `/v1/models` list. It finds the list through the route's configured `baseURL` and `apiKeyEnv` (the `llm-pi-ai` provider `ai-gateway` in this installation), caches it for ten minutes, and never makes a model request. Usage whose route publishes no price is shown as tokens and is never converted into money.
+
+The strip names the deployment default, the Eval role and the Executor role. A role whose provider differs from the default carries a warning tag, because a role left on a personal `deepseek-account` route is exactly how a personal balance gets spent without anyone noticing. The rolling window is persisted in the state database, so a host restart does not blank the hour; on startup the host also replays the durable usage of every Session it opens, and the persisted sequence watermarks keep that replay from counting the same calls twice.
+
+The default comes from the DSH model catalog. Changing a role's model affects Sessions created afterwards: a Session keeps the durable `model/selection` it already recorded, so an in-flight worker may stay on the old route until its Ticket is retried or its Session is reselected. The strip shows the route that actually charged, not the route configuration promises.
+
 ## Settings
 
 Setup must succeed before polling or work starts. Overview lists missing requirements and links to their settings. A save that changes a field setup reads, namely the GitHub repository or agent CLI or the Feishu bot CLI, runs setup again and restarts dsh-superagent; other saves apply without a restart. If you fix something outside the application, such as CLI authentication, choose **Check again**.

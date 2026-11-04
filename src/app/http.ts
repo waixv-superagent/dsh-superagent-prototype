@@ -9,6 +9,7 @@ import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types
 import { PromptConflict, SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, builtInParts, defaultPrompts, savePrompts, type Prompts }
   from './prompts.ts'
 import type { Activity } from './activity.ts'
+import type { Billing } from './billing.ts'
 import type { Editor } from './editor.ts'
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
@@ -50,6 +51,8 @@ export interface HttpHost {
   readonly activity: Pick<Activity, 'read'>
   /** Cached editor occupancy the overview reads; null until the first process probe finishes. */
   readonly editor: Pick<Editor, 'read'>
+  /** Rolling model spend the overview's billing strip reads; absent on a host built before it. */
+  readonly billing?: Pick<Billing, 'view'>
   readonly health: Record<string, Health>
   readonly machine: Machine
   readonly masterId: string
@@ -178,8 +181,13 @@ function routes(runtime: HttpHost): Routes {
   const promptBody = (input: { body: (maxBytes?: number) => Promise<unknown> }) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096)
   return {
     'GET state': () => stateView(runtime),
-    'GET overview': () => overview(views(runtime), runtime.health, policyVersion(store.settings()),
-      executorLoad(store, runtime.executor.activeCount()), runtime.setupProblem ?? runtime.feishuProblem, runtime.editor.read()),
+    // The billing strip is optional: an older host without the ledger still serves the board.
+    'GET overview': async () => {
+      const page = overview(views(runtime), runtime.health, policyVersion(store.settings()),
+        executorLoad(store, runtime.executor.activeCount()), runtime.setupProblem ?? runtime.feishuProblem, runtime.editor.read())
+      const billing = runtime.billing ? await runtime.billing.view() : undefined
+      return billing ? { ...page, billing } : page
+    },
     'GET editor': () => editorPage(views(runtime), runtime.activity, runtime.editor.read(), executor()),
     'GET search': ({ query }) => search(views(runtime), query.q ?? '', runtime.sourceLinks),
     'GET sources': () => sourcesStatus(views(runtime), runtime.health, setupState(runtime)),

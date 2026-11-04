@@ -96,6 +96,8 @@ export interface PanelServer {
   activity: (ticketId: string) => ActivityView | undefined
   /** Editor occupancy the Overview reads; tests replace it to simulate a person, an agent, an unreadable probe or no probe yet. */
   editor: ApiResponse<'GET overview'>['editor']
+  /** The billing strip the Overview reads; tests replace it to simulate an unpriced route or a role switched to a personal account. */
+  billing: NonNullable<ApiResponse<'GET overview'>['billing']>
   /** The build the Editor page reports, including the verification Tickets delivered before it started. */
   build?: ApiResponse<'GET editor'>['build']
   /** Replaces the Editor page's answer; by default it is derived from the lanes, `editor` and `activity` above. */
@@ -238,7 +240,7 @@ const overviewView = (): ApiResponse<'GET overview'> => {
       ...Object.values(server.settings.policy.sources).some(part => part.allowed.length) ? [] : [{ kind: 'no-allowed' as const }],
       ...server.failing.map(outgoing => ({ kind: 'outgoing' as const, outgoing }))],
     person: server.person, verification: server.verification, working: server.working, idle: server.idle,
-    pipeline: server.pipeline, ended: server.ended, editor: server.editor,
+    pipeline: server.pipeline, ended: server.ended, editor: server.editor, billing: server.billing,
     endedStats: { completed: 1, verified: 0, pending: 1, agent: 1, none: 0, changelist: 1, archived: 0 },
     executor: { running: 2, queued: 0, maxWorkers: server.settings.executor.maxWorkers, idle: 1 },
     flow: { received: 12, filtered: 2, triggers: 10, judged: 5, accepted: 1, evaluating: 0,
@@ -312,6 +314,21 @@ function initial(): PanelServer {
     activity: () => undefined,
     editor: { holder: 'person', activity: 'editing', since: '2026-09-22T08:00:00.000Z', pid: 1, build: null,
       at: '2026-09-22T08:10:00.000Z' },
+    billing: {
+      windowMinutes: 60, currency: 'CNY',
+      current: { provider: 'ai-gateway', name: 'kurogames', model: 'DeepSeek V4.1 Flash', at: Date.now() - 60_000 },
+      configured: [
+        { role: 'default', provider: 'ai-gateway', name: 'kurogames', model: 'deepseek-v4.1-flash' },
+        { role: 'orchestrator', provider: 'ai-gateway', name: 'kurogames', model: 'deepseek-v4.1-flash' },
+        { role: 'worker', provider: 'deepseek-account', name: 'DeepSeek Account', model: 'deepseek-flash' },
+      ],
+      providers: [{ provider: 'ai-gateway', name: 'kurogames', model: 'DeepSeek V4.1 Flash', cost: 1.23, tokens: 456_000, requests: 9,
+        lastAt: Date.now() - 60_000, unpricedTokens: 0 }],
+      total: { cost: 1.23, tokens: 456_000, requests: 9, unpricedTokens: 0 },
+      buckets: Array.from({ length: 60 }, (_, index) => ({ at: Date.now() - (59 - index) * 60_000, cost: index === 59 ? 0.1 : 0,
+        tokens: index === 59 ? 20_000 : 0 })),
+      priced: true, updatedAt: Date.now(),
+    },
     working: [ticketSummary({ id: 't5', title: '补 i18n 文案', summary: '第 12 步 · 修改 zh-CN.json' }),
       ticketSummary({ id: 't6', title: '升级依赖', summary: '后台 job · 60 秒无输出', updatedAt: '2026-09-22T23:30:00Z' })],
     idle: [], pipeline: [], ended: [ended],

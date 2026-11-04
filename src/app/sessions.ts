@@ -9,6 +9,7 @@ import { key, liveTicket, ticketPhase, type Ticket } from '../core/index.ts'
 import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { AgentDelivery, messageId } from './delivery.ts'
+import type { BillingEvent } from './billing.ts'
 import type { Effects } from './effects.ts'
 import type { Variable } from './execution-environment.ts'
 import { RetryHealth } from './retry-health.ts'
@@ -37,6 +38,8 @@ export interface SessionsHost {
   closing(): boolean
   /** A person wrote in a ticket's worker Session: it resumes, takes the message, or starts its next Assignment; returns whether it did. */
   wroteInSession(ticketId: string, text: string): boolean
+  /** Replays a Session's durable events into the rolling billing window without counting what its snapshot already holds. */
+  restoreBilling?(sessionId: string, events: readonly BillingEvent[]): void
   /** Execution environment variables for `ticket`, rendered into its worker's system prompt. */
   environment(ticket: Ticket): Variable[]
   /** Tools to register on the main Session (`ticket === undefined`) or on `ticket`'s worker Session. */
@@ -295,6 +298,7 @@ export class Sessions {
     const binding: SessionBinding = { disposers: [] }
     this.bindings.set(agent, binding)
     this.retryHealth.restore(agent.id, agent.session.snapshotEvents())
+    this.host.restoreBilling?.(agent.id, agent.session.snapshotEvents())
     if (agent.status === 'idle') this.retryHealth.clear(agent.id)
     this.updateModelHealth()
     // Disable variable interpolation so literal ${{ ... }} expressions in team prompts are preserved.

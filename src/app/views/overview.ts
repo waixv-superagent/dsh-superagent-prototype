@@ -3,6 +3,7 @@ import { completedArchived, reasonText, ticketStage, type Decision, type Thread 
 import type { Health } from '../../sources/host.ts'
 import type { SetupProblem } from '../../setup.ts'
 import type { EditorView } from '../editor.ts'
+import type { BillingView } from '../billing.ts'
 import { anyoneAllowed } from '../../policy.ts'
 import type { Store } from '../store.ts'
 import { awaitingEval, dayAgo, delivered, newestFirst, ownersOf, snapshot, threadSummary, type ViewHost } from './records.ts'
@@ -116,4 +117,7 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
     policyVersion: policyVersionValue,
   }
 }
-export type OverviewView = ReturnType<typeof overview>
+export type OverviewView = ReturnType<typeof overview> & {
+  /** The board's billing strip; absent when an older host serves the overview. */
+  billing?: BillingView
+}
