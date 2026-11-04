@@ -9,6 +9,7 @@ import { channelLink, decisionView, delivered, newestFirst, page, snapshot, thre
   type Snapshot, type ViewHost } from './records.ts'
 import { markdown, preview } from './text.ts'
 import { feishuTrace } from './trace.ts'
+import { ticketRelations } from './graph.ts'
 
 export type BasisFact =
   | { name: 'addressed'; value: 'mention' | 'direct' } | { name: 'followup' } | { name: 'admission'; value: AdmissionCell } | { name: 'observation' }
@@ -203,6 +204,7 @@ export function ticketDetail(host: ViewHost, id: string) {
       ...assignment.state === 'running' && assignment.report && assignment.report.state !== 'progress' && stage !== 'working'
         ? { turnEndedAt: assignment.report.at } : {} })),
     inputs: ticket.inputs.slice().reverse().map(input),
+    relations: ticketRelations(host, id),
     // Threads followed for context only (e.g., related issues) grant no authority and are marked with `context: true`.
     threads: view.threadsOf(id).map(thread => ({ ...threadSummary(view, thread),
       ...thread.context?.includes(id) ? { context: true as const } : {} })) }

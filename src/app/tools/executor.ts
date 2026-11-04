@@ -1,6 +1,6 @@
 /** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, checking a delivered change's pipeline, and reporting status. */
 import { z } from 'zod'
-import { liveTicket, missingVerifyLabels, ticketPhase, VERIFY_LABELS, type EngineForExecutor, type Ticket } from '../../core/index.ts'
+import { LINKED_RELATION_KINDS, liveTicket, missingVerifyLabels, ticketPhase, VERIFY_LABELS, type EngineForExecutor, type Ticket } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
 import { matchDeliveryTarget, deliveryTargets } from '../delivery-targets.ts'
 import { claimPull, readPull } from '../../sources/github-pull.ts'
@@ -16,7 +16,7 @@ import { EDITOR_JOB_KINDS, EDITOR_PURPOSES, MAX_LEASE_MS, ordered } from '../edi
 import type { EditorScheduler } from '../editor-scheduler.ts'
 
 export interface ExecutorToolsHost {
-  readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'submitPlan' | 'advancePhase' | 'redispatchTicket'
+  readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'submitPlan' | 'advancePhase' | 'redispatchTicket'
     | 'recordPipeline' | 'rerunPipeline'>
   readonly store: Pick<Store, 'tickets' | 'settings' | 'replyStatus' | 'atomic'>
   readonly sessions: Pick<Sessions, 'relay' | 'notify' | 'prompt'>
@@ -94,6 +94,16 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
         if (followed) host.sessions.notify(...threadFollowedNotice(ticketId, args.thread, args.reason))
         return { followed, thread: args.thread }
       }),
+    }),
+    tool({
+      name: 'orchestrator_ticket_link',
+      description: 'Record that this ticket supersedes, blocks or relates to another.',
+      schema: z.object({
+        ticket_id: z.string().trim().min(1),
+        kind: z.enum(LINKED_RELATION_KINDS),
+        reason: z.string().trim().min(1).max(300),
+      }).strict(),
+      execute: async args => ({ linked: host.engine.link(ticketId, args.kind, args.ticket_id, args.reason), kind: args.kind, ticket_id: args.ticket_id }),
     }),
     tool({
       name: 'orchestrator_trigger_handback',

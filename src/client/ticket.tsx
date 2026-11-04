@@ -482,6 +482,24 @@ function PipelineGate({ ticket, onChanged }: { ticket: TicketPageView; onChanged
   </section>
 }
 
+/** One related Ticket: how it relates, read from this Ticket's side, and where the relation came from. */
+function RelationLine({ relation }: { relation: TicketPageView['relations'][number] }) {
+  const { t, navigate } = usePanel()
+  return <li className="dt-row dt-link"><div className="dt-row-main">
+    <div className="dt-row-title">
+      <Tag tone={relation.kind === 'blocks' ? 'warning' : relation.kind === 'supersedes' ? 'info' : 'outline'}>
+        {t(relation.outgoing ? `relation.${relation.kind}` : `relationIn.${relation.kind}`)}</Tag>
+      <button type="button" className="dt-open" onClick={() => navigate({ page: 'execution', id: relation.ticket.id })}>
+        {relation.ticket.title}</button>
+    </div>
+    <div className="dt-row-meta">
+      <span>{t(`relationVia.${relation.via}`)}</span>
+      {relation.ticket.stage === 'ended' && <span>{t('ticket.ended')}</span>}
+      {relation.reason && <span className="dt-ellipsis">{relation.reason}</span>}
+    </div>
+  </div></li>
+}
+
 export function TicketPage({ id }: { id: string }) {
   const { t, call, notify } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET tickets/:id', { id }), [id])
@@ -581,6 +599,10 @@ export function TicketPage({ id }: { id: string }) {
     {undelivered.length > 0 && <Section title={t('undeliveredInputs')} count={undelivered.length}>
       <Hint>{data.deliveryError ? t('inputRetryHint') : data.paused ? t('inputPausedHint') : t('inputWaitingHint')}</Hint>
       <InputList inputs={undelivered} />
+    </Section>}
+    {data.relations.length > 0 && <Section title={t('relatedTickets')} count={data.relations.length}>
+      <ul className="dt-list">{data.relations.map(relation => <RelationLine key={`${relation.kind}${relation.ticket.id}${relation.outgoing}`}
+        relation={relation} />)}</ul>
     </Section>}
     {data.threads.length > 0 && <Section title={t('subscribedThreads')} count={data.threads.length}>
       <ul className="dt-list">{data.threads.map(thread => <ThreadLine key={thread.key} thread={thread} ticketId={data.id}

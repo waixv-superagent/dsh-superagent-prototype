@@ -35,6 +35,7 @@ import { settingsView } from './views/settings.ts'
 import { sourcesStatus, type SetupState } from './views/sources.ts'
 import { decisionList, search, threadDetail, threadList } from './views/threads.ts'
 import { executorLoad, ticketDetail, ticketList, ticketSearch } from './views/tickets.ts'
+import { ticketGraph } from './views/graph.ts'
 
 export interface HttpHost {
   readonly store: Store
@@ -265,6 +266,7 @@ function routes(runtime: HttpHost): Routes {
       const { q, limit } = TicketSearchQuery.parse(query)
       return ticketSearch(views(runtime), q, limit)
     },
+    'GET tickets/graph': () => ticketGraph(runtime),
     'GET tickets/:id': ({ params }) => ticketPage(runtime, params.id),
     'GET tickets/:id/activity': ({ params }) => runtime.activity.read(ticket(params.id)),
     'POST tickets/:id/retry': ({ params }) => { const id = ticket(params.id); runtime.engine.retryTicket(id); return { retried: true } },

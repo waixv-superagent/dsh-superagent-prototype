@@ -17,7 +17,7 @@ it('opens on the board view, with the editor one switch away', async () => {
   await mountHome()
   expect(tab(zh['tab.editor']).getAttribute('aria-selected')).toBe('true')
   expect(all('.dt-tabs [role="tab"]').map(tab => tab.textContent)).toEqual(['概览', '来源', '触发', '评估', '执行', '设置'])
-  expect(all('.dt-home-switch [role="tab"]').map(tab => tab.textContent)).toEqual(['编辑器', '看板'])
+  expect(all('.dt-home-switch [role="tab"]').map(tab => tab.textContent)).toEqual(['编辑器', '看板', '关系图'])
   expect(tab(zh.homeViewBoard).getAttribute('aria-selected')).toBe('true')
   expect(document.querySelector('.dt-verdict')).not.toBeNull()
   expect(document.querySelector('.dt-editor-hero')).toBeNull()

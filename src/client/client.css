@@ -764,7 +764,7 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-editor-run-summary { margin: 2px 0 0; font-size: 11.5px; line-height: 17px; color: var(--dsw-alias-label-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The 概览 switch between the editor page and the board, above the hero so both views share it. */
 .dt-home-switch { display: flex; justify-content: flex-end; margin: 0 0 12px; }
-.dt-home-switch .dt-segmented { width: 220px; }
+.dt-home-switch .dt-segmented { width: 300px; }
 /* The recent tools behind a working row: a short trail, opened on demand, so a person can see the MCP server it called. */
 .dt-editor-run-tools { margin-top: 4px; }
 .dt-editor-tools-toggle { padding: 0; border: 0; background: none; font: inherit; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); cursor: pointer; }
@@ -936,3 +936,50 @@ button.dt-problem-title:hover { color: var(--dsw-alias-label-primary); text-deco
 .dt-now-elapsed { color: var(--dsw-alias-label-caption); font-variant-numeric: tabular-nums; }
 .dt-now-latest { color: var(--dsw-alias-label-secondary); }
 .dt-now-next { color: var(--dsw-alias-label-secondary); }
+/* The relation view of 概览: a time DAG or a force-directed cloud of Tickets, in plain SVG. */
+.dt-graph { --dt-g-working: var(--dsw-alias-state-business-primary); --dt-g-person: var(--dsw-alias-state-warn-primary); --dt-g-pipeline: #7c5cff; --dt-g-idle: var(--dsw-alias-label-tertiary); --dt-g-done: var(--dsw-alias-state-success-primary); --dt-g-closed: var(--dsw-alias-label-caption); --dt-g-spawned: var(--dsw-alias-link, #2f6fed); --dt-g-supersedes: #7c5cff; --dt-g-blocks: var(--dsw-alias-state-error-primary); --dt-g-related: var(--dsw-alias-label-tertiary); display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dt-graph-head { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
+.dt-graph-head .dt-graph-switch { width: 180px; }
+.dt-graph-count { margin-left: auto; color: var(--dsw-alias-label-caption); font-size: 12px; font-variant-numeric: tabular-nums; }
+.dt-graph-frame { min-width: 0; overflow: hidden; border: .5px solid var(--dsw-alias-border-l2); border-radius: 14px; background: radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--dsw-alias-brand-primary) 5%, transparent), transparent 70%), var(--dsw-alias-bg-layer-1); }
+.dt-graph-scroll { overflow-x: auto; }
+.dt-graph-svg { display: block; font-size: 11px; user-select: none; }
+.dt-graph-cloud { width: 100%; height: auto; touch-action: none; }
+.dt-graph-tick line { stroke: var(--dsw-alias-border-l2); stroke-dasharray: 2 4; }
+.dt-graph-tick text { fill: var(--dsw-alias-label-caption); text-anchor: middle; font-variant-numeric: tabular-nums; }
+.dt-graph-lane rect { fill: transparent; }
+.dt-graph-lane[data-odd] rect { fill: color-mix(in srgb, var(--dsw-alias-label-primary) 3%, transparent); }
+.dt-graph-lane text { fill: var(--dsw-alias-label-secondary); }
+.dt-graph-edge { fill: none; stroke-width: 1.4; stroke: var(--dt-g-related); opacity: .75; transition: opacity 140ms ease; }
+.dt-graph-edge[data-kind='spawned'] { stroke: var(--dt-g-spawned); stroke-width: 1.6; }
+.dt-graph-edge[data-kind='supersedes'] { stroke: var(--dt-g-supersedes); stroke-dasharray: 6 3; }
+.dt-graph-edge[data-kind='blocks'] { stroke: var(--dt-g-blocks); stroke-dasharray: 2 3; stroke-width: 1.8; }
+.dt-graph-edge[data-kind='related'] { opacity: .35; }
+.dt-graph-edge[data-dim] { opacity: .08; }
+.dt-graph-arrow { fill: var(--dt-g-related); }
+.dt-graph-arrow[data-kind='spawned'] { fill: var(--dt-g-spawned); }
+.dt-graph-arrow[data-kind='supersedes'] { fill: var(--dt-g-supersedes); }
+.dt-graph-arrow[data-kind='blocks'] { fill: var(--dt-g-blocks); }
+.dt-graph-node { --dt-g: var(--dt-g-idle); cursor: pointer; outline: none; transition: opacity 140ms ease; }
+.dt-graph-node[data-tone='working'] { --dt-g: var(--dt-g-working); }
+.dt-graph-node[data-tone='person'] { --dt-g: var(--dt-g-person); }
+.dt-graph-node[data-tone='pipeline'] { --dt-g: var(--dt-g-pipeline); }
+.dt-graph-node[data-tone='done'] { --dt-g: var(--dt-g-done); }
+.dt-graph-node[data-tone='closed'] { --dt-g: var(--dt-g-closed); }
+.dt-graph-node[data-dim] { opacity: .15; }
+.dt-graph-node circle { fill: var(--dt-g); stroke: var(--dsw-alias-bg-layer-1); stroke-width: 1.5; }
+.dt-graph-node .dt-graph-span { fill: color-mix(in srgb, var(--dt-g) 26%, transparent); stroke: none; }
+.dt-graph-node .dt-graph-halo { fill: color-mix(in srgb, var(--dt-g) 16%, transparent); stroke: none; opacity: 0; transition: opacity 140ms ease; }
+.dt-graph-node[data-hover] .dt-graph-halo { opacity: 1; }
+.dt-graph-node:focus-visible .dt-graph-halo { opacity: 1; }
+.dt-graph-node[data-hover] .dt-graph-span { fill: color-mix(in srgb, var(--dt-g) 45%, transparent); }
+.dt-graph-label { fill: var(--dsw-alias-label-primary); font-size: 12px; paint-order: stroke; stroke: var(--dsw-alias-bg-layer-1); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
+.dt-graph-legend { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.dt-graph-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.dt-graph-legend-sep { width: .5px; height: 12px; background: var(--dsw-alias-border-l3); }
+.dt-graph-swatch { width: 9px; height: 9px; border-radius: 50%; background: var(--dt-g-idle); }
+.dt-graph-swatch[data-tone='working'] { background: var(--dt-g-working); }
+.dt-graph-swatch[data-tone='person'] { background: var(--dt-g-person); }
+.dt-graph-swatch[data-tone='pipeline'] { background: var(--dt-g-pipeline); }
+.dt-graph-swatch[data-tone='done'] { background: var(--dt-g-done); }
+.dt-graph-swatch[data-tone='closed'] { background: var(--dt-g-closed); }

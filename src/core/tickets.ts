@@ -2,7 +2,7 @@
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, latestReport, liveTicket, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
-import type { Assignment, Backend, ChannelRef, Evaluation, Follow, Mandate, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketEndBy,
+import type { Assignment, Backend, ChannelRef, Evaluation, Follow, LinkedRelationKind, Mandate, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketEndBy,
   TicketInput, TicketOutcome, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
@@ -995,6 +995,24 @@ export class Tickets extends EnginePart {
     const at = this.now()
     this.addInput(ticket, { id: key('input', ticketId, 'note', at, text), kind: 'note', text, at })
     return this.require(ticketId)
+  }
+  /**
+   * Record that a ticket's worker found it is to another ticket as `kind` says (see `TicketRelation`). Recording the same
+   * kind to the same ticket again changes nothing, so a retry is safe; the first reason stays.
+   * @returns false when the ticket recorded that relation already.
+   * @throws UserError when either ticket is unknown, the ticket has ended, or it names itself.
+   */
+  link(ticketId: string, kind: LinkedRelationKind, otherId: string, reason: string): boolean {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    if (otherId === ticketId) throw new UserError('selfRelation')
+    if (!this.repo.tickets.get(otherId)) throw new UserError('unknownRelated', { ticket: otherId })
+    if (ticket.relations?.some(item => item.kind === kind && item.ticketId === otherId)) return false
+    const at = this.now()
+    ticket.relations = [...ticket.relations ?? [], { kind, ticketId: otherId, reason, at }]
+    ticket.updatedAt = at
+    this.repo.tickets.save(ticket)
+    return true
   }
   /**
    * Subscribe an open ticket to a Thread its Executor found related, for context: see `Thread.context`.

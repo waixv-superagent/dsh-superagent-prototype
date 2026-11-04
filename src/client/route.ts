@@ -9,8 +9,8 @@ export const TABS = ['editor', 'source', 'trigger', 'eval', 'execution', 'settin
 export type Tab = typeof TABS[number]
 export const SETTINGS_GROUPS = ['source', 'eval', 'execution', 'prompts', 'deployment'] as const
 export type SettingsGroup = typeof SETTINGS_GROUPS[number]
-/** The two views the 概览 tab switches between: the editor page and the duty-desk board. */
-export const HOME_VIEWS = ['editor', 'board'] as const
+/** The views the 概览 tab switches between: the editor page, the duty-desk board, and the ticket relation graph. */
+export const HOME_VIEWS = ['editor', 'board', 'graph'] as const
 export type HomeView = typeof HOME_VIEWS[number]
 /**
  * The editor hero counts that open the board at the Tickets behind them. A one-shot arrival cue, not a board filter:

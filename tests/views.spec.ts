@@ -10,6 +10,7 @@ import { feishuKind } from '../src/sources/feishu.ts'
 import { githubKind } from '../src/sources/github.ts'
 import { snapshot, threadSummary, ticketSummary, triggerView } from '../src/app/views/records.ts'
 import { basisFacts, ticketDetail, ticketRow, ticketSearch } from '../src/app/views/tickets.ts'
+import { ticketGraph, ticketRelations } from '../src/app/views/graph.ts'
 import { search, threadDetail } from '../src/app/views/threads.ts'
 import { droppedReplies, sourcesStatus } from '../src/app/views/sources.ts'
 import { editorPage, editorUse, shortTitle } from '../src/app/views/editor.ts'
@@ -598,3 +599,33 @@ it('reads each ticket a page\'s follow-ups reached once, and nothing for a messa
   expect([records.tickets.get, records.threads.get].map(read => read.mock.calls.length)).toEqual([0, 0])
 })
 
+
+it('draws spawned edges from hand-backs, related edges for split requests and shared Threads, and the links workers recorded', () => {
+  const host = views()
+  for (const id of ['t1', 't2', 't3', 't4']) live(id)
+  const get = (id: string) => store.tickets.get(id)!
+  // t2 started from a message t1's worker handed back; t3 and t4 came from one split request on another Thread.
+  store.tickets.save({ ...get('t1'), createdAt: '2026-11-01T00:00:00.000Z', origin: { triggerId: 'o1', triggerIds: ['o1'] } })
+  store.tickets.save({ ...get('t2'), createdAt: '2026-11-01T01:00:00.000Z', origin: { triggerId: 'o2', triggerIds: ['o2'] } })
+  store.tickets.save({ ...get('t3'), decisionId: 'split', createdAt: '2026-11-01T02:00:00.000Z', origin: { triggerId: 'o3', triggerIds: ['o3'] } })
+  store.tickets.save({ ...get('t4'), decisionId: 'split', createdAt: '2026-11-01T03:00:00.000Z', origin: { triggerId: 'o3', triggerIds: ['o3'] },
+    relations: [{ kind: 'blocks', ticketId: 't3', reason: 'Lands first', at: '2026-11-01T04:00:00.000Z' },
+      { kind: 'related', ticketId: 'gone', reason: 'Not in the graph', at: '2026-11-01T04:00:00.000Z' }] })
+  store.triggers.save(message('o1', { source: 'feishu', id: 'ou_alice' }))
+  store.triggers.save(message('o2', { source: 'feishu', id: 'ou_alice' }))
+  store.triggers.save({ ...message('o3', { source: 'feishu', id: 'ou_alice' }), threads: [{ source: 'feishu', id: 'oc_1:om_other' }] })
+  store.triggers.saveDisposition('o2', { fanout: ['t1'], handbacks: [{ ticketId: 't1', reason: 'Another fix', at }], at })
+  const graph = ticketGraph(host)
+  expect(graph.nodes.map(node => [node.id, node.thread])).toEqual([['t1', 'feishu:oc_1:om_root'], ['t2', 'feishu:oc_1:om_root'],
+    ['t3', 'feishu:oc_1:om_other'], ['t4', 'feishu:oc_1:om_other']])
+  // A pair keeps its strongest edge: t1–t2 its spawned one, t3–t4 the recorded link over the split; a link to an unknown ticket is left out.
+  expect(graph.edges.map(({ from, to, kind, via }) => [from, to, kind, via])).toEqual([['t1', 't2', 'spawned', 'handback'],
+    ['t4', 't3', 'blocks', 'link']])
+  expect(graph.lanes.map(lane => lane.key)).toEqual(['feishu:oc_1:om_root', 'feishu:oc_1:om_other'])
+  // A ticket's page lists its relations from its own side.
+  expect(ticketRelations(host, 't2')).toEqual([{ ticket: { id: 't1', title: 't1', stage: 'working' }, kind: 'spawned', via: 'handback',
+    outgoing: false, reason: 'Another fix' }])
+  expect(ticketDetail(host, 't4')!.relations.map(item => [item.kind, item.ticket.id, item.outgoing])).toEqual([['blocks', 't3', true]])
+  // The limit keeps the newest tickets.
+  expect(ticketGraph(host, 2)).toMatchObject({ total: 4 })
+})
