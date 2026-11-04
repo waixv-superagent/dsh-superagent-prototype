@@ -118,7 +118,7 @@ export async function sendFeishu(host: ChannelHost, message: OutboundMessage, co
   if (message.pipeline) {
     try {
       const sent = await host.commands.lark<unknown>(['im', '+messages-reply', '--message-id', messageId, '--msg-type', 'interactive',
-        '--content', jsonForCmd(pipelineStageCard(message.pipeline, checked).card), '--reply-in-thread', '--idempotency-key', message.id])
+        '--content', jsonForCmd(pipelineStageCard(message.pipeline, checked, panelUrl ? ticketPanelLink(panelUrl, message.pipeline.ticketId) : undefined).card), '--reply-in-thread', '--idempotency-key', message.id])
       const id = messageIdOf(sent)
       remember(sent)
       if (id && (message.pipeline.reviewers || message.pipeline.targets || message.pipeline.close || message.pipeline.rerun)) {

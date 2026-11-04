@@ -475,7 +475,7 @@ const choiceForm = (name: string, placeholder: string, options: readonly { label
  * and the actions this stage offers — pick reviewers to add on Swarm, rerun the checks, send the editor package to people or
  * chats, or close the ticket. The text fallback is the same one-line notice the chat used to get.
  */
-export function pipelineStageCard (notice: PipelineCard, text: string): CardMessage {
+export function pipelineStageCard (notice: PipelineCard, text: string, ticketLink?: string): CardMessage {
   const id = notice.ticketId
   const links = notice.links.map((link, index) => linkButton(link.label, link.url, index === 0 && !notice.reviewers && !notice.targets))
   const actions: Record<string, unknown>[] = []
@@ -502,6 +502,7 @@ export function pipelineStageCard (notice: PipelineCard, text: string): CardMess
         ...links.length ? [buttonRow(links)] : [],
         ...actions,
         ...own.length ? [buttonRow(own)] : [],
+        ...ticketLink ? [ticketLinkLine(id, ticketLink)] : [],
       ],
     },
   }
