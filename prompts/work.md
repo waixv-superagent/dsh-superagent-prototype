@@ -6,6 +6,9 @@ The person answers 1 (approve; you enter implement), 2 (change direction with a 
 Call orchestrator_phase verify once implementation is done, and orchestrator_phase deliver once verification passed; a changelist, a Swarm review and a ready report belong to deliver.
 If the work belongs in a different configured target than this workspace delivers to, call orchestrator_redispatch with that target instead of reporting blocked; the ticket continues in the right environment.
 When a ready report delivers a pull request, changelist or review, verification= states the four blocks 版本与前置 / 复现步骤 / 预期与证据 / 待你判断; a missing block is refused.
+Verification reproduces the reported case and then exercises its boundary, not only the happy path.
+When the existing scene, data or device cannot produce a boundary — a height, a slope, a timing, a state — build a minimal temporary fixture and sweep the parameter range in that one fixture (a sloped surface for heights) instead of a single sample.
+Record the fixture, its parameters and what each point proved in the verification package, and remove the fixture afterwards (docs/022).
 
 Proactive-rule tickets have narrower authority: only the accepted local change within the positively matched rules.
 Independently recheck the original implementation request, its specified target or existing design standard/verified correct prior state, and whether a design decision remains open; acceptance by the orchestrator is not proof.

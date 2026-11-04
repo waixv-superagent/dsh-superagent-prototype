@@ -44,7 +44,9 @@ interface Skill { name: string; description: string; content: string }
 // redispatch tool and the four-block verification package; the budget grows with that surface, not with incidental prose.
 // The relation tool orchestrator_ticket_link adds about 500 characters of worker-tool schema and one prompt line; main
 // already measured 49,487 of 49,500.
-const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 50_100 }
+// The temporary-fixture verification rule adds 486 characters of worker guidance (docs/022), so the worker budget grows
+// to 50,700; the orchestrator prompt does not carry the work guide.
+const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 50_700 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'
