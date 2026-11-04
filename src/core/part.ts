@@ -18,7 +18,7 @@ export interface EngineOptions {
    * Rebuilds the Execution of a ticket a person moves to another delivery environment (`Tickets.redispatch`), dropping the
    * instructions the previous environment had appended; without it the recorded execution keeps its assignment text.
    */
-  reprepareTicket?: (ticket: Ticket, backend: Backend) => Execution
+  reprepareTicket?: (ticket: Ticket, backend: Backend, target?: string) => Execution
   /** Local pipeline skill the worker's fix Assignment reads; empty uses the built-in instructions. */
   pipelineSkill?: string
   /** The Swarm base URL, so a pipeline observation gets a review link from a bare review id. */

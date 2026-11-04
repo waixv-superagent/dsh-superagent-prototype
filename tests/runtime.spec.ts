@@ -244,7 +244,7 @@ it('relays an explicit member mention as a candidate and creates the ticket, ack
   const larkCalls = vi.mocked(Commands.prototype.lark).mock.calls.map(([args]) => args)
   const reply = larkCalls.find(args => args[1] === '+messages-reply')!
   expect(reply).toEqual(expect.arrayContaining(['--message-id', 'om_1', '--msg-type', 'post']))
-  expect(JSON.parse(reply[reply.indexOf('--content') + 1]!)).toEqual({ zh_cn: { content: [[{ tag: 'md', text: '收到，修复回归。' }]] } })
+  expect(JSON.parse(reply[reply.indexOf('--content') + 1]!)).toEqual({ zh_cn: { content: [[{ tag: 'md', text: `收到，修复回归。\n工单 ${ticket.id.slice(0, 8)}` }]] } })
   // The first message holds the request itself: an explicit ticket has no assignment text beyond it, and nothing to read first.
   const first = relays(sessionId)[0]!
   expect(first).toEqual({ ticket_id: ticket.id, title: '修复回归', trigger: expect.objectContaining({ trigger_id: trigger.id, from: MEMBER,
@@ -361,6 +361,30 @@ it('records worker reports, binds the task PR, ends the ticket on ready without 
   expect(agents.get(sessionId)!.cancel).not.toHaveBeenCalled()
   const notice = runtime.store.receipts.waiting().find(item => item.kind === 'notice')
   expect(notice ?? runtime.store.replyStatus(key('pr-terminal', '42', 'feishu', JSON.stringify({ chatId: CHAT, messageId: 'om_1' }), 'merged'))).toBeTruthy()
+})
+
+it('refuses a ready report that delivers work without the four-block verification package', async () => {
+  const { ticket, sessionId } = await acceptedTicket()
+  await runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'pr open', pr_number: 42 })
+  await expect(runTool(sessionId, 'orchestrator_report', { state: 'ready', summary: 'done', pr_number: 42 }))
+    .rejects.toThrow(/版本与前置/)
+  await expect(runTool(sessionId, 'orchestrator_report', { state: 'ready', summary: 'done', pr_number: 42,
+    verification: '版本与前置：PR #42\n复现步骤：打开看板' })).rejects.toThrow(/预期与证据/)
+  await runTool(sessionId, 'orchestrator_report', { state: 'ready', summary: 'done', pr_number: 42,
+    verification: '版本与前置：PR #42，编辑器 5.8.3\n复现步骤：打开看板\n预期与证据：卡片出现，截图见 PR\n待你判断：卡片是否可读' })
+  expect(runtime.store.tickets.get(ticket.id)!.execution!.verification).toContain('待你判断')
+})
+
+it('refuses ready for a pull request that is no longer open', async () => {
+  const { sessionId } = await acceptedTicket()
+  const gh = vi.mocked(Commands.prototype.gh)
+  const original = gh.getMockImplementation()!
+  gh.mockImplementation(async args => String(args[1]).includes('/pulls/77')
+    ? { state: 'closed', merged: true, html_url: 'https://github.com/acme/widgets/pull/77', user: { login: 'agent-bot' },
+      head: { ref: 'agent/x', sha: 'head-77', repo: { full_name: 'acme/widgets' } } }
+    : original(args))
+  await expect(runTool(sessionId, 'orchestrator_report', { state: 'ready', summary: 'done', pr_number: 77,
+    verification: '版本与前置：PR #77\n复现步骤：打开\n预期与证据：已合并\n待你判断：不用判断' })).rejects.toThrow(/merged|closed/)
 })
 
 it('lists each ticket with the Threads it subscribes to, as their Sources describe them', async () => {

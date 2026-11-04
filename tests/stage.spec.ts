@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canRetry, completedArchived, currentReport, ticketStage, type Assignment, type ReportState, type Ticket } from '../src/core/index.ts'
+import { canRetry, completedArchived, currentReport, ticketStage, waitingOf, type Assignment, type ReportState, type Ticket } from '../src/core/index.ts'
 
 const assignment = (overrides: Partial<Assignment> = {}): Assignment => ({ id: 'a', state: 'running', createdAt: '', ...overrides })
 const reported = (state: ReportState, overrides: Partial<Assignment> = {}) => assignment({ report: { state, summary: '', at: '' }, ...overrides })
@@ -66,6 +66,21 @@ describe('ticketStage', () => {
     ['a progress Report', ticket({ assignments: [reported('progress')] }), { stage: 'working' }],
     ['an ended Ticket', ticket({ ended, attention, assignments: [reported('failed')] }), { stage: 'ended' }],
   ])('%s', (_name, value, stage) => { expect(ticketStage(value)).toEqual(stage) })
+})
+
+// The same rows as a wait a person or the router can act on: who it is for, the action, and the one real deadline.
+describe('waitingOf', () => {
+  const plan = { text: '', at: '', waiting: true as const, deadline: '2026-09-24T00:00:00Z' }
+  it.each([
+    ['a question for a person', ticket({ attention, plan, updatedAt: 'now' }), { who: 'person', action: 'answer', since: 'now', until: '2026-09-24T00:00:00Z' }],
+    ['delivered work waiting for the person\'s check', ticket({ verification: { at: 'delivered', state: 'pending' } }),
+      { who: 'person', action: 'verify', since: 'delivered' }],
+    ['a pipeline waiting on Swarm', ticket({ pipeline: { state: 'running', at: 'piped' }, assignments: [assignment({ state: 'ended' })] }),
+      { who: 'pipeline', action: 'running', since: 'piped' }],
+    ['a queued ticket', ticket({ assignments: [] }), { who: 'worker', action: 'queued', since: '' }],
+    ['a running worker', ticket(), { who: 'worker', action: 'running', since: '' }],
+    ['an ended ticket', ticket({ ended }), { who: 'none', action: 'closed', since: '' }],
+  ])('%s', (_name, value, waiting) => { expect(waitingOf(value)).toEqual(waiting) })
 })
 
 // A Report speaks for the Ticket only while its worker has nothing newer, which is what the stage and the summary read.

@@ -4,7 +4,7 @@ import { isoTime, liveTicket } from './model.ts'
 import type { Backend, ChannelRef, Decision, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketPipeline, TicketRepair, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
-import type { PlanDecision, PlanOption, PlanVia } from './plan.ts'
+import type { PlanDecision, PlanOption, PlanTemplate, PlanVia } from './plan.ts'
 import { Assignments, type WorkerReport } from './assignments.ts'
 import { Evals, type Outcome } from './evals.ts'
 import { Intake, type ReceiveResult } from './intake.ts'
@@ -192,7 +192,7 @@ export class Engine {
    * `backend` recorded, so its worker continues in the channel the ticket belongs in.
    * @throws UserError when the ticket is unknown or has ended.
    */
-  redispatchTicket(ticketId: string, backend: Backend): Ticket { return this.repo.atomic(() => this.tickets.redispatch(ticketId, backend)) }
+  redispatchTicket(ticketId: string, backend: Backend, target?: string): Ticket { return this.repo.atomic(() => this.tickets.redispatch(ticketId, backend, target)) }
   /**
    * Records a person's confirmation that a delivered ticket may be submitted. It never submits: the person runs the submit.
    * @throws UserError when the ticket is unknown, ended, did not report a changelist, or was already confirmed.
@@ -242,8 +242,8 @@ export class Engine {
    * submission is refused. The ticket stays in its plan phase until the answer.
    * @throws UserError when the ticket is unknown or ended, its plan was approved already, or a template line is missing.
    */
-  submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[]): Ticket {
-    return this.repo.atomic(() => this.tickets.submitPlan(ticketId, text, question, options, sections))
+  submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[], template: PlanTemplate = 'fix'): Ticket {
+    return this.repo.atomic(() => this.tickets.submitPlan(ticketId, text, question, options, sections, template))
   }
   /**
    * A person's decision on a ticket's waiting plan: `1` approves it and moves the ticket to implement, `2` asks for another
@@ -391,7 +391,7 @@ export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
   | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply'
-  | 'submitPlan' | 'advancePhase' | 'recordPipeline' | 'rerunPipeline'>
+  | 'submitPlan' | 'advancePhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>
 /** What the host's watchdog tells the Engine: it recovers a ticket its worker stopped on a passing failure. */

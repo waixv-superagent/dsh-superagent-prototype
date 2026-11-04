@@ -6,8 +6,8 @@ import type { Assignment, Backend, ChannelRef, Evaluation, Follow, Mandate, Pipe
   TicketInput, TicketOutcome, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
-import { missingPlanLabels, pendingPlan, planOverdue, PLAN_GATE_HOURS, PLAN_QUESTION, ticketPhase, validCardOptions, validQuestionSections, type PlanDecision,
-  type PlanOption, type PlanVia, type TicketPhase } from './plan.ts'
+import { missingPlanLabels, pendingPlan, planOverdue, PLAN_GATE_HOURS, PLAN_QUESTION, planTemplate, ticketPhase, validPlanOptions, validQuestionSections, type PlanDecision,
+  type PlanOption, type PlanTemplate, type PlanVia, type TicketPhase } from './plan.ts'
 import type { Replies } from './replies.ts'
 import { canRetry } from './stage.ts'
 
@@ -54,7 +54,7 @@ export class Tickets extends EnginePart {
     const assignment = this.newAssignment(ticket)
     this.repo.tickets.save(ticket)
     for (const triggerId of triggerIds) for (const ref of this.repo.triggers.get(triggerId)?.threads ?? []) this.subscribe(id, ref)
-    if (outcome.acknowledgement && primary) this.replies.acknowledgeAccepted(id, primary, outcome.acknowledgement)
+    if (outcome.acknowledgement && primary) this.replies.acknowledgeAccepted(ticket, primary, outcome.acknowledgement)
     this.options.executor.start(this.require(id), assignment)
     this.emit('ticket.created', { ticketId: id, decisionId, strength: mandate.strength })
   }
@@ -465,23 +465,25 @@ export class Tickets extends EnginePart {
    * @throws UserError when the ticket is unknown or ended, its plan was approved already, a template line is missing, or
    * the question or choices are not a card's.
    */
-  submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[]): Ticket {
+  submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[], template: PlanTemplate = 'fix'): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     if (ticket.plan?.approved) throw new UserError('phaseOutOfOrder', { from: ticketPhase(ticket) })
-    const missing = missingPlanLabels(text)
-    if (missing.length) throw new UserError('planIncomplete', { labels: missing.join(', ') })
+    const missing = missingPlanLabels(text, template)
+    if (missing.length) throw new UserError('planIncomplete', { template, labels: missing.join(', ') })
     const asked = question?.trim()
     if (asked !== undefined && (!asked || Array.from(asked).length > 200)) throw new UserError('planQuestion')
-    const choices = options?.map(option => ({ ...option, label: option.label.trim() }))
-    if (choices && (!validCardOptions(choices.map(option => option.label))
+    const choices = options?.map(option => ({ ...option, label: option.label.trim(), ...option.description ? { description: option.description.trim() } : {} }))
+    // A design plan is a choice between alternatives: the card needs them, and each must say what choosing it means.
+    if (template === 'design' && (!choices || choices.length < 2)) throw new UserError('planTemplate', { template })
+    if (choices && (!validPlanOptions(choices, template === 'design')
       || choices.some(option => !['approve', 'revise', 'stop'].includes(option.decision)))) throw new UserError('planOptions')
     if (sections && !validQuestionSections(sections)) throw new UserError('planSections')
     const context = sections?.map(section => ({ ...section, label: section.label.trim(), text: section.text.trim() }))
     const at = this.now()
     const previous = ticket.attention
     ticket.plan = { text, at, waiting: true, deadline: new Date(Date.parse(at) + PLAN_GATE_HOURS * 3_600_000).toISOString(),
-      ...(asked ? { question: asked } : {}), ...(choices?.length ? { options: choices } : {}), ...(context?.length ? { sections: context } : {}) }
+      ...(template !== 'fix' ? { template } : {}), ...(asked ? { question: asked } : {}), ...(choices?.length ? { options: choices } : {}), ...(context?.length ? { sections: context } : {}) }
     ticket.phase = 'plan'
     ticket.attention = { id: key('attention', ticketId, PLAN_QUESTION, at), question: PLAN_QUESTION }
     if (previous && previous.id !== ticket.attention.id) this.replies.withdrawAttention(previous.id)
@@ -608,7 +610,7 @@ export class Tickets extends EnginePart {
    * without being ended and accepted again.
    * @throws UserError when the ticket is unknown or has ended.
    */
-  redispatch(ticketId: string, backend: Backend): Ticket {
+  redispatch(ticketId: string, backend: Backend, target?: string): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     const at = this.now()
@@ -620,12 +622,12 @@ export class Tickets extends EnginePart {
     if (backend === 'p4') ticket.phase = 'plan'
     else if (ticket.phase === undefined || (ticket.phase === 'plan' && !pendingPlan)) ticket.phase = 'implement'
     // The previous environment's delivery instructions are dropped, so the next launch reads only the new channel's.
-    ticket.execution = this.options.reprepareTicket?.(ticket, backend)
-      ?? { ...(ticket.execution ?? { name: '', directory: '', assignment: '' }), backend }
+    ticket.execution = this.options.reprepareTicket?.(ticket, backend, target)
+      ?? { ...(ticket.execution ?? { name: '', directory: '', assignment: '' }), backend, ...(target ? { target } : {}) }
     ticket.updatedAt = at
     const assignment = this.newAssignment(ticket)
     const input: TicketInput = { id: key('input', ticket.id, 'redispatch', at), kind: 'text', at,
-      text: `人确认把这张单改派到 ${backend === 'git' ? 'git 通道（本部署的源码仓库）' : 'p4 通道（depot 工作区）'}：`
+      text: `人确认把这张单改派到 ${backend === 'git' ? 'git 通道（本部署的源码仓库）' : 'p4 通道（depot 工作区）'}${target ? `（${target}）` : ''}：`
         + '按该通道的准备和交付方式继续这张单的工作，交付时按对应要求报告。'
         + (pendingPlan ? '这张单的方案还在等人确认，改派不改变这一步：按方案卡回答后再动代码。' : '') }
     ticket.inputs.push(input); ticket.undelivered.push(input.id)

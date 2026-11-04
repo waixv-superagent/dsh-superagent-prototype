@@ -43,6 +43,46 @@ describe('P1 plan card', () => {
     expect(front).toContain('通过后')
     expect(elements.some(item => item.tag === 'hr')).toBe(true)
   })
+  it('leads a design card with the question and the recommendation, and puts each choice consequence in full', () => {
+    const design = `问题：A 复用控件还是 B 新控件
+选项：A 复用控件；B 新控件
+证据：两个都能过测试，A 少一个缓存层
+推荐：A，改动最小`
+    const { card, text } = planCard({ id: ticket.id, title: '控件取舍' }, { text: design, template: 'design', question: '选哪个？',
+      options: [
+        { label: 'A 复用控件', decision: 'approve', description: '改动小，少一个缓存层' },
+        { label: 'B 新控件', decision: 'revise', description: '多一天，但彻底' },
+      ] })
+    const elements = (card.body as { elements: Element[] }).elements
+    const front = JSON.stringify(elements.filter(item => item.tag !== 'collapsible_panel'))
+    expect(front).toContain('**问题**')
+    expect(front).toContain('**推荐**')
+    expect(front).not.toContain('**选项**')
+    expect(front).toContain('**选项说明**')
+    // Each button keeps its short label; the consequence is a line above them, not a 24-character compromise.
+    expect(front).toContain('改动小，少一个缓存层')
+    expect(front).toContain('多一天，但彻底')
+    const panel = elements.find(item => item.tag === 'collapsible_panel')!
+    expect(JSON.stringify(panel)).toContain('**选项**')
+    expect(JSON.stringify(panel)).toContain('**证据**')
+    expect(text).toContain('A 复用控件（改动小，少一个缓存层）')
+    expect((card.body as { elements: Element[] }).elements.filter(item => item.tag === 'column_set').at(-1)!.columns!
+      .map(column => (column.elements[0] as unknown as { text: { content: string } }).text.content)).toEqual(['A 复用控件', 'B 新控件'])
+  })
+  it('leads an analysis card with the finding and folds its evidence, so no fix line is invented', () => {
+    const analysis = `问题：翻页为什么会闪
+结论：复用控件时先清了纹理
+依据：AvatarList.cpp:42 的日志
+建议：复用前重设纹理并补一例测试`
+    const { card } = planCard(ticket, { text: analysis, template: 'analysis' })
+    const elements = (card.body as { elements: Element[] }).elements
+    const front = JSON.stringify(elements.filter(item => item.tag !== 'collapsible_panel'))
+    expect(front).toContain('**问题**')
+    expect(front).toContain('**结论**')
+    expect(front).toContain('**建议**')
+    expect(front).not.toContain('**修复锚点**')
+    expect(JSON.stringify(elements.find(item => item.tag === 'collapsible_panel'))).toContain('依据')
+  })
   it('shows the plan key lines in full and folds only the evidence', () => {
     const long = `${'复用控件时清空了纹理，'.repeat(12)}所以闪烁。第二句也在正文里。`
     const plan = PLAN.replace('现象：翻页时头像闪一下', `现象：${long}`)

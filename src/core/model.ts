@@ -213,6 +213,8 @@ export interface Decision {
   reason: Reason[]
   strength: Strength
   ticketId?: string
+  /** Every ticket this Decision opened: one for an ordinary accept, more when the message held 2–4 separable goals. */
+  ticketIds?: string[]
   mandate?: Mandate
   /** 一条 chat 决策想建、并且已经建出来的单（没有它时 chat 只回复）。 */
   escalation?: Escalation
