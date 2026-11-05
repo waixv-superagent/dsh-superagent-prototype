@@ -80,6 +80,27 @@ it('answers only a same-origin request from the panel on the loopback address', 
   expect(() => serve({}, '0.0.0.0')).toThrow('Orchestrator management requires a loopback Web server')
 })
 
+it('answers a ticket\'s open question from the panel, by one of its choices or in writing', async () => {
+  const calls: unknown[] = []
+  const call = serve({
+    store: { tickets: { get: (id: string) => id === 't1' ? { id } : undefined } },
+    engine: {
+      answerAttention: (...args: unknown[]) => { calls.push(['option', ...args]); return {} },
+      answerAttentionText: (...args: unknown[]) => { calls.push(['text', ...args]); return {} },
+    },
+  })
+  expect(await call('POST', 'tickets/t1/answer', { attentionId: 'a1', text: '走 B，先上工具链' }))
+    .toEqual({ status: 200, body: { answered: true } })
+  expect(await call('POST', 'tickets/t1/answer', { attentionId: 'a1', option: '先上 A' }))
+    .toEqual({ status: 200, body: { answered: true } })
+  expect(calls).toEqual([['text', 't1', 'a1', '走 B，先上工具链'], ['option', 't1', 'a1', '先上 A']])
+  // Exactly one kind of answer per request; both and neither are refused.
+  expect(await call('POST', 'tickets/t1/answer', { attentionId: 'a1' })).toMatchObject({ status: 400 })
+  expect(await call('POST', 'tickets/t1/answer', { attentionId: 'a1', option: '先上 A', text: '走 B' })).toMatchObject({ status: 400 })
+  expect(await call('POST', 'tickets/nope/answer', { attentionId: 'a1', text: '走 B' }))
+    .toEqual({ status: 404, body: { error: 'Ticket not found' } })
+})
+
 it('answers a prompt save that lost a race with 409, and a settings body over 128 KiB with 400', async () => {
   const saves: unknown[] = []
   const call = serve({

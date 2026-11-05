@@ -5,7 +5,7 @@ import { workerSessionId } from '../../executor/dsh.ts'
 import { KV } from '../../kv.ts'
 import { feishuClientLink } from '../../sources/feishu-channel.ts'
 import type { Store } from '../store.ts'
-import { channelLink, decisionView, delivered, newestFirst, page, snapshot, threadSummary, threadTitle, ticketLine, ticketSummary,
+import { channelLink, decisionView, delivered, newestFirst, page, snapshot, threadFacts, threadSummary, threadTitle, ticketLine, ticketSummary,
   type Snapshot, type ViewHost } from './records.ts'
 import { markdown, preview } from './text.ts'
 import { feishuTrace } from './trace.ts'
@@ -129,25 +129,37 @@ export function ticketSearch(host: ViewHost, query: string, limit = 8) {
 }
 export type TicketSearchView = ReturnType<typeof ticketSearch>
 /**
- * The message the ticket's open question was asked in: the current attention card's own link when the question is a card,
- * else the latest plan card's; undefined when neither link is known.
+ * The message the ticket's open question was asked in: the current attention message's own link when it is known (a card or
+ * a plain text question alike), else the latest plan card's; undefined when neither link is known.
  */
 function questionUrl(view: Snapshot, ticket: Pick<Ticket, 'id' | 'attention'>): string | undefined {
   const attention = ticket.attention
   if (attention) {
-    const asked = view.store.get(KV.feishu.attentionCards) ?? {}
-    const card = Object.values(asked).find(ref => ref.ticketId === ticket.id && ref.attentionId === attention.id && ref.url)
-    if (card?.url) return card.url
+    // A question may have been sent more than once, such as a card replaced by its text fallback: the newest message is
+    // what the person should land on.
+    const asked = Object.values(view.store.get(KV.feishu.attentionCards) ?? {})
+      .filter(ref => ref.ticketId === ticket.id && ref.attentionId === attention.id && ref.url)
+      .sort((left, right) => (right.at ?? '').localeCompare(left.at ?? ''))
+    if (asked[0]?.url) return asked[0].url
   }
   const cards = view.store.get(KV.feishu.cards) ?? {}
   return Object.values(cards).find(ref => ref.ticketId === ticket.id && ref.url)?.url
 }
-/** Where a person answers a ticket waiting on them: the question's message when known, else its chat. */
+/** The open Feishu topic a ticket's conversation lives in: the right conversation even when the question's message is unknown. */
+function topicAnswerUrl(view: Snapshot, ticket: Pick<Ticket, 'id'>): string | undefined {
+  for (const thread of view.threadsOf(ticket.id)) {
+    if (thread.ref.source !== 'feishu') continue
+    const url = threadFacts(view.store, thread).url
+    if (url) return url
+  }
+  return undefined
+}
+/** Where a person answers a ticket waiting on them: the question's message when known, else its topic, else its chat. */
 function answerLink(view: Snapshot, ticket: Ticket, stage: TicketStage['stage']) {
   if (stage !== 'person') return undefined
   const channel = ticket.channels[0]
   const link = channel ? channelLink(view, channel) : undefined
-  const url = questionUrl(view, ticket) ?? link?.url
+  const url = questionUrl(view, ticket) ?? topicAnswerUrl(view, ticket) ?? link?.url
   if (!url) return link
   // The panel opens the client directly, so answering does not leave Feishu's landing page behind as a browser tab.
   return { ...(link ?? { source: 'feishu' as const, label: { zh: '飞书消息', en: 'Feishu message' } }), url: feishuClientLink(url) }

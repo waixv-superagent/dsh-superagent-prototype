@@ -68,8 +68,8 @@ export const KV = {
     receipts: record<Record<string, ReceiptReaction>>('feishu-receipts'),
     /** Plan card `message_id` to the ticket, plan and message link it asks about, so a button click decides without a Trigger. */
     cards: record<Record<string, { ticketId: string; planAt: string; url?: string }>>('feishu-plan-cards'),
-    /** Question card `message_id` to the ticket, attention, and the card's own message link, so a click answers it and the
-     * panel's answer button opens the question rather than the chat. */
+    /** Question message (card or plain text) `message_id` to the ticket, attention, and its own message link, so a click
+     * answers it and the panel's answer button opens the question rather than the chat. */
     attentionCards: record<Record<string, { ticketId: string; attentionId: string; at: string; url?: string }>>('feishu-attention-cards'),
     /** Priority card `message_id` to the ticket and the priority question it asks, so a button click records the level. */
     priorityCards: record<Record<string, { ticketId: string; askAt: string; url?: string }>>('feishu-priority-cards'),

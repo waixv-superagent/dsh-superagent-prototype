@@ -11,7 +11,7 @@ import { feishuTriggerId } from './feishu-trigger.ts'
 import type { ChannelHost, ChannelLink, ChannelLinks } from './kind.ts'
 
 export { feishuPostContent } from './feishu-text.ts'
-/** How long an attention card's message id is remembered for its button callback. */
+/** How long a question message's id and link are remembered for its button callback and the panel's answer button. */
 const CARD_KEEP_MS = 48 * 3600_000
 
 /** Feishu or Lark AppLink that opens a chat; used when the message's own link was not delivered with the event. */
@@ -87,25 +87,16 @@ export async function sendFeishu(host: ChannelHost, message: OutboundMessage, co
     const threadId = threadIdOf(output)
     rememberSent(host.state, KV.feishu.sent(id), { ticketId, chatId, at: new Date().toISOString(), ...threadId ? { threadId } : {} })
   }
-  // A question with choices is a card: the click answers it without a chat round-trip. A card Feishu rejects falls back to
-  // the plain text reply, so the question still reaches the person.
-  if (message.attention) {
+  // A question with choices is a card: the click answers it without a chat round-trip. A question without choices is the
+  // plain text reply below, and a card Feishu rejects falls back to it, so the question still reaches the person.
+  if (message.attention?.options.length) {
     try {
       const sent = await host.commands.lark<unknown>(['im', '+messages-reply', '--message-id', messageId, '--msg-type', 'interactive',
         '--content', jsonForCmd(attentionCard(message.text, message.attention.attentionId, message.attention.options, message.attention.ticketId, message.attention.sections,
           panelUrl ? ticketPanelLink(panelUrl, message.attention.ticketId) : undefined).card),
         '--reply-in-thread', '--idempotency-key', message.id])
-      const id = messageIdOf(sent)
       remember(sent)
-      if (id) {
-        // The card's own link is what the panel's answer button opens, so it lands on the question rather than the chat.
-        const url = await messageLink(host, id).catch(() => undefined)
-        const keep = Date.now() - CARD_KEEP_MS
-        const cards = Object.fromEntries(Object.entries(host.state.get(KV.feishu.attentionCards) ?? {})
-          .filter(([key, ref]) => key === id || Date.parse(ref.at) >= keep))
-        host.state.set(KV.feishu.attentionCards, { ...cards, [id]: { ticketId: message.attention.ticketId,
-          attentionId: message.attention.attentionId, at: new Date().toISOString(), ...url ? { url } : {} } })
-      }
+      await rememberQuestion(host, message.attention, sent)
       await releaseReceipt(host, messageId)
       return 'sent'
     } catch (error) {
@@ -134,13 +125,32 @@ export async function sendFeishu(host: ChannelHost, message: OutboundMessage, co
     }
   }
   let outcome: 'sent' | 'gone' = 'sent'
-  try { remember(await host.commands.lark(reply)) }
+  try {
+    const sent = await host.commands.lark(reply)
+    remember(sent)
+    if (message.attention) await rememberQuestion(host, message.attention, sent)
+  }
   catch (error) {
     if (!gone(error)) throw error
     outcome = 'gone'
   }
   await releaseReceipt(host, messageId)
   return outcome
+}
+/**
+ * Records where a question was asked, as a card or as text alike: the message id lets a choice's button find the question,
+ * and its own link is what the panel's answer button opens, so it lands on the question rather than the chat. Entries older
+ * than a button token's lifetime go, so the map stays small; `fillLinks` retries a link that could not be fetched here.
+ */
+async function rememberQuestion(host: ChannelHost, attention: NonNullable<OutboundMessage['attention']>, output: unknown): Promise<void> {
+  const id = messageIdOf(output)
+  if (!id) return
+  const url = await messageLink(host, id).catch(() => undefined)
+  const keep = Date.now() - CARD_KEEP_MS
+  const cards = Object.fromEntries(Object.entries(host.state.get(KV.feishu.attentionCards) ?? {})
+    .filter(([key, ref]) => key === id || Date.parse(ref.at) >= keep))
+  host.state.set(KV.feishu.attentionCards, { ...cards, [id]: { ticketId: attention.ticketId,
+    attentionId: attention.attentionId, at: new Date().toISOString(), ...url ? { url } : {} } })
 }
 /** Fallback chat link on the bot's brand; the message's own deep link on its Trigger is preferred when available. */
 export const feishuLink = (address: Record<string, string>, links: ChannelLinks): ChannelLink => ({

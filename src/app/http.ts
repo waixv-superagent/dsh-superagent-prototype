@@ -186,6 +186,10 @@ const SourceBlock = z.templateLiteral(['source:', z.string().regex(/^[a-z][a-z0-
 const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), SourceBlock])
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
 const PlanRequest = z.object({ decision: z.enum(['approve', 'revise', 'stop']), note: z.string().trim().max(2000).optional() })
+/** A person's answer to a ticket's open question: one of the question's choices, or a written answer, never both. */
+const AnswerRequest = z.object({ attentionId: z.string().trim().min(1).max(64), option: z.string().trim().min(1).max(120).optional(),
+  text: z.string().trim().min(1).max(4000).optional() }).strict()
+  .refine(value => (value.option === undefined) !== (value.text === undefined), { message: 'Answer with either option or text' })
 /** A person moves a ticket's work to another delivery environment, such as when it was accepted under the wrong one. */
 const RedispatchRequest = z.object({ backend: z.enum(['git', 'p4']), target: z.string().trim().min(1).max(300).optional() }).strict()
 /** A person's action on the shared editor from the overview. */
@@ -316,6 +320,14 @@ function routes(runtime: HttpHost): Routes {
       const request = PlanRequest.parse(await body(8_192))
       runtime.engine.decidePlan(id, request.decision, request.note ?? '', 'panel')
       return { decided: true }
+    },
+    // A person answers the ticket's open question in place: a choice, or a written answer that becomes the worker's input.
+    'POST tickets/:id/answer': async ({ params, body }) => {
+      const id = ticket(params.id)
+      const request = AnswerRequest.parse(await body(16_384))
+      if (request.option !== undefined) runtime.engine.answerAttention(id, request.attentionId, request.option)
+      else runtime.engine.answerAttentionText(id, request.attentionId, request.text!)
+      return { answered: true as const }
     },
     'POST tickets/:id/stop': ({ params }) => { const id = ticket(params.id); runtime.engine.stopTicket(id); return { stopped: true } },
     // A person confirms a delivered ticket; the changelist is theirs to submit, which this route never does.

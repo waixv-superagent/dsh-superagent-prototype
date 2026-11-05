@@ -91,7 +91,10 @@ export interface Executor {
 
 /** A message for a Channel; `ticketId` names the Ticket it is for, when there is one. */
 export interface OutboundMessage { id: string; channel: ChannelRef; text: string; kind: 'acknowledgement' | 'reply' | 'notice'; ticketId?: string
-  /** The human question this message asks, with the choices its card offers, so a channel can render buttons that answer it; `sections` adds the worker's context blocks. */
+  /**
+   * The human question this message asks; `options` holds the choices its card offers, empty when it offers none and the
+   * channel sends the question as text. `sections` adds the worker's context blocks.
+   */
   attention?: { ticketId: string; attentionId: string; options: string[]; sections?: QuestionSection[] }
   /** A pipeline stage notice a channel may draw as a card with its links and actions; `text` stays the fallback. */
   pipeline?: PipelineCard }

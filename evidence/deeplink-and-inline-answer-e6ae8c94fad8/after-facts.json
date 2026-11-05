@@ -1,0 +1,17 @@
+{
+  "found": true,
+  "title": "把设置页的主按钮文案改成「保存更改」",
+  "text": "待人工决定：主按钮叫「保存更改」还是保持「保存」？两个都能用，你定一个。提交答复答复会作为 worker 的下一条输入交给它，不用跳飞书。去飞书回答",
+  "link": {
+    "text": "去飞书回答",
+    "href": "feishu://applink/client/thread/open?open_chat_id=oc_demo&open_thread_id=omt_demo"
+  },
+  "rect": {
+    "x": 377.5,
+    "y": 255,
+    "width": 960,
+    "height": 174
+  },
+  "answer": true,
+  "options": []
+}

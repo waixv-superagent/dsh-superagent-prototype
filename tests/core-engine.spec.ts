@@ -1180,6 +1180,26 @@ describe('worker reports', () => {
     h.settle()
     expect(h.delivered.map(([, id]) => id)).toContain(answered.inputs.at(-1)!.id)
   })
+  it('turns a written answer into the worker\'s input and clears the question, as a choice does', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    const asked = h.engine.report(ticketId, { state: 'progress', summary: 'need a call', question: '用哪个地址？', askedBy: '1' })
+    // A question without choices still travels with its attention: no card offers buttons, only the plain text question.
+    expect(h.engine.reply({ purpose: 'attention', ticketId, question: '用哪个地址？', text: '用哪个地址？' }).status).toBe('pending')
+    expect(h.outbox.at(-1)).toMatchObject({ kind: 'reply', ticketId, attention: { ticketId, attentionId: asked.attention!.id, options: [] } })
+    expect(() => h.engine.answerAttentionText(ticketId, asked.attention!.id, '   '))
+      .toThrowError(expect.objectContaining({ code: 'notAttentionAnswer' }))
+    const answered = h.engine.answerAttentionText(ticketId, asked.attention!.id, '用 10.0.0.1')
+    expect(answered.attention).toBeUndefined()
+    expect(answered.inputs.at(-1)).toMatchObject({ kind: 'text', text: '人对「用哪个地址？」的答复：用 10.0.0.1' })
+    expect(answered.undelivered).toContain(answered.inputs.at(-1)!.id)
+    expect(h.withdrawn).toContain(key('attention-reply', asked.attention!.id))
+    expect(() => h.engine.answerAttentionText(ticketId, asked.attention!.id, '再答一次'))
+      .toThrowError(expect.objectContaining({ code: 'notAttention' }))
+    // The answer is a person's message, so it is delivered rather than held as an automated note.
+    h.settle()
+    expect(h.delivered.map(([, id]) => id)).toContain(answered.inputs.at(-1)!.id)
+  })
   it('puts the worker\'s context sections on the question card and refuses them without a question', () => {
     const h = harness()
     const ticketId = accepted(h).ticketId!
