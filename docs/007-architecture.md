@@ -421,7 +421,9 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/admission-context.ts` | The bounded window an assessment starts from: the first pages of a Trigger's Thread, read through its kind, and the messages around the Trigger |
 | `src/sources/feishu-image.ts` | Reads a Feishu message's image as an attachment for the assessing Session |
 | `src/sources/tapd.ts` | The TAPD kind and plugin entry, exported as `./tapd-watch`: a read-only poll of the open bugs assigned to one person, one Trigger per bug revision, and the bug's ID and link as execution variables |
+| `src/sources/web.ts` | The Web Source: a request a person submits from the panel, as an addressed Trigger of the panel operator with its own Thread, and a Channel that injects the Ticket's replies into the main Session |
 | `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel, the worker Session header actions (open the Ticket, copy the Session id), and the page in DeepSeek Harness's Plugin Manager |
+| `src/client/request.tsx` | The panel's request form: the header action and its dialog, which submit one request to the main Session |
 | `src/client/app.tsx` | The panel: header, search, glossary, tabs, the 概览 switch between the editor page and the board, and the page of the current route, which it keeps in browser history so Back/Forward and the mouse side buttons step through pages, entering each with a short transition |
 | `src/client/boundary.tsx` | The page error boundary: a page that fails to render shows the error with Retry and a way home, instead of the host's blank slot |
 | `src/client/provider.tsx` | What every page reads from its host: copy, calls, navigation, notices, the state poll, and `restart`, which reads the state quickly while dsh-superagent restarts |
@@ -482,6 +484,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/delivery.spec.ts` | `AgentDelivery` |
 | `tests/retry-health.spec.ts`, `tests/role-models.spec.ts` | Model budget retries, and the models of the two roles |
 | `tests/runtime.spec.ts` | The whole application on a simulated DeepSeek Harness host, through tools and HTTP |
+| `tests/web.spec.ts` | The Web Source: a panel request's Trigger and Thread, its Ticket through the normal Eval and accept path, the receipt delivered into the main Session, the Policy list it needs, and the refusal while the Source is off |
+| `tests/panel-request.spec.tsx` | The panel's request form: the submitted text and its length, the queued notice, the dialog closing, and a host that cannot take the request |
 | `tests/smoke.spec.ts` | S1 smoke: accept, a worker with its tools, its readable transcript, a ready report, and the ticket's end |
 | `tests/worker-tools.spec.ts` | The worker tool face: a normal profile passes and reports `worker-tools` ready, a profile that resolves none blocks the Assignment at launch naming the tools |
 | `tests/kind.spec.ts` | Ticket kinds: the classification order, the derivation for older tickets, and the kind each created ticket and split part records |

@@ -412,6 +412,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   } },
   'GET sources': { answer: sourceStatuses },
   'GET settings': { answer: settingsView },
+  'POST requests': { body: true, answer: () => ({ trigger_id: 'trigger-web-1', thread: 'web:trigger-web-1', state: 'stored' }) },
   'POST sources/:id/labels': { answer: () => {
     // Label refresh failures come from the bot CLI and are returned verbatim.
     if (server.joinError) return refuse(500, server.joinError)

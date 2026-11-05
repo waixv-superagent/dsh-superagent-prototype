@@ -327,6 +327,9 @@ export class Runtime extends Service implements SourceHost {
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
+      receive: trigger => passes.receive(trigger),
+      admissible: trigger => engine.admissible(trigger),
+      describeThread: (thread, description) => runtime.context({ kind: thread.source, health: [] }).threads.describe(`${thread.source}:${thread.id}`, description),
       checkSetup: () => { setup.check() }, requestPass: () => { passes.request() }, models: () => this.ctx.sessionController.modelCatalog() }
   }
   /** Idempotent stop; concurrent or repeated calls share the same shutdown promise. */

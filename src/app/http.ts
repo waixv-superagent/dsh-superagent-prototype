@@ -15,11 +15,13 @@ import type { EditorScheduler } from './editor-scheduler.ts'
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
-import { TICKET_KINDS, UserError, type EngineForPeople, type Ticket } from '../core/index.ts'
+import { TICKET_KINDS, UserError, type EngineForPeople, type ReceiveResult, type ThreadRef, type Ticket, type Trigger } from '../core/index.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import type { DshExecutor } from '../executor/dsh.ts'
-import type { Health } from '../sources/host.ts'
+import type { Health, ThreadDescription } from '../sources/host.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
+import { WEB_SOURCE, webLabel, webTrigger } from '../sources/web.ts'
+import { LIMITS } from '../limits.ts'
 import type { Outbox } from './outbox.ts'
 import type { Sessions } from './sessions.ts'
 import type { Watchdog } from './watchdog.ts'
@@ -65,6 +67,12 @@ export interface HttpHost {
   readonly masterId: string
   /** Resolves once startup finishes or setup determines what is still missing. */
   readonly ready: Promise<void>
+  /** Ingests a Trigger a panel action produces, as a Source's own loop would. */
+  readonly receive: (trigger: Trigger) => ReceiveResult
+  /** Whether the Policy admits a Trigger now, so a panel action can refuse before it records one that would only be ignored. */
+  readonly admissible: (trigger: Trigger) => boolean
+  /** Publishes the display name a Source gives one of its Threads, such as the first line of a Web panel request. */
+  readonly describeThread: (thread: ThreadRef, description: ThreadDescription) => void
   /** Resolved deployment; throws if read while waiting for setup (`!configured()`). */
   readonly deployment: Deployment
   readonly setupProblem?: SetupProblem | undefined
@@ -187,6 +195,8 @@ const VerificationRequest = z.object({ note: z.string().trim().max(2000).optiona
 const PipelineRequest = z.object({ state: z.enum(['running', 'blocked', 'merged']),
   url: z.string().trim().max(500).optional(), reason: z.string().trim().max(2000).optional(),
   manual: z.boolean().optional(), check: z.string().trim().max(500).optional() }).strict()
+/** A request a person submits from the panel: the text the main Session assesses, bounded like any Trigger a model reads. */
+const RequestRequest = z.object({ text: z.string().trim().min(1).max(LIMITS.requestChars) }).strict()
 
 function routes(runtime: HttpHost): Routes {
   const { store } = runtime
@@ -222,6 +232,25 @@ function routes(runtime: HttpHost): Routes {
     'GET search': ({ query }) => search(views(runtime), query.q ?? '', runtime.sourceLinks),
     'GET sources': () => sourcesStatus(views(runtime), runtime.health, setupState(runtime)),
     'GET settings': () => settingsView(store, runtime.sources, runtime.health, setupState(runtime), runtime.machine.stateDir),
+    // A request submitted from the panel becomes a Trigger of the Web Source, exactly as a message a Source's own loop
+    // reads would; the main Session assesses it and opens the Ticket. The request is its own Thread, named after it.
+    'POST requests': async ({ body }) => {
+      if (!runtime.configured()) throw new RouteError(400, 'The deployment is not configured yet')
+      const { text } = RequestRequest.parse(await body(64 * 1024))
+      const trigger = webTrigger({ text, at: new Date().toISOString(), session: runtime.masterId })
+      // Refuse before recording a Trigger the Policy would only ignore: the operator must be on the Web Source's list.
+      if (!runtime.admissible(trigger)) throw new RouteError(400,
+        'The request was not admitted: sync the Web panel Source in Settings → Policy so its operator is on the list')
+      const state = runtime.receive(trigger)
+      if (state === 'filtered') {
+        const code = runtime.store.triggers.disposition(trigger.id)?.filtered?.code
+        throw new RouteError(400, code === 'source_disabled'
+          ? 'The Web panel Source is off; enable it in Settings → Sources'
+          : `The request was not admitted (${code ?? 'not admitted'}); sync the Web panel Source in Settings → Policy so its operator is on the list`)
+      }
+      runtime.describeThread(trigger.threads[0]!, { label: webLabel(text) })
+      return { trigger_id: trigger.id, thread: `${WEB_SOURCE}:${trigger.threads[0]!.id}`, state }
+    },
     'POST sources/:id/labels': ({ params }) => runtime.settings.refreshLabels(params.id),
     'GET threads': ({ query }) => {
       const { filter, offset, limit } = ThreadsQuery.parse(query)
