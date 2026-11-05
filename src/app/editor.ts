@@ -20,6 +20,8 @@ export interface EditorProcess {
   readonly name: string
   /** ISO start time, or null when the operating system would not report it for this process. */
   readonly started: string | null
+  /** The executable's full path when it reports one; the lease guard matches a command's path against it. */
+  readonly path?: string
 }
 
 /**
@@ -112,7 +114,9 @@ export function parseEditorProcesses(stdout: string): EditorProcess[] {
     const name = typeof row.name === 'string' ? row.name.trim().toLowerCase().replace(/\.exe$/, '') : ''
     if (pid === undefined || !name) return []
     const started = typeof row.started === 'string' && !Number.isNaN(Date.parse(row.started)) ? row.started : null
-    return [{ pid, name, started }]
+    // A path is optional: the process table hides it for some processes, and a row without one still answers "who is running".
+    const path = typeof row.path === 'string' && row.path.trim() ? row.path.trim() : undefined
+    return [{ pid, name, started, ...path ? { path } : {} }]
   })
 }
 
@@ -122,8 +126,10 @@ const PROBE_SCRIPT = `$ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'
 Get-Process | Where-Object { $_.ProcessName -in 'UnrealEditor','UnrealEditor-Cmd','UnrealBuildTool','ShaderCompileWorker' } | ForEach-Object {
   $started = $null
+  $path = $null
   try { $started = $_.StartTime.ToUniversalTime().ToString('o') } catch { }
-  [pscustomobject]@{ id = $_.Id; name = $_.ProcessName; started = $started }
+  try { $path = $_.Path } catch { }
+  [pscustomobject]@{ id = $_.Id; name = $_.ProcessName; started = $started; path = $path }
 } | ConvertTo-Json -Compress`
 
 /**
@@ -156,10 +162,16 @@ export interface EditorOptions {
  */
 export class Editor {
   private view: EditorView | null = null
+  private rows: readonly EditorProcess[] | null = null
   private startedAt = 0
   private running = false
   private disposed = false
   constructor(private readonly options: EditorOptions = {}) {}
+
+  /** The last probe's rows, including build tools the derived row does not keep; the lease guard matches new processes. */
+  last(): readonly EditorProcess[] | null {
+    return this.rows
+  }
 
   /** The last derived row, starting a refresh when the cached one is older than the interval. */
   read(): EditorView | null {
@@ -180,7 +192,7 @@ export class Editor {
     const at = new Date(this.startedAt).toISOString()
     try {
       const processes = await (this.options.probe ?? probeEditorProcesses)()
-      if (!this.disposed) this.view = deriveEditor(processes, at)
+      if (!this.disposed) { this.view = deriveEditor(processes, at); this.rows = processes }
     } catch (error) {
       this.options.warn?.(`editor probe failed: ${error instanceof Error ? error.message : String(error)}`)
       if (!this.disposed) this.view = { holder: 'unknown', activity: 'unknown', since: null, pid: null, build: null, at,

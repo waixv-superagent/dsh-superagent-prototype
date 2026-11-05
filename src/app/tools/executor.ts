@@ -40,11 +40,16 @@ function editorStatusFor(scheduler: EditorScheduler, ticketId: string) {
   const lease = schedule.lease
   const mine = scheduler.standing(ticketId)
   const engine = scheduler.engine()
+  const view = scheduler.view()
   return {
     you: mine.state === 'holding' ? { holding: true, expires_at: mine.lease.expiresAt, draining: mine.lease.draining ?? null }
       : mine.state === 'queued' ? { queued: mine.position } : { holding: false },
     holder: lease ? { kind: lease.holder.kind, purpose: lease.purpose, note: lease.note, since: lease.acquiredAt,
       tickets: lease.holder.kind === 'agent' ? [lease.holder.ticketId] : lease.holder.kind === 'job' ? lease.holder.ticketIds : [] } : null,
+    /** Why agents are held back, so a worker waits for its turn instead of starting its own editor. */
+    blocked: scheduler.blocked(),
+    /** The editors the probe sees now: a person's editor is open and running, not a broken scheduler. */
+    editors: (view?.editors ?? []).map(process => ({ pid: process.pid, started: process.started })),
     queue: ordered(schedule.queue).map((request, index) => ({ position: index + 1, purpose: request.purpose, tickets: request.ticketIds,
       ...request.person ? { person: true } : {}, ...request.jobId ? { job: request.jobId } : {} })),
     jobs: schedule.jobs.filter(job => job.ticketIds.includes(ticketId)).slice(-5),
@@ -275,7 +280,9 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
     }),
     tool({
       name: 'orchestrator_editor',
-      description: 'Hold to build, restart, test or open the shared UE editor; release after; yield to people.',
+      description: 'Hold to build, restart, test or open the shared UE editor; release after; yield to people. '
+        + 'Acquire it before a shell opens, builds, restarts or tests the editor: the host stops an editor started without it, '
+        + 'and a stop aimed at an editor you did not start is reported.',
       schema: z.object({
         op: z.enum(['acquire', 'heartbeat', 'release', 'run', 'status']),
         purpose: z.enum(EDITOR_PURPOSES).optional(),
