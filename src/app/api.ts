@@ -12,6 +12,7 @@ import type { SettingsView } from './views/settings.ts'
 import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
 import type { TicketGraphView } from './views/graph.ts'
+import type { ReproPageView } from './views/repro.ts'
 import type { TicketListView, TicketSearchView } from './views/tickets.ts'
 import type { UpgradeRun, UpgradeView } from './upgrade.ts'
 
@@ -31,6 +32,14 @@ export interface Api {
   /** A person claims or yields the shared editor, asks its holder to yield, reorders or drops a wait, or stops a job. */
   'POST editor/act': { body: { action: 'claim' | 'release' | 'yield' } | { action: 'preempt'; reason?: string }
     | { action: 'front' | 'cancel' | 'cancel-job'; id: string }; response: { done: true } }
+  /** The local reproduction cases: what the directory holds, how the recent runs ended, and what holds the editor. */
+  'GET repro': { response: ReproPageView }
+  /** A person runs one local case; it starts as a host process against the editor that is already open. */
+  'POST repro/run': { body: { case: string }; response: { started: true } }
+  /** A person stops the local case that is running. */
+  'POST repro/stop': { body: { run: string }; response: { stopped: true } }
+  /** The last output of one run, for the page's output panel: bounded by the host, never a whole log. */
+  'GET repro/log': { query: { run: string }; response: { text: string } }
   'GET search': { query: { q: string }; response: SearchView }
   'GET sources': { response: SourceStatusView[] }
   'GET settings': { response: SettingsView }

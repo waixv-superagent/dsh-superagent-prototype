@@ -10,6 +10,7 @@ import type { ApiRequest } from '../app/api.ts'
 import { Button, Tag } from './controls.tsx'
 import { ticketMark } from './marks.ts'
 import { useAction, usePanel } from './provider.tsx'
+import { ReproCard } from './repro.tsx'
 import type { BoardFocus, Route } from './route.ts'
 import type { T } from './text.ts'
 import { LoadState, When } from './widgets.tsx'
@@ -488,6 +489,7 @@ export function EditorPage() {
     {error && <LoadState error={error} loading={false} />}
     <Hero data={data} />
     {data.schedule && <ScheduleCard schedule={data.schedule} reload={reload} />}
+    <ReproCard />
     {data.timeline && <Timeline timeline={data.timeline} />}
     <div className="dt-editor-grid">
       <Working data={data} />

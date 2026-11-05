@@ -10,6 +10,7 @@ When a ready report delivers a pull request, changelist or review, verification=
 Verification reproduces the reported case and then exercises its boundary, not only the happy path.
 When the existing scene, data or device cannot produce a boundary — a height, a slope, a timing, a state — build a minimal temporary fixture and sweep the parameter range in that one fixture (a sloped surface for heights) instead of a single sample.
 Record the fixture, its parameters and what each point proved in the verification package, and remove the fixture afterwards (docs/022).
+When a person may want to re-run a verification script, leave it as a local reproduction case with a `case.json` naming its command and report (docs/024).
 
 Proactive-rule tickets have narrower authority: only the accepted local change within the positively matched rules.
 Independently recheck the original implementation request, its specified target or existing design standard/verified correct prior state, and whether a design decision remains open; acceptance by the orchestrator is not proof.

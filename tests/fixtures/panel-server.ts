@@ -109,6 +109,8 @@ export interface PanelServer {
   editorPage?: () => ApiResponse<'GET editor'>
   /** The scheduler's part of the Editor page; null for a host without a scheduler. */
   schedule?: ApiResponse<'GET editor'>['schedule']
+  /** The local reproduction cases the editor page lists, the run in flight, and what holds the editor (docs/024). */
+  repro: ApiResponse<'GET repro'>
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; verification: TicketRow[]; working: TicketRow[]; idle: TicketRow[]; pipeline: TicketRow[]; ended: TicketRow[]
@@ -345,6 +347,7 @@ function initial(): PanelServer {
     activity: () => undefined,
     editor: { holder: 'person', activity: 'editing', since: '2026-09-22T08:00:00.000Z', pid: 1, build: null,
       at: '2026-09-22T08:10:00.000Z' },
+    repro: { root: '/w/SunGame/Saved/ReproTests', problem: null, cases: [], runs: [], active: null, blocked: null },
     billing: {
       windowMinutes: 60, currency: 'CNY',
       current: { provider: 'ai-gateway', name: 'kurogames', model: 'DeepSeek V4.1 Flash', at: Date.now() - 60_000 },
@@ -420,6 +423,10 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET state': { answer: stateView },
   'GET overview': { answer: overviewView },
   'GET editor': { answer: editorPageView },
+  'GET repro': { answer: () => server.repro },
+  'POST repro/run': { body: true, answer: () => ({ started: true as const }) },
+  'POST repro/stop': { body: true, answer: () => ({ stopped: true as const }) },
+  'GET repro/log': { query: ['run'], answer: () => ({ text: 'first line\nlast line' }) },
   'GET tickets/graph': { answer: () => server.graph },
   'GET tickets/search': { query: ['q', 'limit'], answer: ({ query }) => server.ticketSearch?.(String(query.q ?? '')) ?? { tickets: [], total: 0 } },
   'GET search': { query: ['q'], answer: async ({ query }) => {

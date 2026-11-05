@@ -2,6 +2,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { createReadStream, statSync } from 'node:fs'
+import { extname, join } from 'node:path'
 import { z } from 'zod'
 import { THREAD_FILTERS, TICKET_FILTERS, type Api, type ApiResponse, type RouteParams } from './api.ts'
 import { sourceSkills } from './context.ts'
@@ -12,6 +14,9 @@ import type { Activity } from './activity.ts'
 import type { Billing } from './billing.ts'
 import type { Editor } from './editor.ts'
 import type { EditorScheduler } from './editor-scheduler.ts'
+import type { ReproRunner } from './repro-runner.ts'
+import { VISIBLE_RUNS } from './repro-runner.ts'
+import { inside, readReproCases } from './repro.ts'
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
@@ -39,6 +44,7 @@ import { sourcesStatus, type SetupState } from './views/sources.ts'
 import { decisionList, search, threadDetail, threadList } from './views/threads.ts'
 import { executorLoad, ticketDetail, ticketList, ticketSearch } from './views/tickets.ts'
 import { ticketGraph } from './views/graph.ts'
+import { reproPage } from './views/repro.ts'
 
 export interface HttpHost {
   readonly store: Store
@@ -60,7 +66,9 @@ export interface HttpHost {
   /** Cached editor occupancy the overview reads; null until the first process probe finishes. */
   readonly editor: Pick<Editor, 'read'>
   /** The shared editor's lease, queue and jobs; absent on a host built before it. */
-  readonly editorScheduler?: Pick<EditorScheduler, 'tick' | 'engine' | 'act' | 'cancelJob'>
+  readonly editorScheduler?: Pick<EditorScheduler, 'tick' | 'engine' | 'act' | 'cancelJob' | 'read'>
+  /** The local reproduction cases' runs (docs/024); absent on a host built before them. */
+  readonly repro?: Pick<ReproRunner, 'tick' | 'run' | 'stop' | 'log' | 'root'>
   /** Rolling model spend the overview's billing strip reads; absent on a host built before it. */
   readonly billing?: Pick<Billing, 'view'>
   /** The one-click update the sidebar badge offers; absent on a host built before it. */
@@ -206,6 +214,16 @@ const PipelineRequest = z.object({ state: z.enum(['running', 'blocked', 'merged'
   manual: z.boolean().optional(), check: z.string().trim().max(500).optional() }).strict()
 /** A request a person submits from the panel: the text the main Session assesses, bounded like any Trigger a model reads. */
 const RequestRequest = z.object({ text: z.string().trim().min(1).max(LIMITS.requestChars) }).strict()
+/** A person's click on a local reproduction case, the run to stop, and the run whose output the panel reads (docs/024). */
+const ReproRunRequest = z.object({ case: z.string().trim().min(1).max(120) }).strict()
+const ReproStopRequest = z.object({ run: z.string().trim().min(1).max(64) }).strict()
+const ReproLogQuery = z.object({ run: z.string().trim().min(1).max(64) })
+
+/** Why a local case may not start now: an agent or a host job holds the shared editor, never a person's own claim. */
+function reproBlocked(runtime: HttpHost): 'agent' | 'job' | null {
+  const lease = runtime.editorScheduler?.read().lease
+  return lease?.holder.kind === 'agent' || lease?.holder.kind === 'job' ? lease.holder.kind : null
+}
 
 function routes(runtime: HttpHost): Routes {
   const { store } = runtime
@@ -238,6 +256,42 @@ function routes(runtime: HttpHost): Routes {
           : { kind: request.action })
       } catch (error) { throw new RouteError(400, error instanceof Error ? error.message : String(error)) }
       return { done: true as const }
+    },
+    // Local reproduction cases (docs/024): the host lists what a local directory holds, runs one on a person's click and
+    // serves the output and report it wrote. Cases stay outside the repository, so a case re-runs against the editor that
+    // is already open instead of starting another one.
+    'GET repro': () => {
+      const repro = runtime.repro
+      if (!repro) throw new RouteError(404, 'This host has no local reproduction runner')
+      const root = repro.root()
+      const found = readReproCases(root)
+      const runs = repro.tick().slice(0, VISIBLE_RUNS)
+      const active = runs.find(run => run.state === 'running')
+      return reproPage({ root, ...found.problem ? { problem: found.problem } : {}, cases: found.cases, runs,
+        ...active ? { active: { runId: active.id, caseId: active.caseId, tail: repro.log(active.id, ACTIVE_TAIL) } } : {},
+        blocked: reproBlocked(runtime) })
+    },
+    // A person runs one case: one at a time, and never while an agent or a host job drives the shared editor.
+    'POST repro/run': async ({ body }) => {
+      const repro = runtime.repro
+      if (!repro) throw new RouteError(404, 'This host has no local reproduction runner')
+      const request = ReproRunRequest.parse(await body(2_048))
+      const blocked = reproBlocked(runtime)
+      if (blocked === 'agent') throw new UserError('reproBlockedAgent')
+      if (blocked === 'job') throw new UserError('reproBlockedJob')
+      repro.run(request.case)
+      return { started: true as const }
+    },
+    'POST repro/stop': async ({ body }) => {
+      const repro = runtime.repro
+      if (!repro) throw new RouteError(404, 'This host has no local reproduction runner')
+      repro.stop(ReproStopRequest.parse(await body(2_048)).run)
+      return { stopped: true as const }
+    },
+    'GET repro/log': ({ query }) => {
+      const repro = runtime.repro
+      if (!repro) throw new RouteError(404, 'This host has no local reproduction runner')
+      return { text: repro.log(ReproLogQuery.parse(query).run) }
     },
     'GET search': ({ query }) => search(views(runtime), query.q ?? '', runtime.sourceLinks),
     'GET sources': () => sourcesStatus(views(runtime), runtime.health, setupState(runtime)),
@@ -377,6 +431,52 @@ function routes(runtime: HttpHost): Routes {
 function decoded(segment: string): string {
   try { return decodeURIComponent(segment) } catch { throw new RouteError(400, 'A path segment has a malformed escape') }
 }
+/** How much of the running case's output the page shows while it runs; the rest is a click away in its log. */
+const ACTIVE_TAIL = 8 * 1024
+/** The prefix a run's files are served under; the run id and the path below it identify the file. */
+const REPRO_FILE = '/orchestrator/repro/file/'
+/** What a browser may render inline from a case folder; anything else downloads as an opaque file. */
+const REPRO_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8',
+  '.csv': 'text/csv; charset=utf-8', '.xml': 'application/xml; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.pdf': 'application/pdf',
+  '.mp4': 'video/mp4', '.webm': 'video/webm',
+}
+/** Whether a request names the loopback host, where the panel and the tab it opens a report in run (DNS-rebinding guard). */
+function loopback(req: Pick<IncomingMessage, 'headers'>, port: number | undefined): boolean {
+  if (port === undefined) return false
+  return req.headers.host === `127.0.0.1:${port}` || req.headers.host === `localhost:${port}`
+}
+function notFound(res: ServerResponse): void {
+  res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
+  res.end('Not found')
+}
+/**
+ * Serves one file inside the case folder of a recorded run. The report opens in its own browser tab, so it cannot carry
+ * the management header; the loopback host and the run's own folder are the boundary instead. A report HTML runs in a
+ * sandboxed origin, so its scripts cannot reach the panel's management API with the page's credentials.
+ */
+function serveReproFile(runtime: HttpHost, url: URL, res: ServerResponse, method: string): void {
+  const repro = runtime.repro
+  const parts = url.pathname.slice(REPRO_FILE.length).split('/').map(part => {
+    try { return decodeURIComponent(part) } catch { return part }
+  })
+  const [runId, ...rest] = parts
+  const run = runId && repro ? repro.tick().find(item => item.id === runId) : undefined
+  const full = run && rest.length ? inside(join(repro!.root(), run.caseId), rest.join('/')) : undefined
+  if (!run || !full) { notFound(res); return }
+  let size: number
+  try { const stat = statSync(full); if (!stat.isFile()) { notFound(res); return } size = stat.size } catch { notFound(res); return }
+  const type = REPRO_TYPES[extname(full).toLowerCase()] ?? 'application/octet-stream'
+  const sandboxed = type.startsWith('text/html') || type.startsWith('image/svg')
+  res.writeHead(200, { 'content-type': type, 'content-length': size, 'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff', ...sandboxed ? { 'content-security-policy': 'sandbox allow-scripts' } : {} })
+  if (method === 'HEAD') { res.end(); return }
+  // The file was statted just above; a failure to open it now must end the response rather than hang the browser tab.
+  createReadStream(full).on('error', () => { res.destroy() }).pipe(res)
+}
 function match(table: Routes, method: string, segments: string[]) {
   for (const [route, run] of Object.entries(table)) {
     const [verb, path] = route.split(' ') as [string, string]
@@ -395,6 +495,15 @@ export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
   const disposers = [
     ctx.webServer.register({ kind: 'prefix', path: '/orchestrator', handler: async (req, res) => {
       const url = new URL(req.url ?? '/', 'http://localhost')
+      // A case's report opens in its own browser tab, so it cannot carry the management header; the loopback host and
+      // the run's own case folder are what bound it instead.
+      if (url.pathname.startsWith(REPRO_FILE)) {
+        if (!loopback(req, ctx.webServer.port)) { notFound(res); return }
+        if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { allow: 'GET, HEAD' }); res.end(); return }
+        try { await runtime.ready } catch { notFound(res); return }
+        serveReproFile(runtime, url, res, req.method)
+        return
+      }
       if (!url.pathname.startsWith('/orchestrator/api/')) { res.writeHead(404); res.end(); return }
       if (!sameOrigin(req, ctx.webServer.port)) { json(res, 403, { error: 'Same-origin management request required' }); return }
       try {

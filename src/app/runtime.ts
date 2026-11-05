@@ -42,6 +42,8 @@ import { Editor } from './editor.ts'
 import { EditorScheduler, killTree } from './editor-scheduler.ts'
 import { EditorGuard } from './editor-guard.ts'
 import { EditorGatekeeper } from './editor-gatekeeper.ts'
+import { ReproRunner } from './repro-runner.ts'
+import { reproRoot } from './repro.ts'
 import { notifyPlan as sendPlanCard } from './plan.ts'
 import { notifyPriority as sendPriorityCard } from './priority.ts'
 import { IdleScheduler } from './idle.ts'
@@ -89,6 +91,8 @@ export class Runtime extends Service implements SourceHost {
   readonly editorGatekeeper: EditorGatekeeper
   /** Watches workers' shell calls for editor use outside the lease (docs/021). */
   readonly editorGuard: EditorGuard
+  /** Runs the local reproduction cases a person clicks on the editor page (docs/024). */
+  readonly repro: ReproRunner
   readonly billing: Billing
   readonly pipeline: PipelineChecks
   readonly pipelineWatch: PipelineWatch
@@ -196,6 +200,10 @@ export class Runtime extends Service implements SourceHost {
         adopt: (id, pid, kind, started) => { this.editorGatekeeper.adopt(id, pid, kind, started) },
         notify: (id, noticeId, text) => sessions.prompt(workerSessionId(id), noticeId, text, 'steer'),
         warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
+      // The local reproduction cases live outside the repository: the host runs only what its directory lists, one at a
+      // time, and keeps each run's output and report so a case re-runs against the editor that is already open (docs/024).
+      this.repro = new ReproRunner({ store, root: () => reproRoot(store.settings().executor.editor.project, machine.stateDir),
+        logDir: join(machine.stateDir, 'repro-logs'), warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       // The board's billing strip reads actual Session usage priced from the routes' published lists, and the gateway account's own
       // settled hour and quota when the default route is a gateway it can read.
       this.billing = new Billing({ store, catalog: () => ctx.sessionController.modelCatalog(),
@@ -366,12 +374,13 @@ export class Runtime extends Service implements SourceHost {
     this.pipelineWatch.start()
     this.editorScheduler.start()
     this.editorGatekeeper.start()
+    this.repro.start()
     this.runtimeHealth.set({ state: 'ready', detail: 'Orchestrator is ready', at: now() })
   }
   private httpHost(): HttpHost {
     const runtime = this
-    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing, stallWatch, upgrade } = this
-    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, billing, upgrade, health, machine, masterId, ready, sourceLinks, watchdog, stallWatch,
+    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, repro, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing, stallWatch, upgrade } = this
+    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, repro, billing, upgrade, health, machine, masterId, ready, sourceLinks, watchdog, stallWatch,
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
@@ -403,6 +412,7 @@ export class Runtime extends Service implements SourceHost {
       this.editorGuard.dispose()
       this.editor.dispose()
       this.editorScheduler.dispose()
+      this.repro.dispose()
       for (const dispose of this.disposers.reverse()) dispose()
       // A flush failure must not keep the host from stopping and starting again: the event log is durable for the next open,
       // whose write path truncates a torn tail, and the failure is logged instead of rejecting the stop.
