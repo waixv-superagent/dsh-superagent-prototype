@@ -1,0 +1,7 @@
+{
+  "name": "演示：急转时的滑动（合成）",
+  "description": "合成用例：A 臂模拟未修复，B 臂模拟修复后；演示 A/B 运行与报告，不接编辑器。",
+  "command": "node ../../scripts/repro-ab.mjs replay .",
+  "report": ".repro/report.html",
+  "timeoutSeconds": 120
+}
