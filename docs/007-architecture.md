@@ -322,6 +322,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/core/stage.ts` | `ticketStage` and `canRetry`: the Ticket stages of [003 Execution](003-execution.md) |
 | `src/core/waiting.ts` | `waitingOf`: who a Ticket waits for (person, pipeline, worker or nobody), the action that wait corresponds to, and the one real deadline it may have |
 | `src/core/plan.ts` | The P1 plan gate: a Ticket's phases, `Plan`, the fix/analysis/design templates, `planDecision` and the entrance a decision came through |
+| `src/core/diff.ts` | The unified diff a P1 plan carries: `parsePlanDiff` reads files, hunks, renames and binary changes into what the card summarizes and the panel renders, with the size limits and the text it refuses |
 | `src/core/priority.ts` | Ticket priority: the four levels, who set a level and why, `defaultPriority` (a TAPD question, a person's mention P1, P0 only from a person), `priorityOfText`/`priorityAnswer`, `systemPriority`'s stickiness, and the TAPD suggestion |
 | `src/core/idle.ts` | Idle time: the five signals (`queue`, `capacity`, `window`, `human`, `guard`), the three depths `L1`/`L2`/`L3`, the configured windows and their defaults, `idleState`, `idleAdmits` and the daily budget |
 | `src/core/verification.ts` | The four-block verification package a delivered change reports: `VERIFY_LABELS`, `verifyLines` and `missingVerifyLabels` |
@@ -437,6 +438,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/pipeline.ts` | Reading a delivered change as stages: the fine stage of the Swarm submitter flow, the four-step track, the running checks' counts and the failed-smoke wait, shared by the board card, the Ticket page and the stage mark |
 | `src/client/source.tsx`, `trigger.tsx`, `eval.tsx`, `execution.tsx` | One file per stage: its status, and its settings where it has some |
 | `src/client/thread.tsx`, `ticket.tsx` | The record pages: a Thread with its timeline, and a Ticket with its authorization, Inputs and Assignments |
+| `src/client/diff.tsx` | The plan's code diff in the Ticket page: a file index and each file's hunks, inline or side by side, with old/new line numbers, added/removed rows, token-level marks and a remembered layout |
 | `src/client/activity.tsx` | The compact "now" block of a running Ticket: the current tool, its latest progress and who acts next, with no reasoning stream or token speed |
 | `src/client/editor.tsx` | The 概览 editor view: the holder, the last-hour timeline with short lane names, the working list split by editor use with each worker's tool and an expandable tool/MCP trail, and the short rail of what waits on a person; its four hero counts are doors to the board; it starts and stops nothing |
 | `src/client/settings.tsx` | The Settings tab: the group navigation and the group on screen |
@@ -463,6 +465,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | Test | Covers |
 | --- | --- |
 | `tests/core-engine.spec.ts` | Domain rules on in-memory repositories: receiving, Eval, fan-out, resume and stop, interrupted Assignments, the pause, Policy changes, reports and outcomes, attaching, replies, failed deliveries and dismissed problems |
+| `tests/diff.spec.ts` | The unified diff a P1 plan carries: files, hunks, renames, added/deleted/binary changes, quoted paths, and the text the parser refuses instead of rendering half a change |
 | `tests/stage.spec.ts` | The Ticket stages, row by row |
 | `tests/stall-watch.spec.ts` | The stall alert: the progress it counts from, the one notice per stall and the new count after progress, a running or hung tool, background work, a queued Ticket, the paused, person-waiting, idle and ended Tickets it leaves alone, `notify: false`, the three-line text and the settings defaults |
 | `tests/policy.spec.ts` | Source scope, the gate, the admission table, Mandate revalidation, the Policy version, settings migrations and assessment outcomes |
@@ -525,6 +528,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/deployment.spec.ts`, `tests/environment.spec.ts`, `tests/index.spec.ts` | The plugin configuration and setup, the agent's process environment, the plugin entry |
 | `tests/service-script.spec.ts` | `scripts/dsh-superagent` against fake `ps`, `tmux` and `dsh` |
 | `tests/client.spec.tsx`, `tests/navigation.spec.ts`, `tests/controls.spec.tsx` | The client plugin's registration and polling, Session navigation and route memory, the `?view=board` deep link, the local controls, and the panel's imports, which have no cycle |
+| `tests/client-diff.spec.tsx` | The panel's plan diff: the file index and line numbers, token-level marks, the inline/side-by-side switch and the layout it remembers, and a binary file with no hunks |
 | `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx` | Each page of the panel, against a fake management API answered by route |
 | `tests/panel-navigation.spec.tsx` | Panel navigation through browser history: Back/Forward, the mouse side buttons and the page Back button on the same entries, the parent menu behind a page opened without history, filters replacing their entry, each page's entrance, and a crashed page that recovers in place |
 | `tests/panel-graph.spec.tsx` | The 概览 relation view: the timeline lanes, edges and hover title placement, the cloud, the only-related filter, both layouts' geometry, the cloud's frame loop on fake animation frames (no radius breathing, fill opacity, hover lift, hidden-tab pause, reduced motion), hub rings, the frost sheen's inline fill, chevron arrowheads, guessed edges (dotted, no arrow, opacity by strength, the switch, no growth in size, absent from the timeline, the hover reason and its placement, the weak springs), the speck schedule, label placement, node sizing, and a Ticket page's related Tickets |

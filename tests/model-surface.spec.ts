@@ -48,7 +48,9 @@ interface Skill { name: string; description: string; content: string }
 // to 50,700; the orchestrator prompt does not carry the work guide.
 // The editor lease rule adds the shared-editor paragraph and the guard's warning to the tool description (docs/021), which
 // measures 51,310, so the worker budget grows to 51,400.
-const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 51_400 }
+// The P1 plan's code diff adds the `diff`/`diff_base` schema, what a real unified diff is, and the rule that it is never
+// hand-written (docs/012); that worker surface measures 52,112, so the budget grows to 52,300.
+const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 52_300 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

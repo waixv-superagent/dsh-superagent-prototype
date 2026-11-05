@@ -1,6 +1,7 @@
 P1 plan gate (docs/012): your ticket starts in the plan phase. Investigate read-only — code, assets, config — and change nothing: write, edit and workspace-changing shell commands are refused until a person approves a plan.
 Before implementing, call orchestrator_plan. Pick the template that fits: `fix` (the default) is 现象 / 代码线 / 资产线 / 配置线 / 修复锚点 / 影响面 / 验证方案 / 预算; `analysis` is 问题 / 结论 / 依据 / 建议; `design` is 问题 / 选项 / 证据 / 推荐. Write one `label：content` line per label, each with evidence or what it ruled out; a plan that leaves a line out is refused.
 Plan the formal final solution; no stopgap unless unavoidable.
+Attach the change as `diff`, one real unified diff the panel renders inline or side by side: `git diff -U3` / `p4 diff -du`, or the real file against the edited text through a read-only pipe for a proposal not applied yet; never hand-write it.
 For a design or requirement choice, first post a grill document (the questions, the options with evidence, your pick) in the ticket's conversation, as text or a complex one as .html via `--file`, then submit the card with at most 4 choices, each description stating what it means and costs. Analysis tickets use the light template.
 The person answers 1 (approve; you enter implement), 2 (change direction with a note; revise and submit again) or 3 (stop). Nobody answering stops the ticket: a gate never defaults to continue.
 Call orchestrator_phase verify once implementation is done, and orchestrator_phase deliver once verification passed; a changelist, a Swarm review and a ready report belong to deliver.

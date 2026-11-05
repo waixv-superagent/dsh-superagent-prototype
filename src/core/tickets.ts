@@ -9,6 +9,7 @@ import { EnginePart, type EngineOptions } from './part.ts'
 import { classifyTicket } from './kind.ts'
 import { missingPlanLabels, pendingPlan, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planTemplate, ticketPhase, validPlanOptions, validQuestionSections,
   type PlanDecision, type PlanOption, type PlanTemplate, type PlanVia, type TicketPhase } from './plan.ts'
+import { parsePlanDiff, type PlanDiff } from './diff.ts'
 import { defaultPriority, priorityAskDeadline, PRIORITY_ASK_MINUTES, priorityAskOverdue, systemPriority, waitsForIdle, type PriorityLevel,
   type PriorityVia } from './priority.ts'
 import type { IdleLevel } from './idle.ts'
@@ -533,16 +534,27 @@ export class Tickets extends EnginePart {
   /**
    * A worker's P1 plan, as the fixed template with evidence, now waits for a person: the ticket stays in `plan`, its
    * attention asks the plan question, and its deadline stops it if nobody answers (see `PLAN_GATE_HOURS`). A worker may
-   * word the card's question and offer 2–4 choices that map to the gate's own decisions.
-   * @throws UserError when the ticket is unknown or ended, its plan was approved already, a template line is missing, or
-   * the question or choices are not a card's.
+   * word the card's question and offer 2–4 choices that map to the gate's own decisions, and attach the proposed code
+   * change as a real unified diff (`diffText`, `diffBase`) so a person can read the code before approving.
+   * @throws UserError when the ticket is unknown or ended, its plan was approved already, a template line is missing,
+   * the question or choices are not a card's, or the attached diff is not a unified diff this panel can render.
    */
-  submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[], template: PlanTemplate = 'fix'): Ticket {
+  submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[], template: PlanTemplate = 'fix',
+    diffText?: string, diffBase?: string): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     if (ticket.plan?.approved) throw new UserError('phaseOutOfOrder', { from: ticketPhase(ticket) })
     const missing = missingPlanLabels(text, template)
     if (missing.length) throw new UserError('planIncomplete', { template, labels: missing.join(', ') })
+    // A diff a person will review is parsed now, so the card and the panel never receive half a change or a summary
+    // dressed up as one; text that cannot be a unified diff is refused with the line that broke it.
+    let diff: PlanDiff | undefined
+    if (diffText?.trim()) {
+      const parsed = parsePlanDiff(diffText, diffBase)
+      if ('problem' in parsed) throw new UserError('planDiff', { problem: parsed.problem })
+      if (!parsed.diff.files.length) throw new UserError('planDiff', { problem: 'it has no file changes' })
+      diff = parsed.diff
+    }
     const asked = question?.trim()
     if (asked !== undefined && (!asked || Array.from(asked).length > 200)) throw new UserError('planQuestion')
     const choices = options?.map(option => ({ ...option, label: option.label.trim(), ...option.description ? { description: option.description.trim() } : {} }))
@@ -555,7 +567,8 @@ export class Tickets extends EnginePart {
     const at = this.now()
     const previous = ticket.attention
     ticket.plan = { text, at, waiting: true, deadline: new Date(Date.parse(at) + PLAN_GATE_HOURS * 3_600_000).toISOString(),
-      ...(template !== 'fix' ? { template } : {}), ...(asked ? { question: asked } : {}), ...(choices?.length ? { options: choices } : {}), ...(context?.length ? { sections: context } : {}) }
+      ...(template !== 'fix' ? { template } : {}), ...(asked ? { question: asked } : {}), ...(choices?.length ? { options: choices } : {}),
+      ...(context?.length ? { sections: context } : {}), ...(diff ? { diff } : {}) }
     ticket.phase = 'plan'
     ticket.attention = { id: key('attention', ticketId, PLAN_QUESTION, at), question: PLAN_QUESTION }
     if (previous && previous.id !== ticket.attention.id) this.replies.withdrawAttention(previous.id)

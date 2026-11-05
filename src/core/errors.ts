@@ -58,6 +58,7 @@ export const USER_ERRORS = {
   planOptions: ['refused', 'Plan choices are 2 to 4 unique labels, each mapped to approve, revise, or stop; a design choice also needs a description of at most 160 characters'],
   planQuestion: ['refused', 'A plan question is one non-empty line of at most 200 characters'],
   planSections: ['refused', 'A plan card\'s context sections are 1 to 6 blocks, each with a short unique label and its own text'],
+  planDiff: ['refused', 'The plan diff must be one unified diff this panel can render: {problem}'],
   optionsWithoutQuestion: ['refused', 'Options need the question they answer; ask it with human_action'],
   attentionOptions: ['refused', 'A question offers 2 to 4 unique option labels of at most 24 characters'],
   attentionSections: ['refused', 'A question card\'s context sections are 1 to 6 blocks, each with a short unique label and its own text'],

@@ -4,7 +4,7 @@
  * that record an answer, and the text fallback when Feishu refuses a card.
  */
 import { PLAN_CARD_QUESTION, PLAN_REPLY_HINT, PLAN_TEMPLATES, PRIORITY_LABELS, PRIORITY_LEVELS, planLines, planTemplate, type Plan, type PlanDecision,
-  type PlanOption, type PlanTemplate, type PipelineCard, type PriorityAsk, type PriorityLevel, type QuestionSection, type Ticket } from '../core/index.ts'
+  type PlanDiff, type PlanOption, type PlanTemplate, type PipelineCard, type PriorityAsk, type PriorityLevel, type QuestionSection, type Ticket } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
 import { feishuPostContent, jsonForCmd, textSafe } from './feishu-text.ts'
 
@@ -54,6 +54,25 @@ const footer = (lines: readonly string[], ticketId?: string, link?: string): Rec
 }
 /** The plan's lines by label; a card shows the lines the worker wrote and `—` for one it left out (the gate refuses those). */
 const linesOf = (text: string, template: PlanTemplate = 'fix'): Map<string, string> => new Map(planLines(text, template).map(line => [line.label, line.text]))
+/** How many files a card names before it only says how many more the diff changes. */
+const CARD_DIFF_FILES = 3
+/** A changed file's path as a card line: a long depot path keeps its tail, where the file name is. */
+const diffPath = (path: string): string => {
+  const chars = Array.from(path)
+  return chars.length <= 64 ? path : `…${chars.slice(chars.length - 63).join('')}`
+}
+/**
+ * The plan's code diff as a card can carry it: how many files and lines it changes, the baseline, and the first files.
+ * Hunks are unreadable in a chat card, so the panel page renders them (inline or side by side) and this block only
+ * says what the change costs; without a panel link it stays a summary.
+ */
+const diffBlock = (diff: PlanDiff): Record<string, unknown> => {
+  const lines = [`**代码改动 · ${diff.files.length} 个文件 · +${diff.added} −${diff.removed}**`,
+    ...diff.base ? [`对比基线：${diff.base}`] : [],
+    ...diff.files.slice(0, CARD_DIFF_FILES).map(file => `• ${diffPath(file.path)}${file.binary ? '（二进制）' : ` +${file.added} −${file.removed}`}`),
+    ...diff.files.length > CARD_DIFF_FILES ? [`• 等 ${diff.files.length} 个文件`] : []]
+  return markdown(lines.join('\n'))
+}
 /** A bare URL's display title: what it is, not the address, while the link still opens the URL. */
 const linkTitle = (url: string): string => {
   let parsed: URL
@@ -238,7 +257,7 @@ const buttonRow = (buttons: readonly Record<string, unknown>[]): Record<string, 
  * previews the card by its question. The text fallback carries the key lines and the labels in full, since only a person
  * who cannot see the card reads it.
  */
-export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 'text' | 'template' | 'question' | 'options' | 'deadline' | 'sections'>,
+export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 'text' | 'template' | 'question' | 'options' | 'deadline' | 'sections' | 'diff'>,
   ticketLink?: string): CardMessage {
   const template = planTemplate(plan)
   const lines = linesOf(plan.text, template)
@@ -255,6 +274,7 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
       markdown(`**${question}**`, { text_size: 'heading' }),
       ...body.length ? body.map(section => block(section.label, section.text))
         : custom ? [] : layout.front.map(label => block(label, get(label), ['影响面', '预算'].includes(label) ? { text_size: 'notation' } : {})),
+      ...plan.diff ? [diffBlock(plan.diff), ...ticketLink ? [markdown(`[在面板看完整 diff（内联 / 并排）](${ticketLink})`, { text_size: 'notation' })] : []] : [],
       ...folded.length ? [foldPanel(folded, '补充')] : custom ? [] : [evidencePanel(layout.fold.map(label => ({ label, text: get(label) || '—' })))],
       { tag: 'hr', margin: '0px 0px 0px 0px' },
       ...choiceRows(choices.map((choice, index) => ({
@@ -266,9 +286,12 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
     ],
   })
   const context = custom ?? layout.front.map(label => ({ label, text: get(label) || '—' }))
+  const diffText = plan.diff ? `代码改动：${plan.diff.files.length} 个文件 +${plan.diff.added} −${plan.diff.removed}`
+    + `${plan.diff.base ? `（对比 ${plan.diff.base}）` : ''}；逐行 diff 在工单面板里，可切内联 / 并排。` : ''
   const text = textSafe([`待确认 · ${PLAN_KIND[template]}：${ticket.title}（工单 ${shortId(ticket)}）`,
     `要你定：${question}`,
     ...context.map(section => blockText(section.label, section.text)),
+    diffText,
     '通过后：开始实现，交付前再请你确认；不会直接 submit。',
     `选项：${choices.map(choice => choice.description ? `${choice.label}（${choice.description}）` : choice.label).join(' ｜ ')}`,
     custom ? '' : `证据（${layout.fold.join('/')}）在卡片折叠与工单面板里。`, PLAN_REPLY_HINT].filter(Boolean).join('\n'))

@@ -4,6 +4,7 @@ import { TicketNow } from './activity.tsx'
 import { ApiError, usePoll, type TicketPageView } from './api.ts'
 import { Button, DisclosureRow, Dot, Icon, Tag, type IconName } from './controls.tsx'
 import { decisionMark, reportDot, ticketMark } from './marks.ts'
+import { PlanDiffView } from './diff.tsx'
 import { pipelineTrack, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackLabel, pipelineTrackState, type PipelineView } from './pipeline.ts'
 import { usePanel } from './provider.tsx'
 import { settingsRoute } from './route.ts'
@@ -164,6 +165,26 @@ const planPoints = (text: string): string[] => text.split(/[；。]\s*/).map(poi
  */
 interface PlannedFile { path: string; range?: string; points: string[] }
 const FILE = /(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:hpp|cpp|cc|cs|tsx|ts|jsx|js|py|ini|json|uproject|usf|ush|md|h|c)(?::\d+(?:-\d+)?)?/g
+/**
+ * Whether a plan sentence is about `file`: it may name the path, or only the stem a person writes mid-sentence
+ * (`SkillRotateAPI` for `SkillRotateAPI.cpp`), which is how a fix's own line usually reads.
+ */
+const mentions = (text: string, file: PlannedFile): boolean => {
+  if (text.includes(file.path)) return true
+  const stem = (file.path.split('/').pop() ?? file.path).replace(/\.[^.]+$/u, '')
+  return stem.length >= 4 && text.includes(stem)
+}
+/**
+ * A point as a file row shows it: when a sentence covers many files, the table needs the part around this one, not
+ * the whole paragraph repeated under every row.
+ */
+function around(text: string, path: string): string {
+  if (Array.from(text).length <= 220) return text
+  const at = text.indexOf(path)
+  if (at < 0) return `${Array.from(text).slice(0, 219).join('')}…`
+  const start = Math.max(0, at - 80), end = Math.min(text.length, at + path.length + 140)
+  return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`
+}
 function plannedFiles(lines: { text: string }[]): PlannedFile[] {
   const files = new Map<string, PlannedFile>()
   for (const line of lines) {
@@ -172,11 +193,11 @@ function plannedFiles(lines: { text: string }[]): PlannedFile[] {
       const [path = '', range] = match[0].split(/:(?=\d)/)
       const known = files.get(path) ?? { path, points: [] }
       if (range && !known.range) known.range = range
-      for (const point of points) if (point.includes(path) && !known.points.includes(point)) known.points.push(point)
+      for (const point of points) if (mentions(point, known) && !known.points.includes(point)) known.points.push(point)
       files.set(path, known)
     }
   }
-  return [...files.values()].slice(0, 12)
+  return [...files.values()].slice(0, 12).map(file => ({ ...file, points: file.points.map(point => around(point, file.path)) }))
 }
 /** The decision the plan waits for: the files and the finding first, the evidence behind one fold, and three buttons. */
 function PlanGate({ plan, onDecide }: { plan: PlanView; onDecide: (decision: 'approve' | 'revise' | 'stop', note?: string)
@@ -216,7 +237,8 @@ function PlanGate({ plan, onDecide }: { plan: PlanView; onDecide: (decision: 'ap
       {plan.deadline && <span className="dt-plan-deadline"><Icon name="clock" size={12} />{t('planDeadline', {
         time: when(plan.deadline, t('lang')) })}</span>}
     </div>
-    {files.length > 0 && <div className="dt-plan-files">
+    {plan.diff && <PlanDiffView diff={plan.diff} />}
+    {!plan.diff && files.length > 0 && <div className="dt-plan-files">
       <div className="dt-plan-files-head"><Icon name="code" size={15} /><strong>{t('planFiles', { count: files.length })}</strong></div>
       <ul>{files.map(file => {
         const open = opened === file.path
@@ -234,6 +256,7 @@ function PlanGate({ plan, onDecide }: { plan: PlanView; onDecide: (decision: 'ap
             : first && <div className="dt-plan-file-note">{first}</div>}
         </li>
       })}</ul>
+      <div className="dt-plan-diff-missing">{t('planDiffMissing')}</div>
     </div>}
     {section('现象', t('planPhenomenon'))}
     {section('修复锚点', t('planAnchor'))}

@@ -247,11 +247,14 @@ export class Engine {
   reworkTicket(ticketId: string, note?: string): Ticket { return this.repo.atomic(() => this.tickets.rework(ticketId, note)) }
   /**
    * A worker submits its P1 plan, which then waits for a person: the fixed template with evidence for each line, or the
-   * submission is refused. The ticket stays in its plan phase until the answer.
-   * @throws UserError when the ticket is unknown or ended, its plan was approved already, or a template line is missing.
+   * submission is refused. It may carry the proposed change as a real unified diff, which the card summarizes and the
+   * panel renders. The ticket stays in its plan phase until the answer.
+   * @throws UserError when the ticket is unknown or ended, its plan was approved already, a template line is missing, or
+   * the attached diff is not a unified diff this panel can render.
    */
-  submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[], template: PlanTemplate = 'fix'): Ticket {
-    return this.repo.atomic(() => this.tickets.submitPlan(ticketId, text, question, options, sections, template))
+  submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[], template: PlanTemplate = 'fix',
+    diff?: string, diffBase?: string): Ticket {
+    return this.repo.atomic(() => this.tickets.submitPlan(ticketId, text, question, options, sections, template, diff, diffBase))
   }
   /**
    * A person's decision on a ticket's waiting plan: `1` approves it and moves the ticket to implement, `2` asks for another
