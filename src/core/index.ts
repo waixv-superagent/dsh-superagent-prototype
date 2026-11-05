@@ -23,3 +23,5 @@ export { PRIORITY_LEVELS, PRIORITY_LABELS, PRIORITY_ASK_MINUTES, defaultPriority
   type PrioritySource, type TicketPriority } from './priority.ts'
 export { IDLE_ADMITS, IDLE_DEFAULTS, clockMinutes, dailyIdleRoom, idleAdmits, idleState, inWindow, localDay, minuteOfDay, protectedAt, windowAt,
   type ClockTime, type IdleConfig, type IdleLevel, type IdleRange, type IdleSignals, type IdleState, type IdleWindow } from './idle.ts'
+export { ANALYSIS_ADVICE_LABELS, ANALYSIS_RELATED, ANALYSIS_SECTIONS, ANALYSIS_SUMMARY_CHARS, ANALYSIS_VERDICTS, ANALYSIS_VERDICT_LABELS, analysisAdvice,
+  analysisAdviceFromSections, analysisBrief, analysisFailed, analysisOf, analysisReady, analysisRunning, analysisSection, worthAttention, type AnalysisRelated } from './analysis.ts'

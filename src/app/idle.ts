@@ -13,8 +13,8 @@ export interface IdleHost {
   readonly store: Pick<Store, 'tickets' | 'settings' | 'read'>
   now?: () => Date
 }
-/** What a launch attempt asked and was told: whether the ticket may start, at which depth, and why. */
-export interface IdleAdmission { admitted: boolean; level?: IdleLevel; reason: string }
+/** What a launch attempt asked and was told: whether the ticket may start, at which depth, whether as a read-only analysis, and why. */
+export interface IdleAdmission { admitted: boolean; level?: IdleLevel; analysis?: true; reason: string }
 /** Whether a ticket has runnable work now: a pending or running Assignment. */
 const runnable = (ticket: Ticket): boolean => {
   const stage = ticketStage(ticket)
@@ -60,6 +60,10 @@ export class IdleScheduler {
    * Whether a ticket's work may start now: mainline levels always, a pending priority question never, and `P2`/`P3` only at
    * a depth that admits them, within the idle concurrency and the daily budget. A person's message waiting for the ticket
    * starts it at once, because the person is the reason the system was holding back.
+   *
+   * With `analysis.enabled` (the default since docs/025) a pooled ticket's first idle launch is its read-only analysis, and
+   * a ticket whose analysis already finished waits for a person instead of running again: the pool holds decisions, not a
+   * second implementation queue. A person's message still starts the work itself.
    */
   admission(ticket: Ticket, load: { running: number; max: number }): IdleAdmission {
     this.observe(load.running, load.max)
@@ -71,6 +75,12 @@ export class IdleScheduler {
     if (ticket.priorityAsk?.state === 'pending') return { admitted: false, reason: 'waiting for the priority answer' }
     if (personWaiting(ticket)) return { admitted: true, reason: "a person's message waits for this worker" }
     if (retriedByPerson(ticket)) return { admitted: true, reason: 'a person retried the ticket' }
+    // One read-only analysis per visit to the pool: once it produced a verdict, only a person decides what happens next, so
+    // an automated follow-up cannot turn the pool into an unnoticed implementation queue.
+    if (config.analysis.enabled) {
+      if (ticket.idle?.analysis?.state === 'ready') return { admitted: false, reason: 'its idle analysis waits for a person to act on the verdict' }
+      if (ticket.idle?.analysis?.state === 'failed') return { admitted: false, reason: 'its idle analysis did not finish; a person decides whether to run it again' }
+    }
     const state = this.state()
     if (!state.level) return { admitted: false, reason: state.reason }
     if (!idleAdmits(state.level, level)) return { admitted: false, reason: `${state.level} admits ${IDLE_ADMITS[state.level]}, not ${level}` }
@@ -80,6 +90,9 @@ export class IdleScheduler {
     const today = localDay(this.now().toISOString())
     const launchedToday = this.host.store.tickets.list().filter(item => item.idle?.launchedAt && localDay(item.idle.launchedAt) === today).length
     if (!dailyIdleRoom(launchedToday, config)) return { admitted: false, reason: `the day's ${config.dailyItems} idle items are used` }
-    return { admitted: true, level: state.level, reason: state.reason }
+    // The pool's first launch is the read-only analysis; its worker records a verdict a person can act on (docs/025).
+    return config.analysis.enabled
+      ? { admitted: true, level: state.level, analysis: true, reason: `${state.reason}; the idle pool runs a read-only analysis` }
+      : { admitted: true, level: state.level, reason: state.reason }
   }
 }

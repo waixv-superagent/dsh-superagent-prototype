@@ -5,7 +5,7 @@ import type { MessageId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { dirname } from 'node:path'
 import { z } from 'zod'
-import { key, liveTicket, ticketPhase, type Ticket } from '../core/index.ts'
+import { key, analysisRunning, analysisSection, liveTicket, ticketPhase, type Ticket } from '../core/index.ts'
 import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { AgentDelivery, messageId } from './delivery.ts'
@@ -78,6 +78,11 @@ const MASTER_TOOLS = ['skill', 'read', 'read_image', 'job_output', 'job_list', '
 const PLAN_BLOCKED = ['write', 'edit']
 /** The plan gate's refusal, worded so a model submits the plan instead of retrying the tool. */
 const PLAN_CLOSED = 'The P1 plan gate is closed: submit the plan with orchestrator_plan and wait for a person to answer 1 before changing files'
+/** Tools the idle analysis refuses besides the write tools: it neither plans nor delivers, and its dossier is its whole output. */
+const ANALYSIS_BLOCKED = ['write', 'edit', 'orchestrator_plan', 'orchestrator_phase']
+/** The idle analysis's refusal, worded so a model reports its dossier instead of retrying the change. */
+const ANALYSIS_CLOSED = 'This assignment is the ticket\'s read-only idle analysis: change nothing, submit no plan and deliver nothing; '
+  + 'finish with orchestrator_report ready, putting the verdict in its sections, and leave implementation to a person'
 /** Shell commands that change a workspace; a read-only investigation during the plan phase does not run them. */
 const WRITE_COMMAND = /(?:^|[;&|]\s*|\b)(?:p4\s+(?:edit|add|delete|revert|shelve|submit)|git\s+(?:add|commit|push|checkout|switch|reset|rm|mv|restore|clean)|set-content|out-file|new-item|remove-item|move-item|copy-item|sed\s+-i|tee|mkdir|rm|mv|cp|touch)\b/i
 /** What the main Session is told when it would wait: what it waits for comes to it, and a waiting step holds back the next. */
@@ -306,7 +311,9 @@ export class Sessions {
       const version = this.promptFor(agent, context.signal !== undefined)
       const current = ticket && host.store.tickets.get(ticket.id)
       const composed = host.prompts.compose(version.config, master ? 'orchestrator' : 'worker', current ? host.environment(current) : undefined)
+      // A running idle analysis replaces this turn's delivery and handoff expectations with the read-only dossier (docs/025).
       return `[dsh-superagent prompt revision ${version.revision}]\n${composed}\n${current ? mandateInstructions(current.mandate) : ''}`
+        + (current && analysisRunning(current) ? `\n\n${analysisSection()}` : '')
     }, ...(master ? { complete: true } : {}) }))
     // A recreated skill scope (e.g. after the skills service restarts) starts empty, so reset `binding.skills` before rebinding.
     const skillScope = agent.ctx.inject(['skills'], scope => {
@@ -385,6 +392,13 @@ export class Sessions {
     return [agent.ctx.tools.restrict({ allow }), agent.ctx.tools.guard(execution => {
       const current = store.tickets.get(ticketId)
       if (!current || !liveTicket(current)) return 'Ticket ended; new work needs a new authorized ticket'
+      // An idle analysis is read-only (docs/025): no file tool, no plan, no delivery, and no shell command that would change
+      // the workspace. This is the teeth behind the analysis brief, which also tells the model why.
+      if (analysisRunning(current)) {
+        if (execution && ANALYSIS_BLOCKED.includes(execution.name)) return ANALYSIS_CLOSED
+        const command = execution && SHELL_TOOLS.includes(execution.name) ? String((execution.arguments as { command?: unknown } | undefined)?.command ?? '') : ''
+        return command && WRITE_COMMAND.test(command) ? `${ANALYSIS_CLOSED}; this command would change the workspace` : undefined
+      }
       // The P1 gate is closed until a person approves the plan: no file tool, and no shell command that would change the workspace.
       if (ticketPhase(current) !== 'plan') return undefined
       if (execution && PLAN_BLOCKED.includes(execution.name)) return PLAN_CLOSED

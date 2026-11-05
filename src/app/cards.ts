@@ -3,6 +3,7 @@ import { latestReport, reasonText, threadKey, ticketKind, ticketPhase, ticketSta
   type Trigger, type TriggerDisposition } from '../core/index.ts'
 import { pullOf } from '../sources/github-pull.ts'
 import { batchLine, inputResource } from '../executor/dsh.ts'
+import { analysisView } from './analysis.ts'
 
 /** Collapses whitespace and truncates text for display previews while keeping code, angle brackets, and links intact for model readers. */
 export function preview(text: string): string { return text.replace(/\s+/g, ' ').slice(0, 160) }
@@ -27,6 +28,7 @@ function cardState(ticket: Ticket): TicketCardState {
 export function ticketCard(ticket: Ticket) {
   const ended = ticket.ended && { at: ticket.ended.at, by: ticket.ended.by, reason: ticket.ended.reason ?? ticket.ended.outcome }
   const { attention } = ticket
+  const analysis = analysisView(ticket)
   const gate = ticket.plan?.waiting && !ticket.plan.approved ? { at: ticket.plan.at, preview: preview(ticket.plan.text), ...ticket.plan.deadline ? { deadline: ticket.plan.deadline } : {},
     ...ticket.plan.question ? { question: ticket.plan.question } : {}, ...ticket.plan.options?.length ? { options: ticket.plan.options } : {} } : undefined
   return { ticket_id: ticket.id, title: ticket.title, state: cardState(ticket), phase: ticketPhase(ticket), strength: ticket.mandate.strength,
@@ -38,6 +40,8 @@ export function ticketCard(ticket: Ticket) {
       ...ticket.priority.note ? { note: ticket.priority.note } : {} } } : {}),
     ...(ticket.priorityAsk?.state === 'pending' ? { priority_ask: { deadline: ticket.priorityAsk.deadline } } : {}),
     ...(ticket.idle ? { idle: { since: ticket.idle.enteredAt, ...ticket.idle.launchedIn ? { launched_in: ticket.idle.launchedIn } : {} } } : {}),
+    // The idle analysis and its verdict, so a reader knows what the machine found before a person spent attention on it.
+    ...(analysis ? { analysis } : {}),
     ...(pullOf(ticket) ? { pr_number: pullOf(ticket) } : {}), ...(ended ? { ended } : {}), ...(gate ? { plan: gate } : {}),
     ...(attention ? { attention: { question: attention.question, ...attention.options?.length ? { options: attention.options } : {},
       ...attention.triggerId ? { trigger_id: attention.triggerId } : {} } } : {}),

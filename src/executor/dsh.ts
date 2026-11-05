@@ -4,7 +4,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { mkdir, rmdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { key, latestAssignment, latestReport, liveTicket, reprojectable, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
+import { key, analysisBrief, analysisOf, latestAssignment, latestReport, liveTicket, reprojectable, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
 import type { AssessmentOutcome, Assignment, Backend, EngineForExecutor, Execution, Executor, IdleLevel, Mandate, PolicyEffect, Ticket, TicketInput,
   TicketRepair, Trigger } from '../core/index.ts'
 import type { Machine } from '../deployment.ts'
@@ -19,6 +19,7 @@ import type { Sessions } from '../app/sessions.ts'
 import { MissingWorkerTools } from '../app/worker-tools.ts'
 import { WorktreeNameSchema } from '../app/assessment.ts'
 import { resultRelay } from '../app/notices.ts'
+import { relatedForAnalysis } from '../app/analysis.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { cancelled, collectJob, killJobs, runningJobs, stopBackground, stopSubagents, until, untilQuiet } from './background.ts'
 
@@ -99,7 +100,7 @@ export interface ExecutorHost {
   readonly context: Context
   /** Where the Executor reports what happened to Assignments and Inputs. */
   readonly engine: Pick<EngineForExecutor, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed' | 'report'
-    | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'idleLaunch'>
+    | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'idleLaunch' | 'startIdleAnalysis'>
   readonly store: Pick<Store, 'tickets' | 'triggers' | 'set' | 'settings' | 'atomic' | 'afterCommit'>
   /** The GitHub repository this deployment watches, one of the configured delivery targets; empty without a GitHub Source. */
   readonly repository: string
@@ -123,7 +124,7 @@ export interface ExecutorHost {
    * Whether a `P2`/`P3` ticket may start now under the idle five-signal judgement; absent starts every ticket at once.
    * A refusal holds the launch (it retries later) instead of failing the assignment.
    */
-  idleAdmission?(ticket: Ticket, load: { running: number; max: number }): { admitted: boolean; level?: IdleLevel; reason: string }
+  idleAdmission?(ticket: Ticket, load: { running: number; max: number }): { admitted: boolean; level?: IdleLevel; analysis?: boolean; reason: string }
 }
 /** Looks up a ticket's origin trigger in Store. */
 export const sourceTrigger = (host: { store: Pick<Store, 'triggers'> }, ticket: Ticket): Trigger | undefined =>
@@ -448,6 +449,9 @@ export class DshExecutor implements Executor {
     try {
       // Record which depth let the ticket start, so the idle pool's daily budget and the board can say why it ran now.
       if (admission?.level) this.host.engine.idleLaunch(ticketId, admission.level)
+      // The pool's first launch is a read-only analysis (docs/025): record it before the worker starts, so the tool guard and
+      // the launch message both read it, and the ticket cannot also carry implementation instructions into the same turn.
+      if (admission?.analysis && admission.level) this.host.engine.startIdleAnalysis(ticketId, assignment.id, admission.level)
       await this.launch(ticket, assignment); this.transient.delete(`launch:${assignmentId}`)
     }
     catch (error) {
@@ -701,7 +705,15 @@ export class DshExecutor implements Executor {
     if (!current()) return
     const previous = ticket.assignments.at(-2)?.endedReason
     const retried = previous === 'retried' ? { note: RETRIED } : previous === 'recovered' ? { note: RECOVERED } : {}
-    const assignmentText = (ticket.execution?.assignment ?? '') + deliveryInstructions(this.backendOf(ticket))
+    // An idle-window launch is the ticket's read-only analysis (docs/025): its first message carries the analysis brief and
+    // the likely duplicates instead of the delivery instructions, so the worker never reads this turn as "open a PR or CL".
+    const stored = this.host.store.tickets.get(ticket.id)
+    const currentAnalysis = stored ? analysisOf(stored) : undefined
+    const analysis = currentAnalysis?.assignmentId === assignment.id ? currentAnalysis : undefined
+    const assignmentText = analysis
+      ? analysisBrief({ ticketId: ticket.id, title: ticket.title, level: analysis.level, assignment: ticket.execution?.assignment ?? '',
+        related: relatedForAnalysis(this.host.store, stored!, this.host.store.settings().executor.idle.analysis.related) })
+      : (ticket.execution?.assignment ?? '') + deliveryInstructions(this.backendOf(ticket))
     const { text: brief, chars, read } = capped(assignmentText, ASSIGNMENT_CHARS, `ticket/${ticket.id}/assignment`)
     const card = told || !source ? undefined : await this.triggerCard(ticket, source.id)
     if (!current()) return

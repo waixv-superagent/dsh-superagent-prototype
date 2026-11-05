@@ -67,6 +67,8 @@ export const USER_ERRORS = {
   phaseOutOfOrder: ['refused', 'The ticket is in the {from} phase; a worker advances one phase at a time, and implement only once a person approved the plan'],
   notDeliverable: ['refused', 'A changelist, a Swarm review and verification belong to the deliver phase: pass its checks, then call orchestrator_phase with deliver'],
   notImplement: ['refused', 'The ticket is still in its plan phase: a person must approve the plan before this tool changes anything'],
+  notAnalysing: ['refused', 'Only the ticket\'s running idle analysis may record a verdict'],
+  analysisReadOnly: ['refused', 'This assignment is the ticket\'s read-only idle analysis: it cannot deliver a changelist, review or PR; report the dossier and its verdict instead'],
   unknownReproCase: ['missing', 'Unknown reproduction case {case}'],
   unknownReproRun: ['missing', 'Unknown reproduction run {run}'],
   reproCaseInvalid: ['refused', 'The reproduction case {case} cannot run: {reason}'],

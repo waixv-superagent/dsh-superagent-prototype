@@ -277,6 +277,13 @@ export class Engine {
   /** The idle depth at which a `P2`/`P3` ticket's work started, kept as the idle pool's trace and the daily budget's count. */
   idleLaunch(ticketId: string, level: IdleLevel): void { this.repo.atomic(() => { this.tickets.noteIdleLaunch(ticketId, level) }) }
   /**
+   * The Executor admitted a pooled ticket for its read-only idle analysis (docs/025): from here until its report its tools
+   * are read-only and its launch carries the analysis brief; the ticket itself runs no implementation.
+   */
+  startIdleAnalysis(ticketId: string, assignmentId: string, level: IdleLevel): void {
+    this.repo.atomic(() => { this.tickets.beginIdleAnalysis(ticketId, assignmentId, level) })
+  }
+  /**
    * A person's click on a question card: the answer becomes a message to the worker and clears the question.
    * @throws UserError when the ticket is unknown or ended, the question is gone, or the option is not offered.
    */
@@ -431,7 +438,7 @@ export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
   | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'reply'
-  | 'submitPlan' | 'advancePhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch'>
+  | 'submitPlan' | 'advancePhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch' | 'startIdleAnalysis'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>
 /** What the host's watchdog tells the Engine: it recovers a ticket its worker stopped on a passing failure. */

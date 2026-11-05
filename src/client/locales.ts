@@ -1365,6 +1365,8 @@ const TEXT = {
   'userError.phaseOutOfOrder': ['工单当前在 {from} 阶段；worker 一次只能前进一个阶段，implement 只能由人批准方案后进入。', USER_ERRORS.phaseOutOfOrder[1]],
   'userError.notDeliverable': ['changelist、Swarm review 和验证结论属于 deliver 阶段：先跑完验证，再用 orchestrator_phase 进入 deliver。', USER_ERRORS.notDeliverable[1]],
   'userError.notImplement': ['工单还在方案阶段：人批准方案后才能用这个工具改动任何东西。', USER_ERRORS.notImplement[1]],
+  'userError.notAnalysing': ['只有工单正在运行的闲时分析才能写下结论。', USER_ERRORS.notAnalysing[1]],
+  'userError.analysisReadOnly': ['这是工单的只读闲时分析，不能交付 changelist、review 或 PR：请写结论并报告分析报告。', USER_ERRORS.analysisReadOnly[1]],
   'userError.unknownReproCase': ['没有这个复现用例：{case}', USER_ERRORS.unknownReproCase[1]],
   'userError.unknownReproRun': ['没有这次运行：{run}', USER_ERRORS.unknownReproRun[1]],
   'userError.reproCaseInvalid': ['用例 {case} 不能运行：{reason}', USER_ERRORS.reproCaseInvalid[1]],
