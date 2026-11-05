@@ -4,8 +4,8 @@ import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 import { PageBoundary } from '../src/client/boundary.tsx'
 import { zh } from '../src/client/locales.ts'
-import { historyEntry, type Route } from '../src/client/route.ts'
-import { translator, usePanel, mount, remount, settle, click, tab, text } from './fixtures/panel.tsx'
+import { backRoute, historyEntry, parentRoute, type Route } from '../src/client/route.ts'
+import { translator, usePanel, mount, remount, settle, click, tab, text, at } from './fixtures/panel.tsx'
 import { createRoot } from 'react-dom/client'
 
 usePanel()
@@ -30,6 +30,31 @@ async function side(button: 3 | 4) {
     target.dispatchEvent(up)
     // The browser's own side-button handling is cancelled, so the panel's history step is the only one.
     expect([down.defaultPrevented, up.defaultPrevented]).toEqual([true, true])
+    await landed
+  })
+  await settle()
+}
+/** A Ticket id a `?ticket=` deep link accepts: 32 lowercase hex digits, as the host writes them. */
+const LINKED = 'a'.repeat(32)
+/** The fake server answers Ticket t1 under the deep link's id, as the host would for that Ticket. */
+function linkTicket(id: string) {
+  const real = globalThis.fetch
+  vi.stubGlobal('fetch', vi.fn((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    return real(url.split(id).join('t1'), init)
+  }))
+}
+/** Open the panel the way a Feishu bot message does: the URL names a Ticket and the entry has no panel history behind it. */
+async function mountLinked() {
+  linkTicket(LINKED)
+  window.history.replaceState(null, '', `/?ticket=${LINKED}`)
+  await mount(zh, null)
+}
+/** Press the page's Back button and wait for the browser history step it takes. */
+async function pageBack() {
+  await act(async () => {
+    const landed = new Promise(resolve => window.addEventListener('popstate', resolve, { once: true }))
+    document.querySelector<HTMLButtonElement>('.dt-page-head button')!.click()
     await landed
   })
   await settle()
@@ -163,4 +188,73 @@ it('keeps the header and tabs usable when one page crashes', async () => {
   expect(document.querySelector('.dt-crash')).toBeNull()
   expect(text()).not.toContain(zh.pageCrashed)
   error.mockRestore()
+})
+
+it('writes the parent menu behind a Ticket the panel opens without history', async () => {
+  await mountLinked()
+  expect(title()).toBe('修复回归')
+  expect(route()).toEqual({ page: 'execution', id: LINKED })
+  // The page Back button names the list the Ticket belongs to, and that list is the entry just behind the page: the
+  // browser's Back/Forward — and so the macOS trackpad's two-finger swipe — steps between the two inside the panel.
+  expect(document.querySelector('.dt-page-head button')?.textContent).toBe(zh['tab.execution'])
+  await step('back')
+  expect(tab(zh['tab.execution']).getAttribute('aria-selected')).toBe('true')
+  expect(route()).toEqual({ page: 'execution' })
+  await step('forward')
+  expect(title()).toBe('修复回归')
+})
+
+it('sends the page Back button up to the parent menu when the panel has no history', async () => {
+  await mountLinked()
+  const entries = window.history.length
+  await pageBack()
+  // Back moved within the existing entries instead of jumping home or adding one.
+  expect(window.history.length).toBe(entries)
+  expect(tab(zh['tab.execution']).getAttribute('aria-selected')).toBe('true')
+  expect(title()).toBeUndefined()
+})
+
+it('steps to the parent menu from a deep-linked Ticket with the mouse Back button', async () => {
+  await mountLinked()
+  await side(3)
+  expect(tab(zh['tab.execution']).getAttribute('aria-selected')).toBe('true')
+})
+
+it('sends a Thread opened without history back to the Trigger list', async () => {
+  await mount(zh, { page: 'trigger', id: 'feishu:oc_1:om_root' })
+  expect(title()).toBe('这个文案好奇怪')
+  expect(document.querySelector('.dt-page-head button')?.textContent).toBe(zh['tab.trigger'])
+  await pageBack()
+  expect(tab(zh['tab.trigger']).getAttribute('aria-selected')).toBe('true')
+})
+
+it('continues at the entry a reload shows, not at the deep link the tab was opened with', async () => {
+  await mountLinked()
+  await step('back')
+  expect(route()).toEqual({ page: 'execution' })
+  // A reload keeps the entry the browser is on; the URL still names the Ticket the tab opened with, which must not reopen
+  // a page the person already left.
+  await remount(zh)
+  expect(route()).toEqual({ page: 'execution' })
+  expect(tab(zh['tab.execution']).getAttribute('aria-selected')).toBe('true')
+})
+
+it('opens a Ticket a Session asks for one step on from the page the panel showed', async () => {
+  await mount()
+  // A Session's 工单 link writes the remembered route, then selects the panel (which remounts it).
+  at({ page: 'execution', id: 't1' })
+  await remount(zh)
+  expect(title()).toBe('修复回归')
+  expect(document.querySelector('.dt-page-head button')?.textContent).toBe(zh['tab.editor'])
+  await step('back')
+  expect(document.querySelector('.dt-board')).not.toBeNull()
+})
+
+it('takes the parent menu as the fallback Back target of a record, and none above a tab', () => {
+  expect(backRoute({ route: { page: 'execution', id: 't1' }, stack: [] })).toEqual({ page: 'execution' })
+  expect(backRoute({ route: { page: 'trigger', id: 'feishu:oc_1:om_root' }, stack: [] })).toEqual({ page: 'trigger' })
+  expect(backRoute({ route: { page: 'execution', id: 't1' }, stack: [{ page: 'editor' }] })).toEqual({ page: 'editor' })
+  expect(parentRoute({ page: 'execution' })).toBeUndefined()
+  expect(parentRoute({ page: 'editor', query: { view: 'graph' } })).toBeUndefined()
+  expect(backRoute({ route: { page: 'settings', query: { group: 'source' } }, stack: [] })).toEqual({ page: 'editor' })
 })

@@ -1,0 +1,10 @@
+{
+  "rev": "after",
+  "step": "after-back",
+  "url": "http://localhost:3000/?ticket=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "title": null,
+  "back": null,
+  "board": false,
+  "selectedTab": "执行",
+  "historyLength": 2
+}
