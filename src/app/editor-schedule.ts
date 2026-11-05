@@ -86,7 +86,7 @@ export interface EditorJob {
 }
 
 export type EditorEventKind = 'queued' | 'granted' | 'released' | 'expired' | 'ended' | 'preempted' | 'claimed' | 'yielded'
-  | 'cancelled' | 'front' | 'job' | 'bypass'
+  | 'cancelled' | 'front' | 'job' | 'bypass' | 'reclaimed'
 export interface EditorEvent {
   at: string
   kind: EditorEventKind
@@ -182,6 +182,26 @@ export function recordBypass(input: EditorSchedule, value: { ticketId: string; d
   return schedule
 }
 
+/**
+ * Ends a lease the gatekeeper reclaimed after the holder's heartbeat stopped (docs/021). The lease's processes are
+ * stopped by the caller; this records the host's decision with the ending the reason implies and frees the slot so the
+ * next waiter is granted. When another path already ended the lease (a release, or `advance` expiring it first), the
+ * cleanup is still recorded, so the overview keeps why a process was closed.
+ */
+export function reclaim(input: EditorSchedule, leaseId: string, reason: string, context: ScheduleContext,
+  ending: 'expired' | 'ended' | 'released' = 'expired'): { schedule: EditorSchedule; lease?: EditorLease } {
+  const schedule = clone(input)
+  const at = iso(context.now)
+  const detail = reason.trim().slice(0, 300)
+  const lease = schedule.lease?.id === leaseId && schedule.lease.holder.kind !== 'person' ? schedule.lease : undefined
+  if (lease) {
+    endLease(schedule, ending, 'host', at, detail)
+    return { schedule, lease }
+  }
+  event(schedule, { at, kind: 'reclaimed', by: 'host', ...detail ? { detail } : {} })
+  return { schedule }
+}
+
 function grant(schedule: EditorSchedule, request: EditorRequest, context: ScheduleContext): EditorLease {
   const at = iso(context.now)
   schedule.queue = schedule.queue.filter(item => item.id !== request.id)
@@ -214,7 +234,7 @@ function grant(schedule: EditorSchedule, request: EditorRequest, context: Schedu
   return lease
 }
 
-function endLease(schedule: EditorSchedule, kind: 'released' | 'expired' | 'ended', by: EditorEvent['by'], at: string, detail?: string): void {
+function endLease(schedule: EditorSchedule, kind: 'released' | 'expired' | 'ended' | 'reclaimed', by: EditorEvent['by'], at: string, detail?: string): void {
   const lease = schedule.lease
   if (!lease) return
   schedule.lease = null

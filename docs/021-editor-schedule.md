@@ -41,7 +41,8 @@ Workers get `orchestrator_editor` (`src/app/tools/executor.ts`):
 | --- | --- |
 | `acquire purpose note min wait` | Granted at once when free; otherwise queued with a position. It waits up to `wait_seconds`, and a later grant arrives as a message. |
 | `heartbeat min note` | Keeps the lease alive through a long step. |
-| `release note` | Ends the lease or leaves the queue. |
+| `release note` | Ends the lease or leaves the queue. The gatekeeper closes the editor, commandlet or build processes the lease started. |
+| `close` | Stops the editor, commandlet or build this Ticket's lease started and gives the lease back; the gatekeeper refuses it when the Ticket does not hold the editor. |
 | `run purpose filter wait` | Queues a host job. A build waiting in the same workspace absorbs this Ticket instead of starting a second compile, and the worker gets that build's result. A Ticket that holds the editor hands its lease to its own job instead of waiting behind itself. The result, including a log tail, comes back when the job ends within the wait or as a message later. |
 | `status` | Shows the holder, the queue, this Ticket's jobs and ue-mcp's reading. |
 
@@ -54,6 +55,17 @@ The worker prompt is the rule; `EditorGuard` (`src/app/editor-guard.ts`) makes i
 - **A launch** (`& "…\UnrealEditor.exe"`, `Start-Process`, `cmd /c`, and the headless or `UnrealBuildTool` equivalents) requires the matching lease at that moment: `use` or `restart` for the interactive editor, `use`, `test` or `restart` for a headless commandlet (an automation run's natural lease is `test`), and `build` for a compile. Without it, the guard watches the process table for a few seconds, matches the process by the executable path the command named and a start time not older than the call, and stops that process tree. The editor has not finished loading at that point, so nothing is lost; the Ticket gets a steering message and the schedule records a `bypass` event visible on the overview.
 - **A stop** (`taskkill /PID`, `Stop-Process -Id`, or an image-name kill) aimed at an editor the Ticket did not start is recorded and reported. Only a pid the last probe saw as an editor process counts, so a worker stopping its own job is not an editor stop. The process is already gone by the time the event arrives, so the guard cannot undo it; the rule and the report are what keep it from happening again.
 - **Only evidence counts.** A command that merely names an editor path (`Get-Item`, `Test-Path`) starts nothing and is not a violation, because the guard acts only on a new process that matches. A person's Rider or Explorer launch, an MCP tool call and a subagent Session are outside the guard.
+
+## Gatekeeper
+
+The scheduler decides who may use the editor and the guard reads a worker's shell calls; neither owns the editor's operating-system processes. The gatekeeper (`src/app/editor-gatekeeper.ts`) does. It is a resident loop of its own (5 s, independent of any worker call), keeps the processes each lease started in `KV.editor.gatekeeper`, and runs even when nobody touches the editor.
+
+- **Ownership.** An allowed launch the guard matched to a worker's shell command is handed to the gatekeeper with its exact pid, executable and start time. What the guard cannot see — a batch script that starts the build inside itself, an MCP tool, a subagent — is read from the process table for the current lease: one new interactive editor for `use`/`restart`, the headless commandlet for `test`, and UnrealBuildTool/ShaderCompileWorker for `build`. A `use`/`restart` lease also adopts the interactive editors the scheduler already attributes to an agent (`agentPids`), such as one a restart job opened or a previous lease left open, so they close with the lease too.
+- **Heartbeat reclamation.** When a lease's `expiresAt` has passed, its Ticket ended, or it was released, the gatekeeper stops the processes the lease owns, records the reclamation on the schedule (the lease's expiry, ended or release event, or a `reclaimed` cleanup event when the lease was already gone), tells a live holder whose heartbeat lapsed, and lets the scheduler grant the next waiter. It only stops a pid the probe still reports as the same process (same start time); a person's editor, a yielded one and a recycled pid are left alone.
+- **Start and stop.** A launch needs the matching lease; the guard stops one without it. `orchestrator_editor op=close` is the gated way for a holder to stop what its lease started before giving the editor back, and the gatekeeper refuses it when the caller does not hold the lease. A person's preempt or claim still drains the holder first; the gatekeeper closes the lapsed holder's processes after the grace. A host job's lease still ends with its process, which the scheduler already stops; the gatekeeper owns the processes a worker's own lease starts.
+- **Collection stays scripts.** The process probe, the ue-mcp bridge files and the job logs stay read-only inputs. The gatekeeper never reads a log and never calls the editor's game thread.
+
+The gatekeeper's health entry (`editor-gatekeeper`) says how many processes belong to a lease and how many were reclaimed, so a stuck slot is visible on the overview instead of waiting for a person to notice.
 
 ## Host-run jobs and batching
 
@@ -93,8 +105,9 @@ Working rows show "占用中 · 跑测试" or "排第 2 · 编译". The timeline
 
 ## Limits
 
-- **One shell call at a time is covered.** The guard reads worker shell calls only. An MCP tool (`ue-mcp`), a subagent Session, a batch script that starts the editor inside itself, and an `Invoke-Item` launch are not seen, so they can still bypass the lease. The prompt still forbids them.
-- **A process is known by its path and start time.** The guard stops the process whose path the command named and which started at or after the call; it cannot read the caller's intent. A person opening that same executable in the few seconds a bypassing launch is watched would match too, which is why the watch is short and the path must be the one the command named.
+- **A launch is seen as a shell call or as a new process.** The guard reads worker shell calls; the gatekeeper reads the process table for the current lease, so a batch script, an MCP tool or a subagent that starts the editor under a lease is owned too. A launch outside every lease that leaves no process the probe recognizes still escapes both, and so does a person's own editor, which is never adopted. A fresh editor that cannot be told apart from a person's (two new editors under one lease) is not adopted rather than risk stopping a person's; an editor already listed in `agentPids` is an agent's by the scheduler's own rule and is adopted with the lease.
+- **A process is known by its path and start time.** The guard matches the process whose path the command named and which started at or after the call; the gatekeeper refuses a pid whose start time changed. A person opening that same executable would still be a person's editor, which is why the guards leave an ambiguous launch alone.
+- **A lapsed lease closes what it started.** Releasing, ending a Ticket or letting the heartbeat lapse ends the lease, and the gatekeeper stops the editor, commandlet or build tools it owns. A worker that wants to keep the editor open must keep the lease and heartbeat; nothing is left to the next holder.
 - **One editor slot.** The schedule has a single lease. Several workspaces would each need their own slot, which `editor_slot` in 014 anticipated.
 - **No time windows.** A person can claim the editor now but cannot reserve a window ahead of time.
 - **Command quality.** Batching assumes the configured build compiles the whole workspace. A per-Ticket build that only compiles one module should not be configured as `build`.

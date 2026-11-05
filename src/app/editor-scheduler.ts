@@ -11,9 +11,9 @@ import { randomUUID } from 'node:crypto'
 import { KV } from '../kv.ts'
 import type { EditorView } from './editor.ts'
 import { readEngineState, type EditorEngineState } from './editor-mcp.ts'
-import { acquire, advance, emptySchedule, heartbeat, personAct, personBlock, recordBypass, release, standing, submitJob,
-  updateJob, type AcquireRequest, type AcquireResult, type EditorJob, type EditorJobKind, type EditorLease, type EditorSchedule,
-  type PersonAction, type ScheduleContext } from './editor-schedule.ts'
+import { acquire, advance, emptySchedule, heartbeat, personAct, personBlock, reclaim, recordBypass, release, standing,
+  submitJob, updateJob, type AcquireRequest, type AcquireResult, type EditorJob, type EditorJobKind, type EditorLease,
+  type EditorSchedule, type PersonAction, type ScheduleContext } from './editor-schedule.ts'
 
 /** The KV record the schedule lives in, so leases and waits survive a host restart. */
 const EDITOR_SCHEDULE = KV.editor.schedule
@@ -164,6 +164,14 @@ export class EditorScheduler {
   /** Records a worker's attempt to use or stop the editor outside its lease; the lease guard calls this (docs/021). */
   noteBypass(ticketId: string, detail: string): void {
     this.change((schedule, context) => ({ schedule: recordBypass(schedule, { ticketId, detail }, context) }))
+  }
+  /**
+   * Ends a lease the gatekeeper reclaimed after its processes were stopped (docs/021), so the slot frees up and the
+   * next waiter is granted. The ending kind keeps the overview's lease span closing on the event it already understands;
+   * a lease another path already ended keeps a cleanup record on the timeline.
+   */
+  reclaim(leaseId: string, reason: string, ending: 'expired' | 'ended' | 'released' = 'expired'): void {
+    this.change((schedule, context) => ({ schedule: reclaim(schedule, leaseId, reason, context, ending).schedule }))
   }
 
   acquire(request: AcquireRequest): AcquireResult { return this.change((schedule, context) => acquire(schedule, request, context)).result }

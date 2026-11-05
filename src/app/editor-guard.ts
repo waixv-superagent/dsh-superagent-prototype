@@ -149,6 +149,8 @@ export interface EditorGuardHost {
   processes(): Promise<readonly EditorProcess[]>
   /** Stops one process and what it started. */
   kill(pid: number): void
+  /** Hands the process an allowed launch started to the gatekeeper, which owns it for the lease's lifetime (docs/021). */
+  adopt(ticketId: string, pid: number, kind: 'editor' | 'commandlet' | 'build', started: string | null): void
   /** Delivers one notice to the Ticket's worker, at most once per id. */
   notify(ticketId: string, id: string, text: string): Promise<void>
   /** Records the attempt on the schedule's event list. */
@@ -186,7 +188,10 @@ export class EditorGuard {
     const parsed = editorCommand(command)
     const standing = this.host.standing(ticketId)
     const purpose = standing.state === 'holding' ? standing.purpose : null
-    for (const launch of parsed.launches) if (!launchAllowed(launch.kind, purpose)) void this.watch(ticketId, callId, launch)
+    for (const launch of parsed.launches) {
+      if (launchAllowed(launch.kind, purpose)) void this.adopt(ticketId, callId, launch)
+      else void this.watch(ticketId, callId, launch)
+    }
     if (parsed.stop) this.reportStop(ticketId, callId, parsed.stop)
   }
 
@@ -196,6 +201,31 @@ export class EditorGuard {
 
   private delay(ms: number): Promise<void> {
     return this.host.delay ? this.host.delay(ms) : new Promise(resolve => setTimeout(resolve, ms))
+  }
+
+  /** Waits for the process an allowed launch creates and hands it to the gatekeeper, which closes it when the lease lapses. */
+  private async adopt(ticketId: string, callId: string, launch: EditorLaunch): Promise<void> {
+    const key = `${ticketId}:${callId}:adopt:${launch.kind}`
+    if (this.watching.has(key)) return
+    this.watching.add(key)
+    const at = this.now()
+    try {
+      let waited = 0
+      for (const attempt of ATTEMPTS_MS) {
+        await this.delay(attempt - waited)
+        waited = attempt
+        if (this.disposed) return
+        const found = matchLaunch(await this.host.processes(), launch, at)
+        if (!found) continue
+        this.host.adopt(ticketId, found.pid, launch.kind === 'use' ? 'editor' : launch.kind === 'headless' ? 'commandlet' : 'build',
+          found.started)
+        return
+      }
+    } catch (error) {
+      this.host.warn(`editor lease adoption failed: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      this.watching.delete(key)
+    }
   }
 
   /** Waits for the process a disallowed launch creates, stops it, and tells the Ticket what the lease is for. */
