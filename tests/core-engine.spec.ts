@@ -306,9 +306,10 @@ describe('subscription fan-out', () => {
     const waiting = h.repo.tickets.get(id)!
     expect(waiting.ended).toBeUndefined()
     expect(waiting.verification).toEqual({ at: expect.any(String), state: 'pending' })
-    // The host follows the pipeline from delivery on; no person and no follow-up Assignment start it.
+    // The host follows the pipeline from delivery on; no person and no follow-up Assignment start it. The mandatory local
+    // check is the person's next gate, so the Ticket reports as verify while the pipeline runs in parallel.
     expect(waiting.pipeline).toMatchObject({ state: 'running' })
-    expect(ticketStage(waiting)).toEqual({ stage: 'pipeline', action: 'running' })
+    expect(ticketStage(waiting)).toEqual({ stage: 'person', action: 'verify' })
     expect(waiting.assignments).toHaveLength(1)
 
     // Returning it starts a fresh Assignment whose first Input is the person's note; the delivery evidence stays.
@@ -367,7 +368,8 @@ describe('subscription fan-out', () => {
     h.engine.observePipeline(id, { kind: 'review', signature: '12:pass', check: 'Swarm 已通过，待人工审核', url: 'https://swarm/reviews/9' })
     const green = h.repo.tickets.get(id)!
     expect(green.pipeline).toMatchObject({ state: 'blocked', manual: true, check: 'Swarm 已通过，待人工审核' })
-    expect(ticketStage(green)).toEqual({ stage: 'pipeline', action: 'blocked' })
+    // The pending local check still outranks the pipeline gate: the person verifies before the review/submit gate reads.
+    expect(ticketStage(green)).toEqual({ stage: 'person', action: 'verify' })
     const asked = h.outbox.filter(message => message.text.includes('待人工审核'))
     expect(asked).toHaveLength(1)
     expect(asked[0]?.text).toContain('[Swarm - 9](https://swarm/reviews/9)')
@@ -691,7 +693,8 @@ describe('a merged pipeline after a resume', () => {
     expect(redelivered).not.toHaveProperty('ended')
     expect(redelivered.pipeline).toMatchObject({ state: 'running' })
     expect(redelivered.verification).toMatchObject({ state: 'pending' })
-    expect(ticketStage(redelivered)).toEqual({ stage: 'pipeline', action: 'running' })
+    // The new change reopens the local check, which is the stage until the person passes or returns it.
+    expect(ticketStage(redelivered)).toEqual({ stage: 'person', action: 'verify' })
   })
 })
 describe('follow-ups', () => {

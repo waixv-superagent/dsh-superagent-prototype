@@ -204,6 +204,24 @@ it('names who verified delivered work, and never reads "completed" as verified b
   store.tickets.save({ ...store.tickets.get('t1')!, execution: { name: 'w', directory: '/w', assignment: '' } })
   expect(ticketSummary(store.tickets.get('t1')!)).toMatchObject({ provenance: 'auto', actions: { verify: false } })
 })
+it('classifies delivered work awaiting the local check as verification, not as its open question or pipeline', () => {
+  const host = views()
+  live('t1')
+  // The reported shape: a worker delivered a changelist, the host follows the pipeline, and a question is open too. The
+  // mandatory local check is the gate a person must act on, so it is the Ticket's stage and the board's verification lane.
+  store.tickets.save({ ...store.tickets.get('t1')!, title: 'delivered', execution: { name: 'w', directory: '/w', assignment: '',
+    changelist: 42, verification: 'Automation 19/19 passed' }, verification: { at, state: 'pending' },
+  attention: { id: 'q', question: 'which fix should go first?' },
+  pipeline: { state: 'blocked', at, manual: true, check: 'Swarm 已通过，待人工审核' } })
+  const row = ticketSummary(store.tickets.get('t1')!)
+  expect(row).toMatchObject({ stage: 'person', action: 'verify', attention: { question: 'which fix should go first?' },
+    pipeline: { state: 'blocked' }, verification: { state: 'pending' } })
+  expect(ticketDetail(host, 't1')).toMatchObject({ stage: 'person', action: 'verify' })
+  const page = overview(host, {}, 'v1', load)
+  expect(page.verification.map(ticket => ticket.title)).toEqual(['delivered'])
+  expect(page.person).toEqual([])
+  expect(page.pipeline).toEqual([])
+})
 it('does not offer a merged pipeline gate again after a person\'s message resumed the ticket', () => {
   const host = views()
   live('t1')

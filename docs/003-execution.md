@@ -9,9 +9,9 @@ Each open Ticket has one stage, determined by what it is waiting for. Read the t
 | Stage | Condition | Panel label |
 | --- | --- | --- |
 | person / delivery | Delivering an Input to the Executor Session failed; it is retried after 2 seconds, then after a delay that doubles up to a minute, and a success, a new Assignment or the Ticket's end clears it | Input undelivered |
+| person / verify | Delivered work, a changelist or a review, still waits for the person's local check. The host follows the pipeline in parallel from delivery, but the local check is a mandatory gate and the first gate the Ticket page shows, so it comes before a question and the pipeline stage | Awaiting local verification |
 | person / answer | It has an Attention | Awaiting answer |
-| pipeline / running, blocked | Delivered work is followed through its review and pipeline from the moment the worker reports it, including a change delivered into a pull request the Ticket opened, which a person approves and merges there; blocked covers a failing check the host cannot clear, an approval waiting for the submit, and a green review waiting for a person, and is pinned above running work | Pipeline · Blocked |
-| person / verify | Delivered work, a changelist or a review, still waits for the person's local check, recorded in parallel with the pipeline | Awaiting local verification |
+| pipeline / running, blocked | Delivered work is followed through its review and pipeline from the moment the worker reports it, including a change delivered into a pull request the Ticket opened, which a person approves and merges there; it reads as this stage once the local check has passed. blocked covers a failing check the host cannot clear, an approval waiting for the submit, and a green review waiting for a person, and is pinned above running work | Pipeline · Blocked |
 | person / review | The latest Report is `ready`, no pull request the Ticket opened is still open, and no Input reached its worker after the Report | Awaiting review |
 | person / blocked, failed | The latest Report is `blocked` or `failed`, and no person's message reached the Ticket since | Blocked · Failed |
 | working / queued | No Assignment, or a pending one | Queued |
