@@ -2,6 +2,7 @@
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { TicketKind } from '../core/kind.ts'
 import type { PlanDecision } from '../core/plan.ts'
+import type { PriorityLevel } from '../core/priority.ts'
 import type { ActivityView } from './activity.ts'
 import type { PromptConfig, Prompts } from './prompts.ts'
 import type { PromptsView, StateView, TicketPageView } from './http.ts'
@@ -69,6 +70,8 @@ export interface Api {
   'POST tickets/:id/redispatch': { body: { backend: 'git' | 'p4'; target?: string }; response: { redispatched: true } }
   /** A person answers the waiting P1 plan from the ticket page, with no chat round-trip. */
   'POST tickets/:id/plan': { body: { decision: PlanDecision; note?: string }; response: { decided: true } }
+  /** A person lifts a ticket out of the idle pool into the attention pool; the level defaults to `P1`. */
+  'POST tickets/:id/promote': { body: { level?: PriorityLevel }; response: { level: PriorityLevel } }
   /** A person answers the ticket's open question from its page: one of its choices, or a written answer, and the worker continues. */
   'POST tickets/:id/answer': { body: { attentionId: string; option?: string; text?: string }; response: { answered: true } }
   'POST tickets/:id/stop': { response: { stopped: true } }

@@ -20,7 +20,7 @@ import { inside, readReproCases } from './repro.ts'
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
-import { TICKET_KINDS, UserError, type EngineForPeople, type ReceiveResult, type ThreadRef, type Ticket, type Trigger } from '../core/index.ts'
+import { PRIORITY_LEVELS, TICKET_KINDS, ticketPriority, UserError, type EngineForPeople, type ReceiveResult, type ThreadRef, type Ticket, type Trigger } from '../core/index.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import type { DshExecutor } from '../executor/dsh.ts'
 import type { Health, ThreadDescription } from '../sources/host.ts'
@@ -194,6 +194,8 @@ const SourceBlock = z.templateLiteral(['source:', z.string().regex(/^[a-z][a-z0-
 const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), SourceBlock])
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
 const PlanRequest = z.object({ decision: z.enum(['approve', 'revise', 'stop']), note: z.string().trim().max(2000).optional() })
+/** A person lifts a ticket out of the idle pool; the level defaults to the mainline and is what the ticket becomes. */
+const PromoteRequest = z.object({ level: z.enum(PRIORITY_LEVELS).optional() }).strict()
 /** A person's answer to a ticket's open question: one of the question's choices, or a written answer, never both. */
 const AnswerRequest = z.object({ attentionId: z.string().trim().min(1).max(64), option: z.string().trim().min(1).max(120).optional(),
   text: z.string().trim().min(1).max(4000).optional() }).strict()
@@ -374,6 +376,15 @@ function routes(runtime: HttpHost): Routes {
       const request = PlanRequest.parse(await body(8_192))
       runtime.engine.decidePlan(id, request.decision, request.note ?? '', 'panel')
       return { decided: true }
+    },
+    // A person picks a pooled ticket into the attention pool: it becomes their P1 and starts now when its worker is between
+    // turns, so the board's pool is a scheduling surface rather than only a list.
+    'POST tickets/:id/promote': async ({ params, body }) => {
+      const id = ticket(params.id)
+      const request = PromoteRequest.parse(await body(1_024))
+      const updated = runtime.engine.promoteTicket(id, request.level ?? 'P1', 'panel', 'panel')
+      runtime.requestPass()
+      return { level: ticketPriority(updated) }
     },
     // A person answers the ticket's open question in place: a choice, or a written answer that becomes the worker's input.
     'POST tickets/:id/answer': async ({ params, body }) => {

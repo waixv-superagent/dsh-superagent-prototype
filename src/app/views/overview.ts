@@ -1,5 +1,6 @@
 /** Overview view: active system problems, tickets awaiting human action, executor load, and 24-hour trigger flow. */
-import { completedArchived, reasonText, ticketStage, type Decision, type Thread } from '../../core/index.ts'
+import { completedArchived, reasonText, ticketPriority, ticketStage, waitsForIdle, type Decision, type PriorityLevel, type Thread,
+  type Ticket } from '../../core/index.ts'
 import type { Health } from '../../sources/host.ts'
 import type { SetupProblem } from '../../setup.ts'
 import type { EditorView } from '../editor.ts'
@@ -11,6 +12,14 @@ import { sourceHealth, type HealthMap } from './sources.ts'
 import { ticketRow, type ExecutorLoad } from './tickets.ts'
 import { preview } from './text.ts'
 
+/** Level order of the board: urgent first, then the mainline, then the pool. */
+const LEVEL_RANK: Record<PriorityLevel, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
+/** Machine rows lead with the most important work, then the most recently touched. */
+const byLevel = (left: Ticket, right: Ticket): number =>
+  LEVEL_RANK[ticketPriority(left)] - LEVEL_RANK[ticketPriority(right)] || newestFirst(left, right)
+/** Pool rows lead with the level, then with the work that has waited longest, so nothing starves unseen. */
+const oldestFirst = (left: Ticket, right: Ticket): number =>
+  LEVEL_RANK[ticketPriority(left)] - LEVEL_RANK[ticketPriority(right)] || left.createdAt.localeCompare(right.createdAt)
 /** Threads whose latest decision since `since` is an undismissed `unavailable` eval and that are neither evaluating nor queued. */
 function unjudged(store: Store, since: string): { thread: Thread; decision: Decision }[] {
   const seen = new Set<string>()
@@ -84,7 +93,21 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
     const stage = ticketStage(ticket)
     return stage.stage === 'person' && stage.action === 'verify'
   }), ...awaiting]
-  const working = open.filter(ticket => ticketStage(ticket).stage === 'working')
+  // The board's machine lane is the executor itself: a worker turn running now, or mainline work queued for a slot or the
+  // next turn. Discretionary P2/P3 work between turns is the idle pool, never a running row (docs/019).
+  const pooled = (ticket: Ticket) => waitsForIdle(ticketPriority(ticket))
+  const working = open.filter(ticket => {
+    const stage = ticketStage(ticket)
+    return stage.stage === 'working' && (!pooled(ticket) || stage.action !== 'queued')
+  }).sort(byLevel)
+  const idle = open.filter(ticket => ticketStage(ticket).stage === 'idle' && !pooled(ticket)).sort(byLevel)
+  // Only P2 is shown as work a person may pick up; P3 is 暂存 and stays a count until the person asks for it.
+  const pool = open.filter(ticket => {
+    if (!pooled(ticket)) return false
+    const stage = ticketStage(ticket)
+    return stage.stage === 'idle' || (stage.stage === 'working' && stage.action === 'queued')
+  }).sort(oldestFirst)
+  const parked = pool.filter(ticket => ticketPriority(ticket) === 'P3')
   // Pipeline work is after delivery: blocked tickets first, then the ones still being followed.
   const pipeline = open.filter(ticket => ticketStage(ticket).stage === 'pipeline')
     .sort((left, right) => Number(right.pipeline?.state === 'blocked') - Number(left.pipeline?.state === 'blocked')
@@ -108,10 +131,12 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
     verification: verification.map(ticket => ticketRow(view, ticket)),
     pipeline: pipeline.map(ticket => ticketRow(view, ticket)),
     working: working.map(ticket => ticketRow(view, ticket)),
-    idle: open.filter(ticket => ticketStage(ticket).stage === 'idle').map(ticket => ticketRow(view, ticket)),
+    idle: idle.map(ticket => ticketRow(view, ticket)),
+    pool: pool.filter(ticket => ticketPriority(ticket) === 'P2').map(ticket => ticketRow(view, ticket)),
+    parked: parked.map(ticket => ticketRow(view, ticket)),
     ended: ended.map(ticket => ticketRow(view, ticket)),
     endedStats,
-    executor: { ...load, maxWorkers: settings.executor.maxWorkers, idle: open.filter(ticket => ticketStage(ticket).stage === 'idle').length },
+    executor: { ...load, maxWorkers: settings.executor.maxWorkers, idle: pool.length + idle.length },
     flow: { received, filtered, triggers: received - filtered, judged: judgement.judged, accepted: judgement.accepted,
       evaluating: evaluating.length, dropped: store.read.droppedSince(since) },
     editor: editor ?? null,

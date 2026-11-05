@@ -283,6 +283,24 @@ describe('priority in the engine', () => {
     h.engine.decidePriority(ticket.id, 'P1', 'alice', 'panel')
     expect(h.repo.tickets.get(ticket.id)!.idle).toBeUndefined()
   })
+  it('promotes a pooled ticket into the attention pool and starts a worker between turns', () => {
+    const h = engineHarness()
+    const ticket = h.accept(TAPD_TRIGGER)
+    expect(ticket.idle).toBeDefined()
+    // The worker ran one turn and ended; the ticket waits between turns, which is the pooled stage the board picks from.
+    h.repo.tickets.save({ ...h.repo.tickets.get(ticket.id)!, assignments: [{ id: 'a1', state: 'ended', createdAt: '2026-11-04T08:00:00.000Z',
+      startedAt: '2026-11-04T08:00:00.000Z', endedAt: '2026-11-04T08:05:00.000Z',
+      report: { state: 'waiting', summary: '', at: '2026-11-04T08:05:00.000Z' } }] } as never)
+    const promoted = h.engine.promoteTicket(ticket.id, 'P1', 'alice', 'panel')
+    // The pick is a scheduling action: the level is the person's, the pool entry is gone, and a new turn starts now with
+    // their instruction as its first input.
+    expect(promoted.priority).toMatchObject({ level: 'P1', source: 'human', by: 'alice', via: 'panel' })
+    expect(promoted.idle).toBeUndefined()
+    const [started] = h.launches.at(-1)!
+    expect(started.id).toBe(ticket.id)
+    expect(started.assignments.at(-1)!.state).toBe('pending')
+    expect(started.inputs.at(-1)).toMatchObject({ kind: 'text', person: true, text: expect.stringContaining('注意力池') })
+  })
 })
 
 describe('priority card', () => {
