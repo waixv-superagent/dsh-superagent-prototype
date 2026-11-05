@@ -14,18 +14,21 @@ interface Recorder {
   killed: number[]
   records: string[]
   notices: { ticketId: string; id: string; text: string }[]
+  adopted: { ticketId: string; pid: number; kind: string; started: string | null }[]
 }
 
 function host(overrides: Partial<EditorGuardHost> = {}): EditorGuardHost & Recorder {
   const killed: number[] = []
   const records: string[] = []
   const notices: { ticketId: string; id: string; text: string }[] = []
+  const adopted: { ticketId: string; pid: number; kind: string; started: string | null }[] = []
   const base: EditorGuardHost = {
     ticketOf: () => 't1', live: () => true, standing: () => ({ state: 'none' }), agentPids: () => [], known: () => [],
     processes: async () => [], kill: pid => { killed.push(pid) }, notify: async (ticketId, id, text) => { notices.push({ ticketId, id, text }) },
+    adopt: (ticketId, pid, kind, started) => { adopted.push({ ticketId, pid, kind, started }) },
     record: (ticketId, detail) => { records.push(`${ticketId}: ${detail}`) }, warn: () => {}, now: () => T0, delay: async () => {},
   }
-  return Object.assign({}, base, overrides, { killed, records, notices })
+  return Object.assign({}, base, overrides, { killed, records, notices, adopted })
 }
 
 function row(pid: number, name: string, path: string, started = new Date(T0).toISOString()): EditorProcess {
@@ -96,6 +99,15 @@ describe('EditorGuard', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(h.killed).toEqual([])
     expect(h.records).toEqual([])
+  })
+  it('hands an allowed launch to the gatekeeper with the exact pid and start time', async () => {
+    const started = new Date(T0 + 1_000).toISOString()
+    const build = row(7, 'unrealbuildtool', UBT, started)
+    const h = host({ standing: () => ({ state: 'holding', purpose: 'build' }), processes: async () => [build] })
+    new EditorGuard(h).observe('worker-t1', 'call-1', 'pwsh', shell(`& "${UBT}" SunGame Win64 Development`))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(h.adopted).toEqual([{ ticketId: 't1', pid: 7, kind: 'build', started }])
+    expect(h.killed).toEqual([])
   })
   it('holds a build to a build lease, an editor to a use or restart lease, and a headless run to a test lease', async () => {
     const build = row(7, 'unrealbuildtool', UBT)

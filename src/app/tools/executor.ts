@@ -14,6 +14,7 @@ import type { Sessions } from '../sessions.ts'
 import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
 import { EDITOR_JOB_KINDS, EDITOR_PURPOSES, MAX_LEASE_MS, ordered } from '../editor-schedule.ts'
 import type { EditorScheduler } from '../editor-scheduler.ts'
+import type { EditorGatekeeper } from '../editor-gatekeeper.ts'
 
 export interface ExecutorToolsHost {
   readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'submitPlan' | 'advancePhase' | 'redispatchTicket'
@@ -30,6 +31,8 @@ export interface ExecutorToolsHost {
   sendReplies(): Promise<void>
   /** The shared editor's scheduler; absent on a host built without it. */
   readonly editor?: EditorScheduler
+  /** The shared editor's gatekeeper, which owns the editor processes a lease started; absent on a host built without it. */
+  readonly gatekeeper?: Pick<EditorGatekeeper, 'close'>
   /** The directory a ticket's worker runs in, which a host-run job builds or tests. */
   workspaceOf(ticket: Ticket): string
 }
@@ -282,9 +285,9 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
       name: 'orchestrator_editor',
       description: 'Hold to build, restart, test or open the shared UE editor; release after; yield to people. '
         + 'Acquire it before a shell opens, builds, restarts or tests the editor: the host stops an editor started without it, '
-        + 'and a stop aimed at an editor you did not start is reported.',
+        + 'and a stop aimed at an editor you did not start is reported. close stops what your lease started and gives it back.',
       schema: z.object({
-        op: z.enum(['acquire', 'heartbeat', 'release', 'run', 'status']),
+        op: z.enum(['acquire', 'heartbeat', 'release', 'close', 'run', 'status']),
         purpose: z.enum(EDITOR_PURPOSES).optional(),
         note: z.string().optional(),
         min: z.number().optional(),
@@ -313,6 +316,12 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           }
           case 'heartbeat': return { state: 'granted', lease: scheduler.heartbeat(ticketId, ttlMs, args.note) }
           case 'release': scheduler.release(ticketId, args.note); return { state: 'released', ...shown() }
+          case 'close': {
+            // The gatekeeper stops only what this Ticket's own lease started, so stopping stays the host's decision.
+            if (!host.gatekeeper) throw new Error('this host has no editor gatekeeper')
+            const result = host.gatekeeper.close(ticketId)
+            return { state: 'closed', ...result, ...shown() }
+          }
           case 'run': {
             const kind = EDITOR_JOB_KINDS.find(value => value === args.purpose)
             if (!kind) throw new Error('run needs purpose build, restart or test')

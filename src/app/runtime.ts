@@ -41,6 +41,7 @@ import { Setup } from './setup.ts'
 import { Editor } from './editor.ts'
 import { EditorScheduler, killTree } from './editor-scheduler.ts'
 import { EditorGuard } from './editor-guard.ts'
+import { EditorGatekeeper } from './editor-gatekeeper.ts'
 import { notifyPlan as sendPlanCard } from './plan.ts'
 import { notifyPriority as sendPriorityCard } from './priority.ts'
 import { IdleScheduler } from './idle.ts'
@@ -84,6 +85,8 @@ export class Runtime extends Service implements SourceHost {
   readonly activity: Activity
   readonly editor: Editor
   readonly editorScheduler: EditorScheduler
+  /** Owns the editor processes a lease starts and reclaims them when the lease lapses (docs/021). */
+  readonly editorGatekeeper: EditorGatekeeper
   /** Watches workers' shell calls for editor use outside the lease (docs/021). */
   readonly editorGuard: EditorGuard
   readonly billing: Billing
@@ -169,6 +172,14 @@ export class Runtime extends Service implements SourceHost {
         editor: () => this.editor.read(), commands: () => store.settings().executor.editor, logDir: join(machine.stateDir, 'editor-jobs'),
         notify: (ticketId, id, text) => sessions.prompt(workerSessionId(ticketId), id, text, 'steer'),
         warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
+      // The gatekeeper owns the editor's operating-system processes, so a heartbeat that stops or a Ticket that ends
+      // closes the editor it started instead of leaving it for the next holder to fight (docs/021).
+      this.editorGatekeeper = new EditorGatekeeper({ store, schedule: this.editorScheduler, rows: () => this.editor.last(),
+        alive: pid => { try { process.kill(pid, 0); return true } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM' } },
+        kill: pid => killTree(pid), live: id => { const value = store.tickets.get(id); return !!value && !value.ended },
+        notify: (ticketId, id, text) => sessions.prompt(workerSessionId(ticketId), id, text, 'steer'),
+        health: board.claim('editor-gatekeeper', { state: 'starting', detail: 'The editor gatekeeper starts with the orchestrator' }),
+        warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       // The lease's teeth: a worker's shell call that opens, builds or stops the editor without the lease it should hold
       // is recorded, and an editor it started is stopped before the two fight over one workspace (docs/021).
       this.editorGuard = new EditorGuard({ ticketOf: ticketOfSession,
@@ -182,6 +193,7 @@ export class Runtime extends Service implements SourceHost {
         known: () => this.editor.last() ?? [],
         processes: async () => { await this.editor.refresh(); return this.editor.last() ?? [] },
         kill: pid => killTree(pid), record: (id, detail) => this.editorScheduler.noteBypass(id, detail),
+        adopt: (id, pid, kind, started) => { this.editorGatekeeper.adopt(id, pid, kind, started) },
         notify: (id, noticeId, text) => sessions.prompt(workerSessionId(id), noticeId, text, 'steer'),
         warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       // The board's billing strip reads actual Session usage priced from the routes' published lists, and the gateway account's own
@@ -283,7 +295,8 @@ export class Runtime extends Service implements SourceHost {
         pipeline: this.pipeline }
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
         get repository() { return setup.deployment.repository },
-        pipeline: this.pipeline, editor: this.editorScheduler, workspaceOf: ticket => this.executor.workspaceOf(ticket),
+        pipeline: this.pipeline, editor: this.editorScheduler, gatekeeper: this.editorGatekeeper,
+        workspaceOf: ticket => this.executor.workspaceOf(ticket),
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
         notifyPlan: ticket => sendPlanCard({ store, sources, commands, warn: message => ctx.logger.warn('dsh-superagent: %s', message) }, ticket),
@@ -352,6 +365,7 @@ export class Runtime extends Service implements SourceHost {
     this.effects.start()
     this.pipelineWatch.start()
     this.editorScheduler.start()
+    this.editorGatekeeper.start()
     this.runtimeHealth.set({ state: 'ready', detail: 'Orchestrator is ready', at: now() })
   }
   private httpHost(): HttpHost {
@@ -370,6 +384,7 @@ export class Runtime extends Service implements SourceHost {
   stop(): Promise<void> { return this.stopping ??= this.shutdown() }
   private async shutdown(): Promise<void> {
     this.closingFlag = true; const passes = this.passes.stop(); const watch = this.pipelineWatch.stop(); const watchdog = this.watchdog.stop()
+    const gatekeeper = this.editorGatekeeper.stop()
     this.stallWatch.stop()
     this.billing.stop()
     this.upgrade.stop()
@@ -379,7 +394,7 @@ export class Runtime extends Service implements SourceHost {
       const ids = [this.masterId, ...this.store.tickets.list().map(ticket => workerSessionId(ticket.id))]
       const agents = ids.map(id => this.ctx.agents.get(id as SessionId)).filter((agent): agent is Agent => agent !== undefined)
       for (const agent of agents) agent.cancel({ kind: 'user' }, { keepInbox: true })
-      await Promise.allSettled([passes, watch, watchdog, this.effects.drain(), ...agents.map(agent => agent.whenIdle())])
+      await Promise.allSettled([passes, watch, watchdog, gatekeeper, this.effects.drain(), ...agents.map(agent => agent.whenIdle())])
       // The workers' jobs and subagents stop too: their ends would start worker turns without the tool limits released below.
       await this.executor.shutdown()
       this.executor.dispose()

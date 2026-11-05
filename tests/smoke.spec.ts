@@ -15,6 +15,8 @@ it('accepts a ticket, starts a worker with its work tools, reads its transcript,
   const health = h.runtime.health['worker-tools']!
   expect(health.state).toBe('ready')
   for (const name of ['read', 'write', 'edit', 'glob', 'grep', process.platform === 'win32' ? 'pwsh' : 'bash']) expect(health.detail).toContain(name)
+  // The editor gatekeeper is a resident part of the host, not a script: it reports its own health and sweep from startup.
+  expect(h.runtime.health['editor-gatekeeper']).toMatchObject({ state: 'ready', detail: expect.stringContaining('Editor gatekeeper:') })
   expect(h.tools.get(sessionId)!.has('orchestrator_read')).toBe(true)
   // The transcript read works through the session query service that replaced sessionController.inspect.
   expect(await h.runTool(sessionId, 'orchestrator_read', { resource: `ticket/${ticket.id}/transcript` })).toBeDefined()
