@@ -1,0 +1,10 @@
+{
+  "rev": "before",
+  "step": "before-back",
+  "url": "http://localhost:3000/?ticket=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "title": null,
+  "back": null,
+  "board": true,
+  "selectedTab": "概览",
+  "historyLength": 1
+}

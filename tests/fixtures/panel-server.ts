@@ -607,7 +607,7 @@ export function usePanelServer(cleanup: () => void) {
   beforeEach(() => {
     sessionStorage.clear()
     // The panel writes its location into browser history entries; each test starts on a fresh entry like a new tab.
-    window.history.replaceState(null, '')
+    window.history.replaceState(null, '', '/')
     server = initial()
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
       if (server.down) return new Response(null, { status: 404 })

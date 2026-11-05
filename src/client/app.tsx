@@ -13,8 +13,8 @@ import { GLOSSARY, GLOSSARY_VALUES, en, zh, type DshSuperagentKey } from './loca
 import { OverviewPage } from './overview.tsx'
 import { PanelProvider, usePanel, usePanelData } from './provider.tsx'
 import { RequestButton } from './request.tsx'
-import { HOME, TABS, historyEntry, initialLocation, lastSettingsGroup, remember, routeLabel, settingsRoute, writeHistory,
-  type BoardFocus, type HomeView, type Location, type Route, type Tab } from './route.ts'
+import { TABS, backRoute, historyEntry, initialLocation, lastSettingsGroup, parentRoute, remember, routeLabel,
+  settingsRoute, writeHistory, type BoardFocus, type HomeView, type Location, type Route, type Tab } from './route.ts'
 import { SettingsPage } from './settings.tsx'
 import { SourceStatus } from './source.tsx'
 import { actorName, errorText, reasonLabel, valueLabel, type T, readableMarkers } from './text.ts'
@@ -263,21 +263,34 @@ const MOUSE_BACK = 3, MOUSE_FORWARD = 4
  * may not turn the side buttons into history steps itself, so the panel does it and cancels the browser's own handling.
  */
 export function App({ t, openSession, deploymentForm }: AppProps) {
-  const [mount] = useState(() => {
+  const [mount] = useState<{ location: Location; index: number; motion: Motion; mode: 'push' | 'replace'; parent?: Route }>(() => {
     const opened = initialLocation()
-    // A panel that remounts on an entry it wrote (after the Conversation was shown) continues from that entry's position; when it
-    // opens elsewhere than that entry (a worker Session's Ticket link), the new page is one step further, so Back returns there.
+    // A panel that remounts on an entry it wrote (after the Conversation was shown) continues from that entry's position,
+    // with the history that entry carried; when it opens elsewhere than that entry (a worker Session's Ticket link), the
+    // new page is one step further, so Back returns there.
     const own = typeof window === 'undefined' ? undefined : historyEntry(window.history.state)
-    const moved = !!own && JSON.stringify(own.location.route) !== JSON.stringify(opened.route)
-    const location = moved ? { ...opened, stack: [...own.location.stack, own.location.route].slice(-20) } : opened
-    return { location, index: !own ? 0 : moved ? own.index + 1 : own.index, motion: 'none' as Motion,
-      mode: moved ? 'push' as const : 'replace' as const }
+    if (own) {
+      const moved = JSON.stringify(own.location.route) !== JSON.stringify(opened.route)
+      const location = moved ? { ...opened, stack: [...own.location.stack, own.location.route].slice(-20) } : own.location
+      return { location, index: moved ? own.index + 1 : own.index, motion: 'none' as Motion,
+        mode: moved ? 'push' as const : 'replace' as const }
+    }
+    // A page the panel opens with no history behind it (a Feishu `?ticket=` link, a Session's Ticket jump) gets its
+    // parent menu written behind it, so the page Back button, a mouse's side buttons and the browser's Back/Forward —
+    // including the macOS trackpad's two-finger swipe — go up one level instead of leaving DSH Web or jumping home.
+    const parent = opened.stack.length === 0 ? parentRoute(opened.route) : undefined
+    if (!parent) return { location: opened, index: 0, motion: 'none' as Motion, mode: 'replace' as const }
+    return { location: { ...opened, stack: [parent] }, index: 1, motion: 'none' as Motion, mode: 'push' as const, parent }
   })
   const [view, setView] = useState<{ location: Location; index: number; motion: Motion }>(mount)
   const current = useRef(view)
   current.current = view
-  // The mount's own entry is written once, after render, so a render that is replayed writes nothing twice.
-  useEffect(() => { writeHistory(mount.mode, mount.location, mount.index) }, [mount])
+  // The mount's own entry is written once, after render, so a render that is replayed writes nothing twice. A parent is
+  // the entry just behind a page opened without history: the current entry becomes the parent, then the page is pushed.
+  useEffect(() => {
+    if (mount.parent) writeHistory('replace', { route: mount.parent, stack: [] }, 0)
+    writeHistory(mount.mode, mount.location, mount.index)
+  }, [mount])
   useEffect(() => { remember(view.location) }, [view.location])
   useEffect(() => {
     const onPop = (event: PopStateEvent) => {
@@ -322,15 +335,16 @@ export function App({ t, openSession, deploymentForm }: AppProps) {
     stack: replace ? location.stack : [...location.stack, location.route].slice(-20) }), replace ? 'none' : 'forward'), [move])
   const back = useCallback(() => {
     // A pushed page's previous entry shows the last route of its stack, which the Back button names; stepping the browser back
-    // there keeps the button, the browser and the mouse on the same entries. A page with no stack (a tab) returns home in place.
+    // there keeps the button, the browser and the mouse on the same entries. A page with no stack (a tab, a deep link) steps
+    // up to its parent menu in place, so Back reaches the list a record belongs to instead of the home board.
     const { location, index } = current.current
     if (location.stack.length > 0 && index > 0 && historyEntry(window.history.state)) { window.history.back(); return }
-    move('replace', location => ({ route: location.stack.at(-1) ?? HOME, stack: location.stack.slice(0, -1) }), 'back')
+    move('replace', from => ({ route: backRoute(from), stack: from.stack.slice(0, -1) }), 'back')
   }, [move])
   const openTab = useCallback((tab: Tab) => move('push', location => ({ stack: [], route: tab === 'settings'
     ? settingsRoute(lastSettingsGroup(location)) : { page: tab, id: undefined } }), 'tab'), [move])
   const { location, motion } = view
-  return <PanelProvider t={t} openSession={openSession} navigate={navigate} back={back} backLabel={routeLabel(t, location.stack.at(-1) ?? HOME)}>
+  return <PanelProvider t={t} openSession={openSession} navigate={navigate} back={back} backLabel={routeLabel(t, backRoute(location))}>
     {/* The outer boundary keeps a crash in the header or tabs recoverable; each page has its own inside. */}
     <PageBoundary t={t} resetKey={pageKey(location.route)} onHome={() => openTab('editor')}>
       <Pages route={location.route} motion={motion} openTab={openTab} deploymentForm={deploymentForm} />

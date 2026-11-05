@@ -33,6 +33,20 @@ export const setupPage = (place: SetupPlace): Route =>
   place === 'deployment' ? settingsRoute('deployment') : settingsRoute('source', { source: place })
 export const routeLabel = (t: T, route: Route): string =>
   route.id ? t(route.page === 'trigger' ? 'term.thread' : 'term.ticket') : t(`tab.${route.page}`)
+/**
+ * The menu a page belongs to, which Back falls back to when the panel has no history entry to return to: a Ticket's is
+ * the Execution list and a Thread's the Trigger list. A list is already the menu of its own records, and the home page
+ * has no parent above it.
+ */
+export function parentRoute(route: Route): Route | undefined {
+  switch (route.page) {
+    case 'execution': return route.id ? { page: 'execution' } : undefined
+    case 'trigger': return route.id ? { page: 'trigger' } : undefined
+    default: return undefined
+  }
+}
+/** Where Back goes: the page the panel came from, else the page's parent menu, else home. */
+export const backRoute = (location: Location): Route => location.stack.at(-1) ?? parentRoute(location.route) ?? HOME
 
 const pick = <V extends string>(values: readonly V[], value: unknown): V | undefined => values.find(item => item === value)
 function compact<Q extends object>(query: Q): Q | undefined {
@@ -84,17 +98,28 @@ export function parseLocation(value: unknown): Location | undefined {
   const stack = Array.isArray(stored.stack) ? stored.stack as unknown[] : []
   return route ? { route, stack: stack.flatMap(item => parseRoute(item) ?? []), group: pick(SETTINGS_GROUPS, stored.group) } : undefined
 }
-export function initialLocation(): Location {
-  const linked = linkedRoute()
-  if (linked) return { route: linked, stack: [] }
+/** The route memory a previous panel left in this tab, or undefined when it is unreadable or absent. */
+function storedLocation(): Location | undefined {
   try {
-    const location = parseLocation(JSON.parse(sessionStorage.getItem(ROUTE_KEY) ?? 'null'))
-    if (location) return location
+    return parseLocation(JSON.parse(sessionStorage.getItem(ROUTE_KEY) ?? 'null'))
   } catch (error) {
     // Route memory is a convenience; an unreadable value falls back to HOME.
     void error
+    return undefined
   }
-  return { route: HOME, stack: [] }
+}
+export function initialLocation(): Location {
+  // The entry the panel wrote holds the page and history it shows, so a reload or a remount continues there, and the URL
+  // query — which never changes — names a deep link only for a fresh entry. Route memory that names another page is a
+  // newer request: a Session's Ticket jump writes it before selecting the panel, and that page opens one step further.
+  const own = typeof window === 'undefined' ? undefined : historyEntry(window.history.state)
+  if (own) {
+    const remembered = storedLocation()
+    return remembered && JSON.stringify(remembered.route) !== JSON.stringify(own.location.route) ? remembered : own.location
+  }
+  const linked = linkedRoute()
+  if (linked) return { route: linked, stack: [] }
+  return storedLocation() ?? { route: HOME, stack: [] }
 }
 export function remember(location: Location): void {
   try { sessionStorage.setItem(ROUTE_KEY, JSON.stringify(location)) } catch (failure) { void failure /* Route memory is a convenience. */ }

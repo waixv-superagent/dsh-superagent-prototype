@@ -12,7 +12,7 @@
 [data-platform='darwin'] .dt-page .dt-head { padding-top: var(--dsh-frame-top-clearance, 0px); }
 .dt-title { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; color: var(--dsw-alias-label-secondary); }
 .dt-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.dt-page .dt-tabs { overflow-x: auto; display: flex; gap: 20px; max-width: none; padding: 0; border-radius: 0; background: none; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
+.dt-page .dt-tabs { overflow-x: auto; overscroll-behavior-x: contain; display: flex; gap: 20px; max-width: none; padding: 0; border-radius: 0; background: none; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
 .dt-segmented { width: 100%; max-width: 420px; box-sizing: border-box; display: inline-grid; gap: 2px; padding: 3px; border-radius: 9px; background: var(--dsw-alias-interactive-bg-hover); }
 .dt-form.dt-block { padding: 16px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 16px; gap: 16px; }
 .dt-block-title { display: flex; align-items: center; gap: 4px; margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; }
@@ -996,7 +996,7 @@ button.dt-problem-title:hover { color: var(--dsw-alias-label-primary); text-deco
 .dt-graph-head .dt-graph-switch { width: 180px; }
 .dt-graph-count { margin-left: auto; color: var(--dsw-alias-label-caption); font-size: 12px; font-variant-numeric: tabular-nums; }
 .dt-graph-frame { min-width: 0; overflow: hidden; border: .5px solid var(--dsw-alias-border-l2); border-radius: 14px; background: radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--dsw-alias-brand-primary) 5%, transparent), transparent 70%), var(--dsw-alias-bg-layer-1); }
-.dt-graph-scroll { overflow-x: auto; }
+.dt-graph-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
 .dt-graph-svg { display: block; font-size: 11px; user-select: none; }
 .dt-graph-cloud { position: relative; width: 100%; height: auto; touch-action: none; }
 .dt-graph-tick line { stroke: var(--dsw-alias-border-l2); stroke-dasharray: 2 4; }
