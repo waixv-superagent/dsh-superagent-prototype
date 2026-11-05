@@ -230,8 +230,28 @@ describe('report', () => {
     expect(first).toContain('+1 vs 昨天')
     expect(html).toContain('明天做 &lt;script&gt;')
     expect(html).not.toContain('<script')
-    expect(missing).toEqual(['bottlenecks', 'review', 'research', 'template'])
-    expect(html.match(/<section /g)).toHaveLength(8)
+    expect(missing).toEqual(['interview', 'bottlenecks', 'review', 'research', 'template'])
+    expect(html.match(/<section /g)).toHaveLength(9)
     expect(html).not.toMatch(/(src|href)="(https?:)?\/\/(?!example)/)
+  })
+
+  it('gives the interview section a fixed place after the first screen, before the day’s numbers', () => {
+    const metrics = buildMetrics({ db: fixture(), window, sources: {} })
+    const full = '## summary\n- 一句结论\n\n## interview\n- 「终于把复现跑通了」 —— 23:31\n\n**推断**：他要的是可重跑的证据，不是更多面板。\n\n## review\nr\n\n## bottlenecks\nb\n\n## plan\np\n\n## research\ns\n\n## template\nt\n'
+    const { html, missing } = renderReport({ metrics, narrative: parseNarrative(full) })
+    expect(missing).toEqual([])
+    expect(html).toContain('口径见第 9 节')
+
+    const interview = html.slice(html.indexOf('id="s2"'), html.indexOf('id="s3"'))
+    expect(interview).toContain('采访人的感受')
+    expect(interview).toContain('终于把复现跑通了')
+    expect(interview).toContain('<b>推断</b>')
+    expect(interview).toContain('不要用数字反推情绪')
+    expect(interview).not.toContain('小时图')
+    expect(html.slice(0, html.indexOf('id="s2"'))).toContain('一句结论')
+
+    const withoutInterview = renderReport({ metrics, narrative: parseNarrative(full.replace(/## interview\n[\s\S]*?\n\n## review/, '## review')) })
+    expect(withoutInterview.missing).toEqual(['interview'])
+    expect(withoutInterview.html).toContain('待填写：narrative.md 的 <code>## interview</code>，采访人的感受')
   })
 })

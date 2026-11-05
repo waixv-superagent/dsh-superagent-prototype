@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-11-05T16:10:00.000Z",
+  "window": {
+    "date": "2026-11-05",
+    "since": "2026-11-04T16:00:00.000Z",
+    "until": "2026-11-05T16:00:00.000Z",
+    "tz": "+08:00"
+  },
+  "sources": { "github": "waixv-superagent/dsh-superagent-prototype", "p4": "//sun/mainline" },
+  "tickets": {
+    "created": 6,
+    "ended": 3,
+    "open": 3,
+    "kinds": { "feature": 2, "bug": 2, "self": 1, "inquiry": 1 },
+    "list": [
+      { "id": "1a2b3c4d", "title": "面板：复现用例支持参数扫描", "kind": "feature", "createdAt": "09:12", "assignments": 2, "toolCalls": 118, "outcome": "merged", "reports": ["ready"] },
+      { "id": "5e6f7a8b", "title": "急转时朝向跳切（坐骑与角色）", "kind": "bug", "createdAt": "10:03", "assignments": 3, "toolCalls": 264, "outcome": "open", "reports": ["progress", "waiting"] },
+      { "id": "9c0d1e2f", "title": "复盘：固定「采访人的感受」一节", "kind": "self", "createdAt": "11:20", "assignments": 1, "toolCalls": 96, "outcome": "open", "reports": ["ready"] },
+      { "id": "3f4a5b6c", "title": "跃起落地同帧搜过渡导致融合", "kind": "bug", "createdAt": "14:05", "assignments": 2, "toolCalls": 187, "outcome": "completed", "reports": ["ready"] },
+      { "id": "7a8b9c0d", "title": "评估轻量复现 harness 的边界", "kind": "inquiry", "createdAt": "16:40", "assignments": 1, "toolCalls": 73, "outcome": "completed", "reports": ["ready"] },
+      { "id": "2b3c4d5e", "title": "闲时池按最晚开始时间排序", "kind": "feature", "createdAt": "19:30", "assignments": 1, "toolCalls": 42, "outcome": "open", "reports": ["progress"] }
+    ]
+  },
+  "assignments": {
+    "started": 7,
+    "ended": 6,
+    "endedReasons": { "normal": 5, "hostRestarted": 1 }
+  },
+  "reports": {
+    "total": 6,
+    "states": { "ready": 5, "failed": 0, "blocked": 1 },
+    "causes": { "environment": 1 },
+    "failures": [
+      { "at": "15:22", "ticket": "2b3c4d5e", "state": "blocked", "cause": "environment", "summary": "编辑器租约未释放，等待重试" }
+    ]
+  },
+  "restarts": { "interrupted": 1, "events": [{ "at": "03:10", "interrupted": 1 }] },
+  "intake": {
+    "total": 74,
+    "human": 74,
+    "bySource": { "feishu": 61, "tapd": 13 },
+    "decisions": { "accept": 5, "ignore": 66, "chat": 3 },
+    "fanoutOnly": 12,
+    "handbacks": 6,
+    "acks": 5
+  },
+  "delivery": {
+    "ready": 5,
+    "prsMerged": 3,
+    "clsSubmitted": 1,
+    "total": 9,
+    "prs": {
+      "merged": [
+        { "number": 101, "title": "面板：复现用例的参数扫描" },
+        { "number": 102, "title": "复盘：固定「采访人的感受」一节" },
+        { "number": 103, "title": "编辑器：租约超时回收" }
+      ],
+      "closed": [],
+      "open": [{ "number": 104, "title": "闲时池按最晚开始时间排序" }]
+    },
+    "cls": { "source": "p4", "submitted": [{ "changelist": 587901, "ticket": "3f4a5b6c" }] }
+  },
+  "tools": { "calls": 3941, "sessions": 17 },
+  "hourly": [
+    { "hour": 9, "human": 4, "toolCalls": 120, "progress": 1, "deliveries": 0, "failed": 0 },
+    { "hour": 10, "human": 9, "toolCalls": 340, "progress": 2, "deliveries": 1, "failed": 0 },
+    { "hour": 11, "human": 12, "toolCalls": 460, "progress": 3, "deliveries": 1, "failed": 0 },
+    { "hour": 13, "human": 5, "toolCalls": 210, "progress": 1, "deliveries": 0, "failed": 0 },
+    { "hour": 14, "human": 7, "toolCalls": 380, "progress": 2, "deliveries": 1, "failed": 0 },
+    { "hour": 15, "human": 10, "toolCalls": 420, "progress": 3, "deliveries": 0, "failed": 1 },
+    { "hour": 16, "human": 8, "toolCalls": 360, "progress": 2, "deliveries": 1, "failed": 0 },
+    { "hour": 19, "human": 3, "toolCalls": 150, "progress": 1, "deliveries": 0, "failed": 0 },
+    { "hour": 20, "human": 6, "toolCalls": 300, "progress": 2, "deliveries": 1, "failed": 0 },
+    { "hour": 21, "human": 5, "toolCalls": 280, "progress": 2, "deliveries": 1, "failed": 0 },
+    { "hour": 22, "human": 3, "toolCalls": 190, "progress": 1, "deliveries": 1, "failed": 0 },
+    { "hour": 23, "human": 2, "toolCalls": 90, "progress": 1, "deliveries": 0, "failed": 0 }
+  ],
+  "limits": [
+    "p4 只统计了工单记录的 CL，没有拉取完整 changes 列表",
+    "会话归档里有 2 个损坏的 zstd 帧，已跳过"
+  ]
+}
