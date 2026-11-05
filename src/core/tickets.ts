@@ -13,6 +13,7 @@ import { defaultPriority, priorityAskDeadline, PRIORITY_ASK_MINUTES, priorityAsk
   type PriorityVia } from './priority.ts'
 import type { IdleLevel } from './idle.ts'
 import type { Replies } from './replies.ts'
+import { pipelineNotice, rerunNotice } from './pipeline-notice.ts'
 import { canRetry } from './stage.ts'
 
 const sameChannel = (a: ChannelRef, b: ChannelRef): boolean => JSON.stringify(a) === JSON.stringify(b)
@@ -299,13 +300,46 @@ export class Tickets extends EnginePart {
     if (!liveTicket(ticket)) return ticket
     const at = this.now()
     if (observation.kind === 'merged') {
+      if (ticket.pipeline?.state === 'merged' || ticket.pipeline?.submitted) return ticket
       const url = observation.url ?? this.pipelineUrl(ticket)
+      this.notifyPipeline(ticket, observation, url)
+      if (observation.autobuild) {
+        // The submit is recorded, but the autobuild after it is what the person waits for: the ticket stays open until the
+        // build passed and they sent or closed it.
+        if (ticket.verification?.state === 'pending') ticket.verification = { at, state: 'passed', by: 'pipeline' }
+        const rest = { ...ticket.pipeline ?? { state: 'running' as const, at } }
+        delete rest.manual; delete rest.reason; delete rest.observed; delete rest.rerunAt
+        ticket.pipeline = { ...rest, state: 'running', at, seenAt: at, step: 'autobuild', check: '已入库，等待 autobuild',
+          submitted: { at, ...observation.change ? { change: observation.change } : {} }, ...(url ? { url } : {}) }
+        ticket.updatedAt = at
+        this.repo.tickets.save(ticket)
+        return this.require(ticketId)
+      }
       return this.recordPipeline(ticketId, { state: 'merged', step: 'merged', ...(observation.check ? { check: observation.check } : {}), ...(url ? { url } : {}) })
     }
     // A merged pipeline is history; a later round of the ticket is not pipeline work again.
     if (ticket.pipeline?.state === 'merged') return ticket
     const previous = ticket.pipeline
     const url = observation.url ?? previous?.url ?? this.pipelineUrl(ticket)
+    if (observation.kind === 'autobuild') {
+      if (!previous?.submitted) return ticket
+      const signature = observation.signature
+      const waits = observation.result !== 'running'
+      const next: TicketPipeline = { ...previous, seenAt: at, step: 'autobuild', check: observation.check, observed: signature,
+        ...(observation.stageUrl ? { stageUrl: observation.stageUrl } : {}), ...(observation.artifact ? { artifact: observation.artifact } : {}),
+        ...(url ? { url } : {}),
+        // A finished build waits for the person's send or close; a running one is the host's to follow.
+        state: waits ? 'blocked' : 'running', at: previous.observed === signature ? previous.at : at }
+      if (waits) next.manual = true
+      else { delete next.manual; delete next.reason }
+      ticket.pipeline = next
+      if (previous.observed !== signature) this.notifyPipeline(ticket, observation, url)
+      ticket.updatedAt = at
+      this.repo.tickets.save(ticket)
+      return this.require(ticketId)
+    }
+    // After the submit only the autobuild speaks; a late Swarm observation must not move the ticket back.
+    if (previous?.submitted) return this.savePipelineSeen(ticket, previous, at)
     const signature = 'signature' in observation ? observation.signature : undefined
     // The fine stage is what the panel draws; an observation without one falls back to the coarse kind so an older caller
     // still records a usable step.
@@ -320,13 +354,6 @@ export class Tickets extends EnginePart {
     delete base.reason
     // A green review or an approval means the rerun question is settled; a failure keeps `rerunAt` so its grace window works.
     if (observation.kind === 'review' || observation.kind === 'approved') delete base.rerunAt
-    const reviewId = (text?: string): string | undefined => {
-      const value = text?.trim() ?? ''
-      return /(?:reviews?\/)(\d+)/.exec(value)?.[1] ?? (/^\d+$/.test(value) ? value : undefined) ?? /\/reviews\/(\d+)/.exec(url ?? '')?.[1]
-    }
-    const id = reviewId(ticket.execution?.review)
-    const reviewName = id ? `Swarm - ${id}` : 'Swarm'
-    const reviewLink = url ? `[${reviewName}](${url})` : reviewName
     if (observation.kind === 'running') {
       // A person's blocked pipeline stays theirs until they resume it; polling must not overwrite their decision.
       if (previous?.state === 'blocked' && previous.manual) return this.savePipelineSeen(ticket, previous, at)
@@ -336,13 +363,10 @@ export class Tickets extends EnginePart {
     } else if (observation.kind === 'review') {
       // Green checks still wait for a person's review: ask once, and keep the card in the waiting style.
       ticket.pipeline = { ...base, state: 'blocked', manual: true, at, check: observation.check }
-      this.replies.pipelineNotice(ticket, `review:${signature ?? 'ready'}`,
-        `${reviewLink} 已通过，待人工审核。`)
+      this.notifyPipeline(ticket, observation, url)
     } else if (observation.kind === 'approved') {
       ticket.pipeline = { ...base, state: 'running', at, check: observation.check }
-      const notice = observation.step === 'smoke' ? `${reviewLink} 已审核通过，Jenkins 冒烟中。`
-        : `${reviewLink} 已审核通过，等待提交。`
-      this.replies.pipelineNotice(ticket, `approved:${signature ?? 'approved'}`, notice)
+      this.notifyPipeline(ticket, observation, url)
     } else if (observation.kind === 'failure') {
       // A person's blocker stays theirs, but a green review is not a decision yet: an AI verdict that posts after the
       // testruns passed still wakes the worker.
@@ -362,8 +386,7 @@ export class Tickets extends EnginePart {
     } else {
       // Blocked for a person: a repeated observation keeps the message out of the outbox twice.
       ticket.pipeline = { ...base, state: 'blocked', manual: true, at, check: observation.check, reason: observation.reason }
-      this.replies.pipelineNotice(ticket, `blocked:${observation.signature ?? 'blocked'}`,
-        `${reviewLink} 需要人工：${observation.reason}`)
+      this.notifyPipeline(ticket, observation, url)
     }
     ticket.updatedAt = at
     this.repo.tickets.save(ticket)
@@ -378,13 +401,41 @@ export class Tickets extends EnginePart {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     if (!ticket.pipeline || ticket.pipeline.state === 'merged') throw new Error('this ticket has no live pipeline to rerun')
+    if (ticket.pipeline.submitted) throw new Error('this ticket was submitted already; its review checks cannot rerun')
     const at = this.now()
     const rest = { ...ticket.pipeline }
     delete rest.observed
-    ticket.pipeline = { ...rest, step: 'tests', at, rerunAt: at, check: '已请求重跑检查，等待新结果' }
+    // A rerun, whoever asked for it, is the answer to a stuck blocker: the follow-up watches the new result again.
+    delete rest.manual
+    delete rest.reason
+    ticket.pipeline = { ...rest, state: 'running', step: 'tests', at, rerunAt: at, check: '已请求重跑检查，等待新结果' }
     ticket.updatedAt = at
     this.repo.tickets.save(ticket)
+    const url = ticket.pipeline.url ?? this.pipelineUrl(ticket)
+    this.replies.pipelineNotice(ticket, rerunNotice(ticket, url, at))
     return this.require(ticketId)
+  }
+  /**
+   * A person closed a delivered change from its pipeline card (关单): the submitted change, and the autobuild after it, need
+   * nothing more, so the ticket completes. A pipeline that has not been submitted cannot be closed this way.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  closePipeline(ticketId: string): Ticket {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    if (!ticket.pipeline?.submitted) throw new Error('this ticket has no submitted change to close')
+    const at = this.now()
+    ticket.pipeline = { ...ticket.pipeline, state: 'merged', step: 'merged', at }
+    delete ticket.pipeline.manual
+    delete ticket.pipeline.reason
+    ticket.updatedAt = at
+    this.repo.tickets.save(ticket)
+    this.end(ticketId, 'human', 'completed', at, '已入库，人从卡片关单')
+    return this.require(ticketId)
+  }
+  /** Send a pipeline observation's notice to the ticket's conversation, once per event. */
+  private notifyPipeline(ticket: Ticket, observation: Exclude<PipelineObservation, { kind: 'running' } | { kind: 'failure' }>, url: string | undefined): void {
+    this.replies.pipelineNotice(ticket, pipelineNotice(ticket, observation, url, this.options.pipelineChoices?.()))
   }
   /**
    * A person asks the follow-up to look again after clearing a blocker: the pipeline runs again and the host polls on its
@@ -396,7 +447,11 @@ export class Tickets extends EnginePart {
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     const at = this.now()
     const url = this.pipelineUrl(ticket)
-    ticket.pipeline = { state: 'running', at, step: 'tests', check: '等待 Swarm 流水线结果', ...(url ? { url } : {}) }
+    const submitted = ticket.pipeline?.submitted
+    // A submitted change keeps its submit: resuming it follows the autobuild again rather than the review it already left.
+    ticket.pipeline = submitted
+      ? { state: 'running', at, step: 'autobuild', check: '已入库，等待 autobuild', submitted, ...(url ? { url } : {}) }
+      : { state: 'running', at, step: 'tests', check: '等待 Swarm 流水线结果', ...(url ? { url } : {}) }
     ticket.updatedAt = at
     this.repo.tickets.save(ticket)
     return this.require(ticketId)

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Reac
 import { usePoll, type BillingView, type EditorRow, type Problem, type TicketRow, type TicketSearchView } from './api.ts'
 import { Button, Icon, Input, Tag } from './controls.tsx'
 import { ticketMark } from './marks.ts'
-import { PIPELINE_TRACK, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackState } from './pipeline.ts'
+import { pipelineTrack, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackState } from './pipeline.ts'
 import { useAction, usePanel, usePanelData } from './provider.tsx'
 import { KindTag, ThreadChip } from './rows.tsx'
 import { setupPage, settingsRoute, type BoardFocus, type Route } from './route.ts'
@@ -372,7 +372,7 @@ function PipelineCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
     </header>
     <button type="button" className="dt-pipeline-title" onClick={open}>{ticket.title}</button>
     {pipeline && (pipeline.url || delivery?.review) && <div className="dt-pipeline-track" role="img" aria-label={t('pipelineSteps')}>
-      {PIPELINE_TRACK.map((key, index) => <span key={key} data-state={pipelineTrackState(step, index)} />)}
+      {pipelineTrack(pipeline).map((key, index) => <span key={key} data-state={pipelineTrackState(step, index)} />)}
     </div>}
     {pipeline?.reason && <p className="dt-pipeline-reason">{pipeline.reason}</p>}
     {!pipeline?.reason && pipeline?.check && <p className="dt-pipeline-check">{pipeline.check}</p>}

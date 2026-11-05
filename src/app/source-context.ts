@@ -7,12 +7,14 @@ import type { SourceContext } from '../sources/host.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import { sameName } from '../infra/text.ts'
 import type { Outbox } from './outbox.ts'
+import { pipelineChoices, type PipelineChecks } from './pipeline.ts'
 import type { Store } from './store.ts'
 
 export interface SourceContextDeps {
   readonly store: Pick<Store, 'atomic' | 'get' | 'set' | 'delete' | 'keys' | 'threads' | 'tickets' | 'triggers' | 'read' | 'settings'>
   readonly outbox: Pick<Outbox, 'send'>
-  readonly engine: Pick<EngineForSources, 'bindThread' | 'retarget' | 'threadClosed' | 'admissible' | 'decidePlan' | 'answerAttention' | 'decidePriority'>
+  readonly engine: Pick<EngineForSources, 'bindThread' | 'retarget' | 'threadClosed' | 'admissible' | 'decidePlan' | 'answerAttention' | 'decidePriority'
+    | 'rerunPipeline' | 'closePipeline'>
   readonly commands: Commands
   readonly sources: SourceRegistry
   /** Throws when accessed before initial setup completes. */
@@ -29,6 +31,8 @@ export interface SourceContextDeps {
   mayControl(trigger: Trigger): boolean
   /** Applies a pause or resume a person asked for in the conversation; returns whether processing is paused now. */
   pauseProcessing(paused: boolean): Promise<boolean>
+  /** The Swarm calls a pipeline card's buttons make; absent in a host without pipeline checks. */
+  readonly pipeline?: Pick<PipelineChecks, 'addReviewers' | 'rerun'>
 }
 
 /**
@@ -73,6 +77,31 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
     decidePlan: (id, decision, note, via, option) => deps.engine.decidePlan(id, decision, note, via, option),
     answerAttention: (id, attentionId, option) => deps.engine.answerAttention(id, attentionId, option),
     decidePriority: (id, level, by, via) => deps.engine.decidePriority(id, level, by, via),
+    pipelineAction: async (id, action) => {
+      const ticket = store.tickets.get(id)
+      if (!ticket) throw new Error('unknown ticket')
+      if (action.kind === 'close') { deps.engine.closePipeline(id); return { done: [] } }
+      const review = ticket.execution?.review
+      if (!review || !deps.pipeline) throw new Error('这张单没有可操作的 Swarm review')
+      if (action.kind === 'reviewers') {
+        // Only accounts the deployment listed can be added, whatever the callback carried.
+        const listed = new Set(store.settings().executor.p4.reviewers.map(item => item.user))
+        const users = action.users.filter(user => listed.has(user))
+        if (!users.length) throw new Error('没有选中名单里的审核人')
+        return { done: await deps.pipeline.addReviewers(review, users) }
+      }
+      const result = await deps.pipeline.rerun(review)
+      deps.engine.rerunPipeline(id)
+      return { done: result.triggered.map(run => run.title) }
+    },
+    pipelineChoices: () => pipelineChoices(store.settings()),
+    mayActOnPipeline: (id, actor) => {
+      const ticket = store.tickets.get(id)
+      if (!ticket) return false
+      if (ticket.mandate.actor.source === kind.kind && sameName(ticket.mandate.actor.id, actor)) return true
+      const allowed = store.settings().policy.sources[kind.kind]?.allowed ?? []
+      return allowed.some(entry => sameName(entry.id, actor))
+    },
     mayDecidePriority: (id, actor) => {
       const ticket = store.tickets.get(id)
       if (!ticket) return false

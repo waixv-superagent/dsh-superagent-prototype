@@ -3,6 +3,7 @@ import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, liveTicket, ticketOutcome } from './model.ts'
 import type { ChannelRef, Ticket, Trigger } from './model.ts'
+import type { PipelineNotice } from './pipeline-notice.ts'
 import type { ReplyStatus } from './ports.ts'
 import { EnginePart } from './part.ts'
 
@@ -65,10 +66,11 @@ export class Replies extends EnginePart {
    * conversation the ticket's replies go to, once per event. Repeating the same observation never repeats the message, and a
    * ticket with no conversation is silent.
    */
-  pipelineNotice(ticket: Ticket, event: string, text: string): void {
+  pipelineNotice(ticket: Ticket, notice: PipelineNotice): void {
     const channel = this.sourceChannel(ticket)
     if (!channel) return
-    this.options.outbox.send({ id: key('pipeline-reply', ticket.id, event), channel, text, kind: 'reply', ticketId: ticket.id })
+    this.options.outbox.send({ id: key('pipeline-reply', ticket.id, notice.event), channel, text: notice.text, kind: 'reply', ticketId: ticket.id,
+      pipeline: notice.card })
   }
   private acknowledge(request: Extract<ReplyRequest, { purpose: 'acknowledgement' }>): Reply {
     const ticket = this.require(request.ticketId)

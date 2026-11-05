@@ -4,7 +4,7 @@
  * that record an answer, and the text fallback when Feishu refuses a card.
  */
 import { PLAN_CARD_QUESTION, PLAN_REPLY_HINT, PLAN_TEMPLATES, PRIORITY_LABELS, PRIORITY_LEVELS, planLines, planTemplate, type Plan, type PlanDecision,
-  type PlanOption, type PlanTemplate, type PriorityAsk, type PriorityLevel, type QuestionSection, type Ticket } from '../core/index.ts'
+  type PlanOption, type PlanTemplate, type PipelineCard, type PriorityAsk, type PriorityLevel, type QuestionSection, type Ticket } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
 import { feishuPostContent, jsonForCmd, textSafe } from './feishu-text.ts'
 
@@ -440,6 +440,89 @@ export function attentionStaleCard(ticketId?: string): CardMessage {
 export function staleCard(ticket: Pick<Ticket, 'id' | 'title'>): CardMessage {
   return { card: handledCard('已处理 · 这版方案不再等人', ticketSubtitle(ticket, false), '已经有人答过，或已换成新一版，最新状态在工单面板里。'),
     text: textSafe(`已处理：${ticket.title}（这版方案不再等人）`) }
+}
+/** Feishu's "open in the system browser" switch: Jenkins and Swarm ask for a login the embedded web view cannot show. */
+export function browserLink (url: string): string {
+  let parsed: URL
+  try { parsed = new URL(url) } catch { return url }
+  if (!/^https?:$/.test(parsed.protocol)) return url
+  for (const name of ['lk_jump_to_browser', 'lk_mobile_jump_to_browser']) if (!parsed.searchParams.has(name)) parsed.searchParams.append(name, 'true')
+  return parsed.href
+}
+const PIPELINE_TEMPLATES: Record<PipelineCard['tone'], string> = { info: 'blue', success: 'green', waiting: 'orange', danger: 'red' }
+/** A button that opens a link in the system browser. */
+const linkButton = (label: string, url: string, primary = false): Record<string, unknown> => ({
+  tag: 'button', text: plain(label), type: primary ? 'primary' : 'default', width: 'fill',
+  behaviors: [{ type: 'open_url', default_url: browserLink(url), pc_url: browserLink(url), android_url: browserLink(url), ios_url: browserLink(url) }],
+})
+/** A pipeline card button that calls this plugin back with an action on the ticket. */
+const pipelineButton = (label: string, ticketId: string, action: 'reviewers' | 'send' | 'close' | 'rerun', type: string,
+  extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+  tag: 'button', text: plain(label), type, width: 'fill',
+  behaviors: [{ type: 'callback', value: { v: 1, pipeline: action, ticket: ticketId } }], ...extra,
+})
+/** One row of buttons, halves or thirds. */
+const buttonRow = (buttons: Record<string, unknown>[]): Record<string, unknown> => ({
+  tag: 'column_set', flex_mode: flexOf(buttons.length), horizontal_spacing: '8px',
+  columns: buttons.map(button => ({ tag: 'column', elements: [button] })),
+})
+/** A form with a multi-select of `options` and one submit button, for reviewers or package targets. */
+const choiceForm = (name: string, placeholder: string, options: readonly { label: string; value: string }[], submit: Record<string, unknown>): Record<string, unknown> => ({
+  tag: 'form', name,
+  elements: [
+    { tag: 'multi_select_static', name: 'choice', placeholder: plain(placeholder), required: true, width: 'fill',
+      options: options.map(option => ({ text: plain(option.label), value: option.value })) },
+    submit,
+  ],
+})
+/**
+ * One stage of a delivered change's pipeline as a card: a coloured headline (blue running, green passed, orange waiting,
+ * red failed), one or two short lines, the review and build links (opened in the system browser, where their login works),
+ * and the actions this stage offers — pick reviewers to add on Swarm, rerun the checks, send the editor package to people or
+ * chats, or close the ticket. The text fallback is the same one-line notice the chat used to get.
+ */
+export function pipelineStageCard (notice: PipelineCard, text: string, ticketLink?: string): CardMessage {
+  const id = notice.ticketId
+  const links = notice.links.map((link, index) => linkButton(link.label, link.url, index === 0 && !notice.reviewers && !notice.targets))
+  const actions: Record<string, unknown>[] = []
+  if (notice.reviewers?.length) {
+    actions.push(choiceForm('pipeline_reviewers', '选审核人（可多选）', notice.reviewers,
+      pipelineButton('发到 Swarm', id, 'reviewers', 'primary_filled', { name: 'submit_reviewers', form_action_type: 'submit' })))
+  }
+  if (notice.targets?.length) {
+    actions.push(choiceForm('pipeline_send', '选人或群（可多选）', notice.targets,
+      pipelineButton('发送编辑器包', id, 'send', 'primary_filled', { name: 'submit_send', form_action_type: 'submit' })))
+  }
+  const own = [
+    ...notice.rerun ? [pipelineButton('重跑检查', id, 'rerun', 'default')] : [],
+    ...notice.close ? [pipelineButton('关单', id, 'close', 'default', { confirm: { title: plain('关单？'), text: plain('关单后工单结束，不再跟进 autobuild。') } })] : [],
+  ]
+  const card = {
+    schema: '2.0',
+    config: { update_multi: true, width_mode: 'default' },
+    header: { title: plain(notice.heading), subtitle: plain(`${clip(notice.title, 30)} · 工单 ${id.slice(0, 8)}`), template: PIPELINE_TEMPLATES[notice.tone] },
+    body: {
+      direction: 'vertical', padding: '12px 12px 16px 12px', vertical_spacing: '10px',
+      elements: [
+        ...notice.lines.length ? [markdown(notice.lines.join('\n'))] : [],
+        ...links.length ? [buttonRow(links)] : [],
+        ...actions,
+        ...own.length ? [buttonRow(own)] : [],
+        ...ticketLink ? [ticketLinkLine(id, ticketLink)] : [],
+      ],
+    },
+  }
+  return { card, text: textSafe(text) }
+}
+/** The card that replaces a pipeline card after a click: what was done, or why it could not be. */
+export function pipelineResultCard (ticket: Pick<Ticket, 'id' | 'title'>, outcome: { ok: boolean; heading: string; line: string }): CardMessage {
+  const card = {
+    schema: '2.0',
+    config: { update_multi: true },
+    header: { title: plain(outcome.heading), subtitle: plain(`${clip(ticket.title, 30)} · 工单 ${shortId(ticket)}`), template: outcome.ok ? 'green' : 'red' },
+    body: { direction: 'vertical', padding: '12px 12px 16px 12px', elements: [markdown(outcome.line)] },
+  }
+  return { card, text: textSafe(`${outcome.heading}：${outcome.line}`) }
 }
 /** Replaces a card in place with the delayed-update token its button callback carries (valid 30 minutes, two uses). */
 export async function updateCard(host: CardHost, token: string, message: CardMessage): Promise<void> {

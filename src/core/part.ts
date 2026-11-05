@@ -3,6 +3,7 @@ import { UserError } from './errors.ts'
 import { followupOwners, reached, threadKey } from './model.ts'
 import type { Thread, ThreadRef, Ticket, Trigger } from './model.ts'
 import type { Backend, Execution } from './model.ts'
+import type { PipelineChoices } from './pipeline-notice.ts'
 import type { Assessor, AssessmentOutcome, DomainEvent, DomainEvents, Executor, Outbox, Policy, Repositories, SourceScope } from './ports.ts'
 
 export interface EngineOptions {
@@ -25,6 +26,8 @@ export interface EngineOptions {
   swarmUrl?: () => string
   /** Whether delivered work goes on to the host's pipeline follow-up: the p4 backend has one, a git backend has no Swarm/Jenkins stage. */
   pipelineFollowup?: (ticket: Ticket) => boolean
+  /** The reviewers and package targets a pipeline card offers, from the deployment's p4 settings; none without it. */
+  pipelineChoices?: () => PipelineChoices
   /** Minutes a `TAPD` ticket's priority question waits before the `P2` default applies; the deployment's `executor.idle.priorityAskMin`. */
   priorityAskMinutes?: () => number
   now?: () => string

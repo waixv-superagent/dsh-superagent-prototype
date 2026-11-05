@@ -148,6 +148,26 @@ export const P4ConfigSchema = z.object({
   jenkinsToken: z.string().trim().max(500).default(''),
   /** Jenkins job Swarm triggers after a review is approved; its build is the pre-submit smoke. Empty disables that step. */
   postApprovalJob: z.string().trim().max(200).default('PostApproval-Entry'),
+  /**
+   * The people a review-waiting card offers to add as Swarm reviewers: a display name and the p4 account the click adds.
+   * Empty keeps the card without a reviewer choice.
+   */
+  reviewers: z.array(z.object({ label: z.string().trim().min(1).max(60), user: z.string().trim().min(1).max(100) }).strict()).max(40).default([]),
+  /**
+   * Jenkins job that builds the editor after a submit. With one set, a submitted change waits for its build: the ticket
+   * stays open until the build passed and a person sends the package or closes it. Empty completes the ticket at the submit.
+   */
+  autobuildJob: z.string().trim().max(200).default(''),
+  /**
+   * The package link of a passed autobuild, with `<build>` (build number), `<cl>` (the build's changelist) and `<url>` (the
+   * build page) filled in. Empty uses the build page.
+   */
+  autobuildArtifact: z.string().trim().max(500).default(''),
+  /** Where an autobuild card may send the package: a display name and a Feishu person (`ou_…`) or chat (`oc_…`). */
+  autobuildTargets: z.array(z.object({ label: z.string().trim().min(1).max(60), id: z.string().trim().regex(/^o[uc]_[A-Za-z0-9]+$/) }).strict())
+    .max(40).default([]),
+  /** Minutes after a submit with no autobuild including it before the card says so. */
+  autobuildMinutes: z.number().int().min(10).max(1440).default(120),
   /** Seconds between host polls of an open change's Swarm review; 0 turns the automatic follow-up off. */
   followupSeconds: z.number().int().min(0).max(3600).default(60),
   /** How many times a failing pipeline wakes its worker to fix it before it asks a person. */

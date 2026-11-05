@@ -709,6 +709,7 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-pipeline-gate-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding-top: 9px; border-top: .5px solid var(--dsw-alias-border-l2); }
 /* The ticket's stage strip: one node per step, joined by a line so the flow reads left to right. */
 .dt-pipe-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; list-style: none; margin: 0; padding: 0; }
+.dt-pipe-steps:has(> :nth-child(5)) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .dt-pipe-step { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); }
 .dt-pipe-step:not(:last-child)::after { content: ''; position: absolute; top: 6px; left: 14px; right: 4px; height: 1px; background: var(--dsw-alias-border-l2); }
 .dt-pipe-step[data-state='done']::after, .dt-pipe-step[data-state='current']::after { background: color-mix(in srgb, #7c5cff 42%, var(--dsw-alias-border-l2)); }

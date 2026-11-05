@@ -60,6 +60,13 @@ export function ExecutionStatus({ filter: current, kind, state, reload }: {
 }
 
 const firstSentence = (text: string): string => /^[^。；;.]*(?:[。；;]|\.(?=\s|$))?/.exec(text)?.[0] ?? text
+/** "name=value" lines for a list of pairs. */
+export const pairLines = (pairs: readonly (readonly [string, string])[]): string => pairs.map(([label, value]) => `${label}=${value}`).join('\n')
+/** The pairs of "name=value" lines; a line without `=` uses its text for both, and blank lines are skipped. */
+export const parsePairs = (text: string): [string, string][] => text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
+  const at = line.lastIndexOf('=')
+  return at < 0 ? [line, line] : [line.slice(0, at).trim() || line.slice(at + 1).trim(), line.slice(at + 1).trim()]
+})
 function EnvironmentVariables({ groups, sources,
   onPick }: { groups: SettingsView['environment']['variables']; sources: SourceView[]; onPick: (key: string) => void }) {
   const { t } = usePanel()
@@ -86,9 +93,14 @@ export function ExecutionSettings() {
   const { blocks, environment, sources } = useSettings().settings
   // Keep raw user text (such as separators between blocked commands) in the draft and parse only on save.
   const executor = blocks.executor.value
-  const saved = { ...executor, maxWorkers: String(executor.maxWorkers), blockedCommands: executor.blockedCommands.join(' ') }
+  // The reviewer and package-recipient lists are edited as "name=value" lines and parsed back only on save.
+  const saved = { ...executor, maxWorkers: String(executor.maxWorkers), blockedCommands: executor.blockedCommands.join(' '),
+    p4: { ...executor.p4, reviewers: pairLines(executor.p4.reviewers.map(item => [item.label, item.user])),
+      autobuildTargets: pairLines(executor.p4.autobuildTargets.map(item => [item.label, item.id])) } }
   const draft = useBlockDraft('executor', saved, blocks.executor.revision,
-    value => ({ ...value, maxWorkers: numberOf(value.maxWorkers), blockedCommands: value.blockedCommands.split(/[\s,]+/).filter(Boolean) }))
+    value => ({ ...value, maxWorkers: numberOf(value.maxWorkers), blockedCommands: value.blockedCommands.split(/[\s,]+/).filter(Boolean),
+      p4: { ...value.p4, reviewers: parsePairs(value.p4.reviewers).map(([label, user]) => ({ label, user })),
+        autobuildTargets: parsePairs(value.p4.autobuildTargets).map(([label, id]) => ({ label, id })) } }))
   const value = draft.value
   const edit = (next: Partial<typeof value>) => draft.edit({ ...value, ...next })
   const prepare = useRef<HTMLTextAreaElement>(null)
@@ -168,6 +180,24 @@ export function ExecutionSettings() {
               <Input className="dt-mono" value={value.p4.postApprovalJob} placeholder={t('postApprovalJobEmpty')} spellCheck={false}
                 onChange={event => edit({ p4: { ...value.p4, postApprovalJob: event.target.value } })} />
             </Field>
+            <Field label={t('p4Reviewers')} hint={t('p4ReviewersHint')}>
+              <textarea className="dt-textarea dt-mono" rows={3} spellCheck={false} placeholder="张三=zhangsan" value={value.p4.reviewers}
+                onChange={event => edit({ p4: { ...value.p4, reviewers: event.target.value } })} />
+            </Field>
+            <Field label={t('autobuildJob')} hint={t('autobuildJobHint')}>
+              <Input className="dt-mono" value={value.p4.autobuildJob} placeholder={t('autobuildJobEmpty')} spellCheck={false}
+                onChange={event => edit({ p4: { ...value.p4, autobuildJob: event.target.value } })} />
+            </Field>
+            {value.p4.autobuildJob.trim() && <>
+              <Field label={t('autobuildArtifact')} hint={t('autobuildArtifactHint')}>
+                <Input className="dt-mono" value={value.p4.autobuildArtifact} placeholder="<url>" spellCheck={false}
+                  onChange={event => edit({ p4: { ...value.p4, autobuildArtifact: event.target.value } })} />
+              </Field>
+              <Field label={t('autobuildTargets')} hint={t('autobuildTargetsHint')}>
+                <textarea className="dt-textarea dt-mono" rows={3} spellCheck={false} placeholder="编辑器群=oc_xxx" value={value.p4.autobuildTargets}
+                  onChange={event => edit({ p4: { ...value.p4, autobuildTargets: event.target.value } })} />
+              </Field>
+            </>}
           </>}
           <EnvironmentVariables groups={environment.variables} sources={sources} onPick={insert} />
           <Field label={t('editorProject')} hint={t('editorProjectHint')}>

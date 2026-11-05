@@ -234,6 +234,12 @@ export class Engine {
    */
   resumePipeline(ticketId: string): Ticket { return this.repo.atomic(() => this.tickets.resumePipeline(ticketId)) }
   /**
+   * A person closed a submitted change from its pipeline card: the autobuild after the submit needs nothing more, so the
+   * ticket completes.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  closePipeline(ticketId: string): Ticket { return this.repo.atomic(() => this.tickets.closePipeline(ticketId)) }
+  /**
    * A person's local check found a problem: records it and returns the ticket to implement with their words as the next
    * Assignment's first Input, so the worker fixes the delivered work.
    * @throws UserError when the ticket is not open and waiting for local verification.
@@ -402,7 +408,8 @@ export class Engine {
 }
 
 /** What Sources ask and tell the Engine. */
-export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThread' | 'retarget' | 'threadClosed' | 'decidePlan' | 'answerAttention' | 'decidePriority'>
+export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThread' | 'retarget' | 'threadClosed' | 'decidePlan' | 'answerAttention' | 'decidePriority'
+  | 'rerunPipeline' | 'closePipeline'>
 /** What the main Session asks of the Engine. */
 export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'>
 /** What people ask of the Engine, through the panel or the main Session. */

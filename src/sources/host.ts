@@ -1,5 +1,5 @@
 /** Host and context interfaces connecting Source plugins to the application; also imported by the web panel, so it must not import Node-only modules. */
-import type { ChannelRef, PlanDecision, PlanVia, PriorityLevel, PriorityVia, ReceiveResult, OutboundMessage, Thread, ThreadFact, ThreadRef, Ticket, Trigger,
+import type { ChannelRef, PipelineChoices, PlanDecision, PlanVia, PriorityLevel, PriorityVia, ReceiveResult, OutboundMessage, Thread, ThreadFact, ThreadRef, Ticket, Trigger,
   TriggerDisposition } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
 import type { Deployment } from '../deployment.ts'
@@ -105,6 +105,16 @@ export interface SourceContext {
    * own actor, and a ticket another Source started (TAPD has no UI of its own) by a person the Policy allows on this Source.
    */
   mayDecidePriority(ticketId: string, actor: string): boolean
+  /**
+   * A person's click on a pipeline card: add the reviewers they chose to the Swarm review, rerun its failing checks, or
+   * close a submitted change. Returns what was done (the added accounts, the rerun checks).
+   * @throws when the ticket or its review is unknown, or Swarm refused; the message says why.
+   */
+  pipelineAction(ticketId: string, action: { kind: 'reviewers'; users: string[] } | { kind: 'rerun' } | { kind: 'close' }): Promise<{ done: string[] }>
+  /** Whether a person may act on a ticket's pipeline card: its own actor, or a person the Policy allows on this Source. */
+  mayActOnPipeline(ticketId: string, actor: string): boolean
+  /** The reviewers and package targets the deployment configured, so a card can say which one a click chose. */
+  pipelineChoices(): PipelineChoices
   /** Reports the state of one of this kind's declared health entries; throws for undeclared entry names. */
   report(entry: string, health: Health): void
 }

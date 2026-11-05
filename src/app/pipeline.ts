@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Settings } from '../policy.ts'
+import type { PipelineChoices } from '../core/index.ts'
 
 export interface PipelineTestrun {
   id: string | number | null
@@ -76,6 +77,18 @@ export interface PipelineApprovalBuild {
 /** What a changelist looks like on the server: still pending, or gone because a submit renumbered it. */
 export type ChangeState = 'pending' | 'submitted' | 'missing'
 
+/** The editor autobuild that includes a submitted change, and the package link a person may forward. */
+export interface PipelineAutobuild {
+  number: number
+  url: string
+  state: 'running' | 'passed' | 'failed'
+  /** The changelist the build was cut from, when its parameters name one. */
+  change?: number
+  artifact: string
+}
+/** Build parameter names, normalized, that carry the changelist an autobuild built. */
+const CHANGE_PARAMS = ['changelist', 'change', 'cl', 'pchangelist', 'pchange', 'revision']
+
 export interface JenkinsLog {
   job: string
   build: string
@@ -98,6 +111,12 @@ export interface PipelineChecksHost {
 const TIMEOUT = 30_000
 const MAX_ERRORS = 40
 const TAIL_LINES = 60
+
+/** The choices a pipeline card offers from the p4 settings: reviewers to add on Swarm, and where a package may be sent. */
+export const pipelineChoices = (settings: Settings): PipelineChoices => ({
+  reviewers: settings.executor.p4.reviewers.map(item => ({ label: item.label, value: item.user })),
+  targets: settings.executor.p4.autobuildTargets.map(item => ({ label: item.label, value: item.id })),
+})
 
 /** Review id from an id or a review URL; throws instead of guessing. */
 export function reviewIdOf (input: string): string {
@@ -398,6 +417,78 @@ export class PipelineChecks {
       state: result === null ? 'running' : result === 'SUCCESS' ? 'passed' : 'failed',
       at: typeof chosen.timestamp === 'number' ? Math.floor(chosen.timestamp / 1000) : null
     }
+  }
+
+  /**
+   * The editor autobuild that includes a submitted change. The configured job's builds are read newest first; a build whose
+   * changelist parameter is at or after `change` includes it, and the earliest such build is the one to follow. A job whose
+   * builds carry no changelist parameter is matched by time instead: the first build that started after the submit. Null
+   * when the step is disabled or unreadable, or no build includes the change yet.
+   */
+  async autobuildBuild (submit: { change?: number; at: number }): Promise<PipelineAutobuild | null> {
+    const job = this.p4.autobuildJob.trim()
+    const base = this.p4.jenkinsUrl.trim()
+    const token = this.p4.jenkinsToken.trim()
+    if (!job || !base || !token) return null
+    const user = this.p4.jenkinsUser.trim() || this.p4.user.trim() || this.env.P4USER?.trim()
+    if (!user) throw new Error('Jenkins user is not configured; set executor.p4.jenkinsUser or executor.p4.user')
+    const root = base.replace(/\/$/, '')
+    const url = `${root}/job/${encodeURIComponent(job)}/api/json?tree=builds[number,url,timestamp,result,actions[parameters[name,value]]]{0,30}&depth=1`
+    const response = await this.fetchImpl(url, {
+      headers: { authorization: `Basic ${Buffer.from(`${user}:${token}`).toString('base64')}` },
+      signal: AbortSignal.timeout(TIMEOUT)
+    })
+    if (response.status === 404) return null
+    if (response.status === 401 || response.status === 403) throw new Error(`Jenkins rejected the credentials (HTTP ${response.status})`)
+    if (!response.ok) throw new Error(`Jenkins returned HTTP ${response.status} for ${url}`)
+    const body = await response.json() as { builds?: unknown }
+    const builds = (Array.isArray(body.builds) ? body.builds : [])
+      .filter((build): build is { number: number; url?: unknown; timestamp?: unknown; result?: unknown } =>
+        !!build && typeof build === 'object' && typeof (build as { number?: unknown }).number === 'number')
+    const changeOf = (build: unknown): number | undefined => {
+      const value = buildParameters(build).find(param => CHANGE_PARAMS.includes(paramKey(param.name)))?.value.trim()
+      return value && /^\d+$/.test(value) ? Number(value) : undefined
+    }
+    const counted = builds.some(build => changeOf(build) !== undefined)
+    const including = builds.filter(build => {
+      if (counted && submit.change !== undefined) {
+        const change = changeOf(build)
+        return change !== undefined && change >= submit.change
+      }
+      return typeof build.timestamp === 'number' && build.timestamp >= submit.at
+    })
+    // The earliest build that includes the change answers whether it built; a later one would hide a failure.
+    const chosen = including.sort((a, b) => a.number - b.number)[0]
+    if (!chosen) return null
+    const page = typeof chosen.url === 'string' && chosen.url ? chosen.url : `${root}/job/${encodeURIComponent(job)}/${chosen.number}/`
+    const result = typeof chosen.result === 'string' ? chosen.result : null
+    const change = changeOf(chosen)
+    const template = this.p4.autobuildArtifact.trim()
+    const artifact = template
+      ? template.replaceAll('<build>', String(chosen.number)).replaceAll('<cl>', change === undefined ? '' : String(change)).replaceAll('<url>', page)
+      : page
+    return { number: chosen.number, url: page, state: result === null ? 'running' : result === 'SUCCESS' ? 'passed' : 'failed',
+      ...(change !== undefined ? { change } : {}), artifact }
+  }
+
+  /**
+   * Add people to a review as required reviewers, as a person chose on its card. Swarm appends them to the existing
+   * participants; a refusal is reported with Swarm's own message rather than retried.
+   */
+  async addReviewers (input: string, users: readonly string[]): Promise<string[]> {
+    const { id, api, auth } = this.swarm(input)
+    const wanted = [...new Set(users.map(user => user.trim()).filter(Boolean))]
+    if (!wanted.length) throw new Error('no reviewer chosen')
+    const response = await this.fetchImpl(`${api}/participants`, {
+      method: 'POST',
+      headers: { authorization: `Basic ${Buffer.from(auth).toString('base64')}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ participants: { users: Object.fromEntries(wanted.map(user => [user, { required: 'yes' }])) } }),
+      signal: AbortSignal.timeout(TIMEOUT)
+    })
+    const answer = await response.json().catch(() => null) as { error?: unknown; messages?: { text?: unknown }[] } | null
+    const said = answer?.messages?.map(message => String(message?.text ?? '')).filter(Boolean).join('; ')
+    if (!response.ok || answer?.error) throw new Error(`Swarm refused to add reviewers to review ${id}${said ? `: ${said}` : ` (HTTP ${response.status})`}`)
+    return wanted
   }
 
   /**

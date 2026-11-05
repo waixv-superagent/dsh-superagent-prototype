@@ -386,7 +386,7 @@ describe('subscription fan-out', () => {
     expect(merged.ended).toMatchObject({ outcome: 'completed' })
     // The person's local evidence stays attributed to them; only an unverified change is credited to the pipeline.
     expect(merged.verification).toMatchObject({ state: 'passed', by: 'person' })
-    expect(h.outbox.filter(message => message.text.includes('已提交入库'))).toHaveLength(0)
+    expect(h.outbox.filter(message => message.text.includes('已提交入库'))).toHaveLength(1)
   })
   it('lets a worker ask for a rerun, and a still-failing result wakes it once more', () => {
     const h = harness()
@@ -412,6 +412,46 @@ describe('subscription fan-out', () => {
     const merged = h.engine.observePipeline(id, { kind: 'merged', check: 'CL 已提交入库' })
     expect(merged.ended).toMatchObject({ outcome: 'completed' })
     expect(merged.verification).toMatchObject({ state: 'passed', by: 'pipeline' })
+  })
+  it('keeps a submitted change open for its autobuild, asks once when it passed, and completes when a person closes it', () => {
+    const h = harness()
+    const id = accepted(h).ticketId!
+    h.repo.tickets.save({ ...h.repo.tickets.get(id)!, execution: { name: 'w', directory: '/w', assignment: '', changelist: 123456, review: 'review/9' } })
+    h.engine.report(id, { state: 'ready', summary: 'delivered', delivery: { changelist: 123456, review: 'review/9' } })
+    expect(() => h.engine.closePipeline(id)).toThrow(/no submitted change/)
+    const submitted = h.engine.observePipeline(id, { kind: 'merged', check: 'CL 已提交入库', change: 590001, autobuild: true })
+    expect(submitted.ended).toBeUndefined()
+    expect(submitted.pipeline).toMatchObject({ state: 'running', step: 'autobuild', submitted: { change: 590001 } })
+    expect(submitted.verification).toMatchObject({ state: 'passed', by: 'pipeline' })
+    const merged = h.outbox.filter(message => message.pipeline?.heading === '提交成功')
+    expect(merged).toHaveLength(1)
+    // A late Swarm observation of the submitted review neither reopens the review nor repeats the submit.
+    h.engine.observePipeline(id, { kind: 'merged', check: 'review committed', autobuild: true })
+    h.engine.observePipeline(id, { kind: 'review', signature: '12:pass', check: 'Swarm 已通过，待人工审核' })
+    expect(h.repo.tickets.get(id)!.pipeline?.step).toBe('autobuild')
+    expect(h.outbox.filter(message => message.pipeline?.heading === '提交成功')).toHaveLength(1)
+
+    h.engine.observePipeline(id, { kind: 'autobuild', result: 'running', signature: '41:running', check: 'autobuild #41 构建中', stageUrl: 'https://ci/41' })
+    h.engine.observePipeline(id, { kind: 'autobuild', result: 'running', signature: '41:running', check: 'autobuild #41 构建中', stageUrl: 'https://ci/41' })
+    expect(h.outbox.filter(message => message.pipeline?.heading === 'autobuild 构建中')).toHaveLength(1)
+    const passed = h.engine.observePipeline(id, { kind: 'autobuild', result: 'passed', signature: '41:passed', check: 'autobuild #41 已出编辑器包',
+      artifact: 'https://pkg/41.zip', stageUrl: 'https://ci/41' })
+    expect(passed.pipeline).toMatchObject({ state: 'blocked', manual: true, artifact: 'https://pkg/41.zip' })
+    expect(h.outbox.filter(message => message.pipeline?.heading === 'autobuild 出包成功' && message.pipeline.close)).toHaveLength(1)
+    const closed = h.engine.closePipeline(id)
+    expect(closed.ended).toMatchObject({ outcome: 'completed', by: 'human' })
+    expect(closed.pipeline).toMatchObject({ state: 'merged', step: 'merged' })
+  })
+  it('completes at the submit and says so once when no autobuild is followed', () => {
+    const h = harness()
+    const id = accepted(h).ticketId!
+    h.repo.tickets.save({ ...h.repo.tickets.get(id)!, execution: { name: 'w', directory: '/w', assignment: '', changelist: 123456, review: 'review/9' } })
+    h.engine.report(id, { state: 'ready', summary: 'delivered', delivery: { changelist: 123456, review: 'review/9' } })
+    h.engine.rerunPipeline(id)
+    expect(h.outbox.filter(message => message.pipeline?.heading === '检查重跑中')).toHaveLength(1)
+    const merged = h.engine.observePipeline(id, { kind: 'merged', check: 'CL 已提交入库' })
+    expect(merged.ended).toMatchObject({ outcome: 'completed' })
+    expect(h.outbox.filter(message => message.pipeline?.heading === '提交成功')).toHaveLength(1)
   })
   it('lets an AI verdict that posts after a green review still wake the worker', () => {
     const h = harness()

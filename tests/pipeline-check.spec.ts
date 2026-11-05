@@ -177,3 +177,42 @@ it('refuses Jenkins when no token is configured, and refuses Swarm without a P4 
   const noTicket = new PipelineChecks({ settings: () => settings(), env: {}, home: 'Z:\\nowhere', fetchImpl: async () => response({}) })
   await expect(noTicket.status('1')).rejects.toThrow(/P4 ticket/)
 })
+
+it('finds the earliest autobuild that includes a submitted change and fills the package link', async () => {
+  const calls: string[] = []
+  const config = { jenkinsUrl: 'https://ci.example.com', jenkinsToken: 'secret', autobuildJob: 'Editor-Autobuild',
+    autobuildArtifact: 'https://pkg.example.com/<cl>/editor-<build>.zip' }
+  const builds = [
+    { number: 12, url: 'https://ci/12', timestamp: 3000, result: null, actions: [{ parameters: [{ name: 'P4_CHANGELIST', value: '590010' }] }] },
+    { number: 11, url: 'https://ci/11', timestamp: 2000, result: 'SUCCESS', actions: [{ parameters: [{ name: 'P4_CHANGELIST', value: '590003' }] }] },
+    { number: 10, url: 'https://ci/10', timestamp: 1000, result: 'FAILURE', actions: [{ parameters: [{ name: 'P4_CHANGELIST', value: '589990' }] }] },
+  ]
+  const checks = new PipelineChecks({ settings: () => settings(config), env: { P4USER: 'u' },
+    fetchImpl: async (url: string | URL | Request) => { calls.push(String(url)); return response({ builds }) } })
+  expect(await checks.autobuildBuild({ change: 590001, at: 0 }))
+    .toEqual({ number: 11, url: 'https://ci/11', state: 'passed', change: 590003, artifact: 'https://pkg.example.com/590003/editor-11.zip' })
+  expect(calls[0]).toContain('/job/Editor-Autobuild/api/json')
+  expect(await checks.autobuildBuild({ change: 590020, at: 0 })).toBeNull()
+  // A job whose builds name no changelist is matched by time: the first build that started after the submit.
+  const timed = new PipelineChecks({ settings: () => settings({ ...config, autobuildArtifact: '' }), env: { P4USER: 'u' },
+    fetchImpl: async () => response({ builds: [{ number: 5, url: 'https://ci/5', timestamp: 500, result: null }, { number: 4, timestamp: 100, result: 'SUCCESS' }] }) })
+  expect(await timed.autobuildBuild({ at: 200 })).toEqual({ number: 5, url: 'https://ci/5', state: 'running', artifact: 'https://ci/5' })
+  // No job configured: nothing is read.
+  const off = new PipelineChecks({ settings: () => settings({ jenkinsUrl: 'https://ci.example.com', jenkinsToken: 'secret' }),
+    fetchImpl: async () => { throw new Error('should not fetch') } })
+  expect(await off.autobuildBuild({ at: 0 })).toBeNull()
+})
+
+it('adds chosen reviewers to a review as required, and reports Swarm\'s refusal', async () => {
+  const sent: { url: string; init?: RequestInit }[] = []
+  const checks = new PipelineChecks({ settings: () => settings(), env: { P4USER: 'u', P4TICKET: 't' },
+    fetchImpl: async (url: string | URL | Request, init?: RequestInit) => { sent.push({ url: String(url), ...init ? { init } : {} }); return response({ error: null, data: {} }) } })
+  expect(await checks.addReviewers('416666', ['zhangsan', 'zhangsan', 'lisi'])).toEqual(['zhangsan', 'lisi'])
+  expect(sent[0]!.url).toBe('https://swarm.example.com/api/v10/reviews/416666/participants')
+  expect(sent[0]!.init?.method).toBe('POST')
+  expect(JSON.parse(String(sent[0]!.init?.body))).toEqual({ participants: { users: { zhangsan: { required: 'yes' }, lisi: { required: 'yes' } } } })
+  const refused = new PipelineChecks({ settings: () => settings(), env: { P4USER: 'u', P4TICKET: 't' },
+    fetchImpl: async () => response({ error: 400, messages: [{ text: 'unknown participant id' }] }, { ok: false, status: 400 }) })
+  await expect(refused.addReviewers('416666', ['ghost'])).rejects.toThrow(/unknown participant id/)
+  await expect(checks.addReviewers('416666', [' '])).rejects.toThrow(/no reviewer/)
+})

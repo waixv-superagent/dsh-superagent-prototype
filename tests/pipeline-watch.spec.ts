@@ -33,6 +33,7 @@ function harness (tickets: Ticket[], checks: Partial<PipelineWatchHost['checks']
       changeState: vi.fn(async () => 'pending' as const),
       jenkins: vi.fn(async () => ({ job: 'ClientBuild', build: '1', url: 'https://ci/1', errors: ['a.cpp:1:1: error: boom'], tail: [], truncated: false })),
       approvalBuild: vi.fn(async () => null),
+      autobuildBuild: vi.fn(async () => null),
       ...checks
     },
     ...(extra.paused ? { paused: extra.paused } : {}),
@@ -133,6 +134,40 @@ describe('PipelineWatch', () => {
     await failed.watch.poll()
     expect(failed.observations[0]![1]).toMatchObject({ kind: 'blocked', step: 'smoke', check: '提交前冒烟失败（#7）' })
     expect((failed.observations[0]![1] as Extract<PipelineObservation, { kind: 'blocked' }>).reason).toContain('构建日志')
+  })
+  it('follows the autobuild after a submit when a job is set, and asks once the wait runs out', async () => {
+    const config = { jenkinsUrl: 'https://ci.example.com', jenkinsToken: 'secret', autobuildJob: 'Editor-Autobuild', autobuildMinutes: 30 }
+    const merged = harness([ticket()], { review: vi.fn(async () => review({ state: 'approved', commits: [590001] })) }, config)
+    await merged.watch.poll()
+    expect(merged.observations[0]![1]).toMatchObject({ kind: 'merged', change: 590001, autobuild: true })
+    const off = harness([ticket()], { review: vi.fn(async () => review({ state: 'committed' })) })
+    await off.watch.poll()
+    expect(off.observations[0]![1]).not.toHaveProperty('autobuild')
+
+    const submittedAt = new Date(NOW - 60_000).toISOString()
+    const waiting = ticket({ pipeline: { state: 'running', at: submittedAt, step: 'autobuild', submitted: { at: submittedAt, change: 590001 } } })
+    const autobuildBuild = vi.fn(async () => ({ number: 41, url: 'https://ci/41', state: 'passed' as const, change: 590003, artifact: 'https://pkg/41.zip' }))
+    const passed = harness([waiting], { autobuildBuild }, config)
+    await passed.watch.poll()
+    expect(autobuildBuild).toHaveBeenCalledWith({ change: 590001, at: NOW - 60_000 })
+    expect(passed.observations[0]![1]).toMatchObject({ kind: 'autobuild', result: 'passed', signature: '41:passed', artifact: 'https://pkg/41.zip', stageUrl: 'https://ci/41' })
+    // A passed build waiting for the person is not read again.
+    const sent = harness([{ ...waiting, pipeline: { ...waiting.pipeline!, state: 'blocked', manual: true, observed: '41:passed' } }], { autobuildBuild }, config)
+    await sent.watch.poll()
+    expect(sent.observations).toEqual([])
+
+    const quiet = harness([waiting], { autobuildBuild: vi.fn(async () => null) }, config)
+    await quiet.watch.poll()
+    expect(quiet.observations).toEqual([])
+    const late = new Date(NOW - 31 * 60_000).toISOString()
+    const timeout = harness([ticket({ pipeline: { state: 'running', at: late, step: 'autobuild', submitted: { at: late } } })], { autobuildBuild: vi.fn(async () => null) }, config)
+    await timeout.watch.poll()
+    expect(timeout.observations[0]![1]).toMatchObject({ kind: 'autobuild', result: 'timeout', signature: 'timeout' })
+  })
+  it('tags each manual blocker with what kind of wait it is', async () => {
+    const h = harness([ticket({ pipeline: { state: 'running', at: '2026-11-02T22:00:00Z' } })], { review: vi.fn(async () => review({ testStatus: 'none', changedAt: null })) })
+    await h.watch.poll()
+    expect(h.observations[0]![1]).toMatchObject({ kind: 'blocked', topic: 'noResult' })
   })
   it('counts running pre-approval checks instead of saying only "running"', async () => {
     const h = harness([ticket()], { review: vi.fn(async () => review({ testStatus: 'running' })),
