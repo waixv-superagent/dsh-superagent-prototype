@@ -10,6 +10,9 @@ import { server, usePanelServer } from './panel-server.ts'
 
 declare global { var IS_REACT_ACT_ENVIRONMENT: boolean }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
+// jsdom has no canvas: its getContext logs "Not implemented" and returns null. The relation cloud draws nothing without
+// a context, so answer null quietly and keep that fallback the one the tests run.
+if (typeof HTMLCanvasElement !== 'undefined') HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext
 
 export const translator = (dictionary: Record<string, string>): T => ((key: string, params?: Record<string, unknown>) => {
   const template = dictionary[key] ?? key

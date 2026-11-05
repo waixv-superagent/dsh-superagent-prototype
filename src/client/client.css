@@ -982,7 +982,7 @@ button.dt-problem-title:hover { color: var(--dsw-alias-label-primary); text-deco
 .dt-graph-frame { min-width: 0; overflow: hidden; border: .5px solid var(--dsw-alias-border-l2); border-radius: 14px; background: radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--dsw-alias-brand-primary) 5%, transparent), transparent 70%), var(--dsw-alias-bg-layer-1); }
 .dt-graph-scroll { overflow-x: auto; }
 .dt-graph-svg { display: block; font-size: 11px; user-select: none; }
-.dt-graph-cloud { width: 100%; height: auto; touch-action: none; }
+.dt-graph-cloud { position: relative; width: 100%; height: auto; touch-action: none; }
 .dt-graph-tick line { stroke: var(--dsw-alias-border-l2); stroke-dasharray: 2 4; }
 .dt-graph-tick text { fill: var(--dsw-alias-label-caption); text-anchor: middle; font-variant-numeric: tabular-nums; }
 .dt-graph-lane rect { fill: transparent; }
@@ -1007,9 +1007,6 @@ button.dt-problem-title:hover { color: var(--dsw-alias-label-primary); text-deco
 .dt-graph-node[data-dim] { opacity: .15; }
 .dt-graph-node circle { fill: var(--dt-g); stroke: var(--dsw-alias-bg-layer-1); stroke-width: 1.5; }
 .dt-graph-node .dt-graph-span { fill: color-mix(in srgb, var(--dt-g) 26%, transparent); stroke: none; }
-.dt-graph-node .dt-graph-halo { fill: color-mix(in srgb, var(--dt-g) 16%, transparent); stroke: none; opacity: 0; transition: opacity 140ms ease; }
-.dt-graph-node[data-hover] .dt-graph-halo { opacity: 1; }
-.dt-graph-node:focus-visible .dt-graph-halo { opacity: 1; }
 .dt-graph-node[data-hover] .dt-graph-span { fill: color-mix(in srgb, var(--dt-g) 45%, transparent); }
 .dt-graph-label { fill: var(--dsw-alias-label-primary); font-size: 12px; paint-order: stroke; stroke: var(--dsw-alias-bg-layer-1); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 .dt-graph-legend { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; color: var(--dsw-alias-label-secondary); font-size: 12px; }
@@ -1021,3 +1018,38 @@ button.dt-problem-title:hover { color: var(--dsw-alias-label-primary); text-deco
 .dt-graph-swatch[data-tone='pipeline'] { background: var(--dt-g-pipeline); }
 .dt-graph-swatch[data-tone='done'] { background: var(--dt-g-done); }
 .dt-graph-swatch[data-tone='closed'] { background: var(--dt-g-closed); }
+/* The cloud is silver on a charcoal card on every panel theme: stages read by lightness and a faint warm or cool cast, not
+   hue, and the legend follows while the cloud is shown. The timeline keeps the panel surface. */
+.dt-graph[data-layout='cloud'] { --dt-g-working: #f2f4f6; --dt-g-person: #e6dccb; --dt-g-pipeline: #c3cedb; --dt-g-idle: #a9adb3; --dt-g-done: #8e939a; --dt-g-closed: #5d6167; --dt-gc-bg: #1a1b1e; --dt-gc-rim: #2a2c30; --dt-gc-edge: rgba(200, 205, 212, .14); --dt-gc-lit: rgba(214, 218, 224, .45); --dt-gc-label: #aeb2b8; --dt-gc-label-hover: #f0f2f4; --dt-gc-label-minor: #8f949b; }
+.dt-graph-frame[data-layout='cloud'] { border-color: #2a2b2f; background: radial-gradient(70% 65% at 50% 46%, rgba(255, 255, 255, .028), transparent 72%), radial-gradient(130% 120% at 50% 50%, transparent 60%, rgba(0, 0, 0, .22)), var(--dt-gc-bg); }
+.dt-graph-cloud-stage { position: relative; }
+.dt-graph-cloud-life { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.dt-graph-cloud .dt-graph-edge { stroke: var(--dt-gc-edge); stroke-width: .8; stroke-dasharray: none; opacity: 1; transition: opacity 200ms ease, stroke 200ms ease; }
+.dt-graph-cloud .dt-graph-edge[data-kind='spawned'] { stroke: rgba(200, 205, 212, .19); }
+.dt-graph-cloud .dt-graph-edge[data-kind='supersedes'] { stroke-dasharray: 4 3; }
+.dt-graph-cloud .dt-graph-edge[data-kind='blocks'] { stroke-dasharray: 2 3; }
+.dt-graph-cloud .dt-graph-edge[data-lit] { stroke: var(--dt-gc-lit); stroke-width: 1; }
+.dt-graph-cloud .dt-graph-edge[data-dim] { opacity: .3; }
+.dt-graph-cloud .dt-graph-arrow { fill: rgba(214, 218, 224, .6); }
+.dt-graph-cloud .dt-graph-node { transition: opacity 200ms ease; }
+.dt-graph-cloud .dt-graph-node[data-dim] { opacity: .18; }
+/* Frosted silver nodes: a flat fill, a faint sheen (its gradient is set on the element), a 1px dark stroke, a top-left
+   gleam on the bigger ones and a ring on hubs. Strokes are 1 CSS px whatever the scale. */
+.dt-graph-cloud .dt-graph-dot { fill: var(--dt-g); stroke: var(--dt-gc-rim); stroke-width: 1px; vector-effect: non-scaling-stroke; transition: fill 200ms ease, stroke 200ms ease; }
+.dt-graph-cloud .dt-graph-dress { pointer-events: none; }
+.dt-graph-cloud .dt-graph-sheen { stroke: none; }
+.dt-graph-cloud .dt-graph-gleam { fill: none; stroke: rgba(255, 255, 255, .22); stroke-width: 1px; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.dt-graph-cloud .dt-graph-ring { fill: none; stroke: rgba(215, 218, 222, .18); stroke-width: 1px; vector-effect: non-scaling-stroke; transition: stroke 200ms ease; }
+.dt-graph-cloud .dt-graph-node[data-hover] .dt-graph-dot, .dt-graph-cloud .dt-graph-node:focus-visible .dt-graph-dot { stroke: #e8ebef; }
+.dt-graph-cloud .dt-graph-node[data-hover] .dt-graph-ring { stroke: rgba(215, 218, 222, .26); }
+.dt-graph-cloud .dt-graph-label { fill: var(--dt-gc-label); stroke: var(--dt-gc-bg); stroke-width: 3px; font-size: 12px; animation: dt-graph-label-in 200ms ease; }
+.dt-graph-cloud .dt-graph-label[data-minor] { fill: var(--dt-gc-label-minor); font-size: 11px; }
+.dt-graph-cloud .dt-graph-label[data-hover] { fill: var(--dt-gc-label-hover); font-weight: 500; }
+/* The legend sits on the panel, so each stage swatch is a small silver node on a charcoal chip, as it looks in the cloud. */
+.dt-graph[data-layout='cloud'] .dt-graph-swatch { box-shadow: 0 0 0 1px var(--dt-gc-rim), 0 0 0 3px var(--dt-gc-bg); margin: 0 2px; }
+.dt-graph[data-layout='cloud'] .dt-graph-legend .dt-graph-edge { stroke: #8a8f96; opacity: 1; stroke-width: 1; }
+@keyframes dt-graph-label-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .dt-graph-cloud .dt-graph-label { animation: none; }
+  .dt-graph-cloud .dt-graph-edge, .dt-graph-cloud .dt-graph-node, .dt-graph-cloud .dt-graph-dot, .dt-graph-cloud .dt-graph-ring { transition: none; }
+}

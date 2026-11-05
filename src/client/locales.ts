@@ -211,7 +211,7 @@ const TEXT = {
   graphLayoutTimeline: ['时间线', 'Timeline'],
   graphLayoutCloud: ['点云', 'Cloud'],
   graphHint: ['横轴是时间，每条泳道是一个话题；箭头从开单的那张指向被开出来的那张。点节点打开工单。', 'Time runs left to right, one lane per conversation; arrows point from the Ticket that started another. Click a node to open it.'],
-  graphCloudHint: ['有关系的工单聚在一起，节点越大越久。拖动节点可以挪开，点节点打开工单。', 'Related Tickets cluster together; bigger nodes ran longer. Drag a node to move it, click it to open the Ticket.'],
+  graphCloudHint: ['有关系的工单聚在一起，节点越大关系越多、越亮越活跃，会轻微漂动，小光点沿关系从开单的那张流向被开出来的那张。拖动节点可以挪开，点节点打开工单。', 'Related Tickets cluster together; bigger nodes have more relations and brighter ones are more active. The cloud drifts gently, and specks run along each relation from the Ticket that started the other. Drag a node to move it, click it to open the Ticket.'],
   graphEmpty: ['还没有工单。', 'No Tickets yet.'],
   graphCount: ['{nodes} 张工单 · {edges} 条关系', '{nodes} Tickets · {edges} relations'],
   graphCapped: ['只画最近 {shown} 张（共 {total} 张）', 'Showing the latest {shown} of {total}'],
