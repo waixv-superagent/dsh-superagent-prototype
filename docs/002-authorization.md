@@ -15,6 +15,8 @@ The Source records whether a message addresses the agent: `mention` for a mentio
 - Other human messages use the admission table for their receiving scope.
 - A bot on the Source's bot list can produce an inferred candidate, never an explicit request. Other bots are not admitted.
 
+The Web panel's request form is a Source too: it submits as the deployment's operator, whom the Web Source's Policy part lists, so an addressed request from it is explicit. The form cannot submit as anyone else, and the operator's identity is a Policy record rather than a field of the form.
+
 ### Subscriptions: continuing existing work
 
 Every message on a subscribed Thread reaches its subscribed Tickets as context, including messages from bots and CI. This delivery bypasses the gate and grants no new authority. Each Ticket remains limited by its Mandate.

@@ -12,6 +12,7 @@ import { ticketMark } from './marks.ts'
 import { GLOSSARY, GLOSSARY_VALUES, en, zh, type DshSuperagentKey } from './locales.ts'
 import { OverviewPage } from './overview.tsx'
 import { PanelProvider, usePanel, usePanelData } from './provider.tsx'
+import { RequestButton } from './request.tsx'
 import { HOME, TABS, historyEntry, initialLocation, lastSettingsGroup, remember, routeLabel, settingsRoute, writeHistory,
   type BoardFocus, type HomeView, type Location, type Route, type Tab } from './route.ts'
 import { SettingsPage } from './settings.tsx'
@@ -172,6 +173,7 @@ function Header({ masterId }: { masterId: string | undefined }) {
       </form>
       <Button variant="ghost" size="sm" icon={<Icon name="question" />} aria-label={t('glossary')} title={t('glossary')} aria-haspopup="dialog"
         onClick={() => setGlossary(true)} />
+      <RequestButton />
       <Button variant="outline" size="sm" icon={<Icon name="session" size={14} />} disabled={!masterId}
         onClick={() => { if (masterId) openSession(masterId).catch(failure => notify(errorText(failure))) }}>{t('openMaster')}</Button>
     </div>

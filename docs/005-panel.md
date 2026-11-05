@@ -2,6 +2,8 @@
 
 Open **Superagent** in the DeepSeek Harness Web sidebar to supervise the agent. The panel prioritizes work that needs a person, then system health and history. This document builds on [000 Philosophy](000-philosophy.md) through [004 Prompts](004-prompts.md).
 
+The header's **发起工单** (New ticket) opens a request form. Its text becomes a Trigger of the Web Source: the main Session assesses it like an explicit Feishu request, accepts it into a Ticket when the work is clear, and the board tells the person when its plan waits for a decision. Replies for that Ticket are injected into the main Session, so the person can start work without leaving DeepSeek Harness Web. The panel's header is present on every page, so the form is always one click away.
+
 ## Three questions
 
 Opening the panel answers three questions, in this order:
