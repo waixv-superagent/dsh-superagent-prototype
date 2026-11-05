@@ -559,10 +559,14 @@ async function cliCapture(paths, options) {
   if (!options.pid) {
     throw Object.assign(new Error('the lldb CLI backend attaches to a running process; use --backend dap to launch a program'), { exitCode: 2 })
   }
-  const lldb = resolveLldb(paths)
-  if (!lldb) throw Object.assign(new Error('no lldb found; point --root at a UE workspace with its LLVM toolchain'), { exitCode: 2 })
-  const python = resolvePython(paths.engine)
-  if (!python) throw Object.assign(new Error(`no python311.dll under ${paths.engine}/Binaries/ThirdParty/Python3; lldb cannot start`), { exitCode: 2 })
+  const lldb = options.lldb ? resolve(options.lldb) : resolveLldb(paths)
+  if (!lldb || !existsSync(lldb)) {
+    throw Object.assign(new Error(`no lldb at ${options.lldb ?? '<engine>'}; pass --lldb <path>`), { exitCode: 2 })
+  }
+  const python = options.lldbPython ? resolve(options.lldbPython) : resolvePython(paths.engine)
+  if (!python || !existsSync(python)) {
+    throw Object.assign(new Error(`no Python runtime directory at ${options.lldbPython ?? paths.engine}; pass --lldb-python <dir>`), { exitCode: 2 })
+  }
   if (options.print) {
     process.stdout.write(`${lldb}\n`)
     return 0
@@ -660,6 +664,8 @@ export function parseArgs(argv) {
       case 'break-func': options.functions.push(value()); break
       case 'backend': options.backend = value(); break
       case 'formatters': options.formatters = resolve(value()); break
+      case 'lldb': options.lldb = resolve(value()); break
+      case 'lldb-python': options.lldbPython = resolve(value()); break
       case 'root': options.root = value(); break
       case 'project': options.project = value(); break
       case 'frames': options.frames = Number(value()); break
@@ -699,6 +705,8 @@ Options
   --vars <count>          Variables per scope (default: 40)
   --formatters <file>     Import an LLDB Python formatter script (off by default; the engine's
                           UEDataFormatters.py aborts this lldb-dap build)
+  --lldb <path>           lldb.exe for the cli backend (default: the engine's lldb)
+  --lldb-python <dir>     Directory holding the Python DLL lldb needs (default: the engine's Python3)
   --backend <mode>        auto (default), vscode, dap or cli; auto tries the VS Code C/C++ debugger,
                           then lldb-dap, then the lldb CLI for an attach
   --terminate             Let a launched program exit with the capture; an attached editor is never killed

@@ -61,6 +61,8 @@ Live checks on 2026-11-06, after regenerating the database for `SunEditor Win64 
 | `ue-lldb capture --backend vscode --launch <loop fixture>` | the C/C++ debugger started inside VS Code, stopped at `loop.cpp:1`, and returned the `f`/`main` frames and the `i` variable |
 | `ue-lldb capture --backend vscode --launch <Development editor>` | the `cppvsdbg` session started and launched the editor, but the editor stopped progressing at its Turnkey SDK stage and never reached `FEngineLoop::PreInit` or `UWorld::Tick` within the timeout; attaching to an already-started editor did not start a session |
 | `ue-lldb capture --pid <DebugGame editor>` (lldb) | attached and resolved a source breakpoint, but `continue` did not proceed in the batch run; function-breakpoint resolution crashed `lldb` (`0xC0000005`) and `lldb-dap` aborted (`0xC0000409`) after PDB type errors; see §7 |
+| stock LLVM 20.1.8 `lldb` + Python 3.10 embed on `<Development editor>` | the engine starts and parses, but attaching to the editor grew past 13 GB of memory in about three minutes and had not completed when stopped; not viable |
+| Visual Studio 2022 DTE attach (manual probe) | attached to the editor and added a source breakpoint, but `Debugger.Go` failed with "Cannot execute the method at this time" |
 
 ## 4. `ue-clangd.mjs`
 
@@ -180,8 +182,12 @@ The skill's existing rule still holds: a breakpoint in game module code only bin
   still blocked: `cppvsdbg` starts a session and launches the editor, but the editor stops progressing
   at its Turnkey SDK stage and never reaches `FEngineLoop::PreInit`/`UWorld::Tick`, while attaching to an
   editor that someone else started does not start a `cppvsdbg` session. Installing WinDbg/`cdb` was
-  attempted through `winget` and blocked by a 403 from the Microsoft download host. Until one of those is
-  solved, editor breakpoints remain in Rider; `lldb-dap`/`lldb` also do not debug the editor here (the
+  attempted through `winget` and blocked by a 403 from the Microsoft download host. Two further routes
+  were tried: the stock LLVM 20.1.8 `lldb` (run with a Python 3.10 embeddable runtime, since its
+  `liblldb` links `python310.dll`) starts but attaching to the editor grew past 13 GB without completing
+  in about three minutes; Visual Studio 2022's DTE automation attached to the editor and added a source
+  breakpoint, but `Debugger.Go` failed with "Cannot execute the method at this time". Until one of those
+  is solved, editor breakpoints remain in Rider; `lldb-dap`/`lldb` also do not debug the editor here (the
   engine LLDB aborts on the editor PDB type completion: `0xC0000409`; `lldb -b` crashed with
   `0xC0000005` after `Class ... does not have a complete definition` errors).
 - **A CLI attach timeout can leave the target stopped.** Killing `lldb` mid-attach may leave the
