@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-05T05:34:06.057Z",
+  "deployedClientSHA256": "B3A1625022DF47FA3BE99F9C9EEC3054C5A07EA6CAE7A41ADE0304F9F4081416",
+  "branchClientSHA256": "A3F435BB647E251DC24591833EB65061C02577FE7625519B037690911EF4E3DF",
+  "nodes": 132,
+  "explicitEdges": 73,
+  "similarEdges": 25,
+  "timelineTarget": "飞书回答直接跳转到当前问题卡片位置，且不在浏览器里留下 applink 标签页",
+  "hub": "p4+Swarm 流水线跟进迭代：事件驱动、失败自动排查修复、通过后发待人工审核、审核后跟进提交流水线直到收单",
+  "viewport": "1440x1000@2",
+  "theme": "light"
+}

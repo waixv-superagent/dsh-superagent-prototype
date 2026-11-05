@@ -629,3 +629,22 @@ it('draws spawned edges from hand-backs, related edges for split requests and sh
   // The limit keeps the newest tickets.
   expect(ticketGraph(host, 2)).toMatchObject({ total: 4 })
 })
+
+it('adds the likely relations it guesses after the recorded ones, and keeps them off a ticket\'s page', () => {
+  const host = views()
+  const titles = ['登录页按钮文案错位', '登录页按钮文案在暗色主题下错位', '导出报表按钮', '清理旧日志', '升级依赖包', '补齐英文文案', '调大超时时间', '去掉调试输出']
+  titles.forEach((title, i) => {
+    const id = `s${i}`
+    live(id)
+    store.tickets.save({ ...store.tickets.get(id)!, title, decisionId: `ds${i}`, createdAt: `2026-11-01T0${i}:00:00.000Z`, origin: { triggerId: `os${i}`, triggerIds: [`os${i}`] } })
+    // The first two started on Threads of their own; the rest share one, which chains them.
+    store.triggers.save({ ...message(`os${i}`, { source: 'feishu', id: 'ou_alice' }), threads: [{ source: 'feishu', id: i < 2 ? `oc_1:om_${i}` : 'oc_1:om_rest' }] })
+  })
+  const graph = ticketGraph(host)
+  expect(graph.edges.filter(edge => edge.kind !== 'similar')).toHaveLength(5)
+  expect(graph.edges.filter(edge => edge.kind === 'similar')).toEqual([{ from: 's0', to: 's1', kind: 'similar', via: 'fuzzy',
+    strength: expect.any(Number), reason: '标题都有「登录页按钮文案 / 错位」', at: '2026-11-01T01:00:00.000Z' }])
+  // Polled again with nothing changed, the guess is the one already made.
+  expect(ticketGraph(host).edges.at(-1)).toBe(graph.edges.at(-1))
+  expect(ticketRelations(host, 's0')).toEqual([])
+})
