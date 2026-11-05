@@ -127,13 +127,14 @@ export function cloudLayout(nodes: Pick<GraphNode, 'id'>[], edges: Pick<GraphEdg
 }
 
 /**
- * Arrowheads: a thin open chevron in the edge's colour, sized in user units so it keeps its size whatever the line's width,
- * with its tip at the line's end, which stops just short of the target's rim.
+ * Arrowheads: a small filled kite in the edge's colour, about 1.7 times as long as it is wide, with its tip at the
+ * line's end, which stops just short of the target's rim. A square marker viewport with no `viewBox` keeps the head its
+ * stated size: Chromium renders a non-square viewBox smaller than asked.
  */
 function Markers() {
   return <defs>
-    {KINDS.map(kind => <marker key={kind} id={`dt-graph-arrow-${kind}`} viewBox="0 0 8 10" refX="6.5" refY="5" markerUnits="userSpaceOnUse"
-      markerWidth="8" markerHeight="10" orient="auto-start-reverse"><path className="dt-graph-arrow" data-kind={kind} d="M1 2 L6.5 5 L1 8" /></marker>)}
+    {KINDS.map(kind => <marker key={kind} id={`dt-graph-arrow-${kind}`} markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8"
+      refX="8" refY="4" orient="auto-start-reverse"><path className="dt-graph-arrow" data-kind={kind} d="M0 1.6 L8 4 L0 6.4 L1.25 4 Z" /></marker>)}
   </defs>
 }
 function Legend({ fuzzy }: { fuzzy: boolean }) {
@@ -188,7 +189,9 @@ function Timeline({ graph, hover, setHover, open }: { graph: Graph; hover?: stri
         }
         const x0 = edge.kind === 'spawned' ? Math.min(Math.max(b.x0, a.x0), a.x1) : a.x0, x1 = b.x0
         const bend = Math.max(Math.abs(b.y - a.y) * .5, 24)
-        const d = `M${x0} ${a.y} C${x0 + bend} ${a.y}, ${x1 - bend} ${b.y}, ${x1} ${b.y}`
+        // Stop at the child node's rim, so the arrowhead is not hidden under the node circle drawn above it.
+        const dir = x1 >= x0 ? 1 : -1, tip = x1 - dir * Math.min(9, Math.abs(x1 - x0) * .4)
+        const d = `M${x0} ${a.y} C${x0 + bend} ${a.y}, ${x1 - dir * bend} ${b.y}, ${tip} ${b.y}`
         return <path key={`${edge.kind}${edge.from}${edge.to}`} className="dt-graph-edge" data-kind={edge.kind} data-dim={dim([edge.from, edge.to]) || undefined}
           d={d} markerEnd={edge.kind === 'related' ? undefined : `url(#dt-graph-arrow-${edge.kind})`}><title>{edgeLabel(t, edge, nodes)}</title></path>
       })}

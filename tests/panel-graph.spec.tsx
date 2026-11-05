@@ -294,12 +294,15 @@ it('never draws or counts guessed edges on the timeline, which has no switch for
   expect(all('.dt-graph-node').map(item => item.getAttribute('aria-label'))).not.toContain('孤立工单')
 })
 
-it('draws arrowheads as thin open chevrons sized in user units, tip on the line\'s end', async () => {
+it('draws arrowheads as small filled kites with the tip at the line end', async () => {
   await openGraph()
   const marker = document.querySelector('marker#dt-graph-arrow-spawned')!
   expect(marker.getAttribute('markerUnits')).toBe('userSpaceOnUse')
-  expect(marker.getAttribute('refX')).toBe('6.5')
-  expect(marker.querySelector('path')!.getAttribute('d')).toBe('M1 2 L6.5 5 L1 8')
+  expect(marker.getAttribute('refX')).toBe('8')
+  expect(marker.getAttribute('markerWidth')).toBe('8')
+  // No viewBox: Chromium shrinks a non-square marker viewBox, so the square viewport keeps the width the path asks for.
+  expect(marker.getAttribute('viewBox')).toBeNull()
+  expect(marker.querySelector('path')!.getAttribute('d')).toBe('M0 1.6 L8 4 L0 6.4 L1.25 4 Z')
   // The legend's samples are lines with no arrowhead.
   expect(all('.dt-graph-legend line').some(line => line.getAttribute('marker-end'))).toBe(false)
 })

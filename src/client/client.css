@@ -994,10 +994,10 @@ button.dt-problem-title:hover { color: var(--dsw-alias-label-primary); text-deco
 .dt-graph-edge[data-kind='blocks'] { stroke: var(--dt-g-blocks); stroke-dasharray: 2 3; stroke-width: 1.8; }
 .dt-graph-edge[data-kind='related'] { opacity: .35; }
 .dt-graph-edge[data-dim] { opacity: .08; }
-.dt-graph-arrow { fill: none; stroke: var(--dt-g-related); stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
-.dt-graph-arrow[data-kind='spawned'] { stroke: var(--dt-g-spawned); }
-.dt-graph-arrow[data-kind='supersedes'] { stroke: var(--dt-g-supersedes); }
-.dt-graph-arrow[data-kind='blocks'] { stroke: var(--dt-g-blocks); }
+.dt-graph-arrow { fill: var(--dt-g-related); stroke: none; }
+.dt-graph-arrow[data-kind='spawned'] { fill: var(--dt-g-spawned); }
+.dt-graph-arrow[data-kind='supersedes'] { fill: var(--dt-g-supersedes); }
+.dt-graph-arrow[data-kind='blocks'] { fill: var(--dt-g-blocks); }
 .dt-graph-node { --dt-g: var(--dt-g-idle); cursor: pointer; outline: none; transition: opacity 140ms ease; }
 .dt-graph-node[data-tone='working'] { --dt-g: var(--dt-g-working); }
 .dt-graph-node[data-tone='person'] { --dt-g: var(--dt-g-person); }
@@ -1030,7 +1030,7 @@ button.dt-problem-title:hover { color: var(--dsw-alias-label-primary); text-deco
 .dt-graph-cloud .dt-graph-edge[data-kind='blocks'] { stroke-dasharray: 2 3; }
 .dt-graph-cloud .dt-graph-edge[data-lit] { stroke: var(--dt-gc-lit); stroke-width: 1; }
 .dt-graph-cloud .dt-graph-edge[data-dim] { opacity: .3; }
-.dt-graph-cloud .dt-graph-arrow { stroke: var(--dt-gc-lit); }
+.dt-graph-cloud .dt-graph-arrow { fill: var(--dt-gc-lit); stroke: none; }
 /* Guessed (`similar`) edges: a fine dotted line, fainter than an explicit edge (its strength sets stroke-opacity inline, 8-14%),
    lit to half on hover with no arrow, and its reason in small text along it. */
 .dt-graph-cloud .dt-graph-edge[data-kind='similar'] { stroke: rgb(200, 205, 212); stroke-width: .6; stroke-dasharray: 1.2 2.6; stroke-linecap: round; }
