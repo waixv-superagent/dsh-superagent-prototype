@@ -66,7 +66,14 @@ export const USER_ERRORS = {
   notAttentionAnswer: ['refused', 'A written answer cannot be empty'],
   phaseOutOfOrder: ['refused', 'The ticket is in the {from} phase; a worker advances one phase at a time, and implement only once a person approved the plan'],
   notDeliverable: ['refused', 'A changelist, a Swarm review and verification belong to the deliver phase: pass its checks, then call orchestrator_phase with deliver'],
-  notImplement: ['refused', 'The ticket is still in its plan phase: a person must approve the plan before this tool changes anything']
+  notImplement: ['refused', 'The ticket is still in its plan phase: a person must approve the plan before this tool changes anything'],
+  unknownReproCase: ['missing', 'Unknown reproduction case {case}'],
+  unknownReproRun: ['missing', 'Unknown reproduction run {run}'],
+  reproCaseInvalid: ['refused', 'The reproduction case {case} cannot run: {reason}'],
+  reproBusy: ['refused', 'A reproduction case is already running; stop it before starting another'],
+  reproNotRunning: ['refused', 'That reproduction run has already ended'],
+  reproBlockedAgent: ['refused', 'An agent holds the shared editor; let it yield before running a local reproduction case'],
+  reproBlockedJob: ['refused', 'A host-run editor job holds the shared editor; wait for it to end before running a local reproduction case']
 } as const satisfies Record<string, readonly ['missing' | 'refused', string]>
 export type UserErrorCode = keyof typeof USER_ERRORS
 

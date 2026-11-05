@@ -6,6 +6,7 @@ import type { PromptVersion } from './app/prompts.ts'
 import type { BillingSnapshot } from './app/billing.ts'
 import type { EditorSchedule } from './app/editor-schedule.ts'
 import type { GatekeeperState } from './app/editor-gatekeeper.ts'
+import type { ReproState } from './app/repro-runner.ts'
 import type { SettingsVersion } from './app/store.ts'
 import type { SettingsSave } from './policy.ts'
 import type { ReceiptReaction } from './sources/feishu-receipt.ts'
@@ -42,6 +43,8 @@ export const KV = {
   editor: { schedule: record<EditorSchedule>('editor-lease'),
     /** EditorGatekeeper: the processes each lease started, so a lapsed heartbeat can close them (docs/021). */
     gatekeeper: record<GatekeeperState>('editor-owned') },
+  /** ReproRunner: the local reproduction cases' runs, newest first, so a restart loses no verdict (docs/024). */
+  repro: { runs: record<ReproState>('repro-runs') },
   /** Sessions: prompt revisions each Session has worked under, ordered oldest first; the last entry (`.at(-1)`) is its active revision. */
   sessions: { prompts: family<number[], [session: string]>('session-prompts:') },
   /** Schema 11 migration: legacy main-Session queues imported into the effect table. */
