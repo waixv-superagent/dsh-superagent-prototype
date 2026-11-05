@@ -86,7 +86,7 @@ export interface EditorJob {
 }
 
 export type EditorEventKind = 'queued' | 'granted' | 'released' | 'expired' | 'ended' | 'preempted' | 'claimed' | 'yielded'
-  | 'cancelled' | 'front' | 'job'
+  | 'cancelled' | 'front' | 'job' | 'bypass'
 export interface EditorEvent {
   at: string
   kind: EditorEventKind
@@ -169,6 +169,17 @@ export function standing(schedule: EditorSchedule, ticketId: string):
   const queue = ordered(schedule.queue)
   const index = queue.findIndex(request => !request.jobId && !request.person && request.ticketIds.includes(ticketId))
   return index >= 0 ? { state: 'queued', position: index + 1, request: queue[index]! } : { state: 'none' }
+}
+
+/**
+ * Records that a worker's shell command opened, built or stopped the editor outside its lease (docs/021). It adds an
+ * event for the person to see and grants or releases nothing itself; the scheduler's usual advance still runs with it.
+ */
+export function recordBypass(input: EditorSchedule, value: { ticketId: string; detail: string }, context: ScheduleContext): EditorSchedule {
+  const schedule = clone(input)
+  event(schedule, { at: iso(context.now), kind: 'bypass', by: 'agent', ticketIds: [value.ticketId],
+    detail: value.detail.trim().slice(0, 300) })
+  return schedule
 }
 
 function grant(schedule: EditorSchedule, request: EditorRequest, context: ScheduleContext): EditorLease {

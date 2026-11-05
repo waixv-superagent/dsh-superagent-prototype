@@ -20,7 +20,7 @@ import { Commands } from '../infra/commands.ts'
 import { NO_UPGRADE, type Deployment, type Machine } from '../deployment.ts'
 import { environmentOf, ticketEnvironment, type Variable } from './execution-environment.ts'
 import type { SetupProblem } from '../setup.ts'
-import { DshExecutor, sourceTrigger, triggerMessage, workerSessionId } from '../executor/dsh.ts'
+import { DshExecutor, sourceTrigger, ticketOfSession, triggerMessage, workerSessionId } from '../executor/dsh.ts'
 import { ticketCard } from './cards.ts'
 import { MasterAssessor } from './assessment.ts'
 import { KV } from '../kv.ts'
@@ -39,7 +39,8 @@ import { Outbox } from './outbox.ts'
 import { Passes } from './passes.ts'
 import { Setup } from './setup.ts'
 import { Editor } from './editor.ts'
-import { EditorScheduler } from './editor-scheduler.ts'
+import { EditorScheduler, killTree } from './editor-scheduler.ts'
+import { EditorGuard } from './editor-guard.ts'
 import { notifyPlan as sendPlanCard } from './plan.ts'
 import { notifyPriority as sendPriorityCard } from './priority.ts'
 import { IdleScheduler } from './idle.ts'
@@ -83,6 +84,8 @@ export class Runtime extends Service implements SourceHost {
   readonly activity: Activity
   readonly editor: Editor
   readonly editorScheduler: EditorScheduler
+  /** Watches workers' shell calls for editor use outside the lease (docs/021). */
+  readonly editorGuard: EditorGuard
   readonly billing: Billing
   readonly pipeline: PipelineChecks
   readonly pipelineWatch: PipelineWatch
@@ -165,6 +168,21 @@ export class Runtime extends Service implements SourceHost {
       this.editorScheduler = new EditorScheduler({ store, live: id => { const value = store.tickets.get(id); return !!value && !value.ended },
         editor: () => this.editor.read(), commands: () => store.settings().executor.editor, logDir: join(machine.stateDir, 'editor-jobs'),
         notify: (ticketId, id, text) => sessions.prompt(workerSessionId(ticketId), id, text, 'steer'),
+        warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
+      // The lease's teeth: a worker's shell call that opens, builds or stops the editor without the lease it should hold
+      // is recorded, and an editor it started is stopped before the two fight over one workspace (docs/021).
+      this.editorGuard = new EditorGuard({ ticketOf: ticketOfSession,
+        live: id => { const value = store.tickets.get(id); return !!value && !value.ended },
+        standing: id => {
+          const value = this.editorScheduler.standing(id)
+          if (value.state === 'holding') return { state: 'holding', purpose: value.lease.purpose }
+          return value.state === 'queued' ? { state: 'queued' } : { state: 'none' }
+        },
+        agentPids: () => this.editorScheduler.read().agentPids,
+        known: () => this.editor.last() ?? [],
+        processes: async () => { await this.editor.refresh(); return this.editor.last() ?? [] },
+        kill: pid => killTree(pid), record: (id, detail) => this.editorScheduler.noteBypass(id, detail),
+        notify: (id, noticeId, text) => sessions.prompt(workerSessionId(id), noticeId, text, 'steer'),
         warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       // The board's billing strip reads actual Session usage priced from the routes' published lists, and the gateway account's own
       // settled hour and quota when the default route is a gateway it can read.
@@ -315,8 +333,12 @@ export class Runtime extends Service implements SourceHost {
       return
     }
     this.sessions.install()
-    // Every managed Session's model messages feed the rolling spend, including a worker's subagent calls.
-    this.disposers.push(this.ctx.on('session/event', (session, event) => this.billing.observe(session.id, event)))
+    // Every managed Session's model messages feed the rolling spend, including a worker's subagent calls; a worker's
+    // shell call also feeds the editor lease guard, which reads no other Session.
+    this.disposers.push(this.ctx.on('session/event', (session, event) => {
+      this.billing.observe(session.id, event)
+      if (event.type === 'tool/call') this.editorGuard.observe(session.id, String(event.data.callId), event.data.name, event.data.arguments)
+    }))
     this.billing.start()
     this.executor.install()
     await this.sessions.ensure(this.masterId, this.machine.stateDir, MASTER_TITLE, 'orchestrator')
@@ -363,6 +385,7 @@ export class Runtime extends Service implements SourceHost {
       this.executor.dispose()
       this.sessions.dispose()
       this.activity.dispose()
+      this.editorGuard.dispose()
       this.editor.dispose()
       this.editorScheduler.dispose()
       for (const dispose of this.disposers.reverse()) dispose()

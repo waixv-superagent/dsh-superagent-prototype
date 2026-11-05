@@ -11,9 +11,9 @@ import { randomUUID } from 'node:crypto'
 import { KV } from '../kv.ts'
 import type { EditorView } from './editor.ts'
 import { readEngineState, type EditorEngineState } from './editor-mcp.ts'
-import { acquire, advance, emptySchedule, heartbeat, personAct, release, standing, submitJob, updateJob, type AcquireRequest,
-  type AcquireResult, type EditorJob, type EditorJobKind, type EditorLease, type EditorSchedule, type PersonAction,
-  type ScheduleContext } from './editor-schedule.ts'
+import { acquire, advance, emptySchedule, heartbeat, personAct, personBlock, recordBypass, release, standing, submitJob,
+  updateJob, type AcquireRequest, type AcquireResult, type EditorJob, type EditorJobKind, type EditorLease, type EditorSchedule,
+  type PersonAction, type ScheduleContext } from './editor-schedule.ts'
 
 /** The KV record the schedule lives in, so leases and waits survive a host restart. */
 const EDITOR_SCHEDULE = KV.editor.schedule
@@ -152,6 +152,18 @@ export class EditorScheduler {
     const project = this.host.commands().project
     if (!project) return null
     return (this.host.engine ?? readEngineState)(project)
+  }
+  /** The probe's cached row the scheduler decides on, so a worker's status can name the editors a person has open. */
+  view(): EditorView | null {
+    return this.host.editor()
+  }
+  /** Why agents may not take the editor now (a person's claim or open editor, an unreadable probe), or null when free. */
+  blocked(): 'claimed' | 'editor' | 'unknown' | null {
+    return personBlock(this.read(), this.host.editor())
+  }
+  /** Records a worker's attempt to use or stop the editor outside its lease; the lease guard calls this (docs/021). */
+  noteBypass(ticketId: string, detail: string): void {
+    this.change((schedule, context) => ({ schedule: recordBypass(schedule, { ticketId, detail }, context) }))
   }
 
   acquire(request: AcquireRequest): AcquireResult { return this.change((schedule, context) => acquire(schedule, request, context)).result }
@@ -314,7 +326,8 @@ function defaultSpawn(command: string, cwd: string): ChildProcess {
     : spawn('/bin/sh', ['-c', command], { cwd, detached: true })
 }
 
-function killTree(pid: number): void {
+/** Stops a process and everything it started: a lease guard or a cancelled job must leave no editor behind it. */
+export function killTree(pid: number): void {
   if (process.platform === 'win32') spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
   else try { process.kill(-pid, 'SIGTERM') } catch { try { process.kill(pid, 'SIGTERM') } catch { /* Already gone. */ } }
 }

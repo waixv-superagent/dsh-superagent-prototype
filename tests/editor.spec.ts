@@ -99,4 +99,20 @@ describe('Editor cache', () => {
     await running
     expect(editor.read()).toBeNull()
   })
+  it('keeps the probe rows, with their paths, for the lease guard', async () => {
+    const rows = [{ ...process(1, 'unrealeditor'), path: 'E:\\sun_mainline\\Development\\Project\\Engine\\Binaries\\Win64\\UnrealEditor.exe' },
+      process(2, 'unrealbuildtool')]
+    const editor = new Editor({ probe: async () => rows })
+    await editor.refresh()
+    expect(editor.last()).toEqual(rows)
+  })
+})
+
+describe('parseEditorProcesses paths', () => {
+  it('keeps a reported executable path and omits an unreported one', () => {
+    expect(parseEditorProcesses('[{"id":1,"name":"UnrealEditor","started":null,"path":"E:\\\\sun_mainline\\\\UnrealEditor.exe"},'
+      + '{"id":2,"name":"UnrealBuildTool","started":null,"path":""}]'))
+      .toEqual([{ pid: 1, name: 'unrealeditor', started: null, path: 'E:\\sun_mainline\\UnrealEditor.exe' },
+        { pid: 2, name: 'unrealbuildtool', started: null }])
+  })
 })

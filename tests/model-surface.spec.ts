@@ -46,7 +46,9 @@ interface Skill { name: string; description: string; content: string }
 // already measured 49,487 of 49,500.
 // The temporary-fixture verification rule adds 486 characters of worker guidance (docs/022), so the worker budget grows
 // to 50,700; the orchestrator prompt does not carry the work guide.
-const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 50_700 }
+// The editor lease rule adds the shared-editor paragraph and the guard's warning to the tool description (docs/021), which
+// measures 51,310, so the worker budget grows to 51,400.
+const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 51_400 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

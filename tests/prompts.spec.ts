@@ -56,6 +56,13 @@ it('assembles every role from fixed sections around the team sections, whatever 
   expect(composePrompt(config, 'worker')).not.toContain(mainAdmissionPolicy)
 })
 
+it('tells a worker to take the shared editor lease before using UnrealEditor', () => {
+  // docs/021 promises the worker prompt asks for a lease; the guard alone is not the rule a model reads.
+  const worker = composePrompt(defaultPrompts(), 'worker')
+  expect(worker).toContain('orchestrator_editor op=acquire')
+  expect(worker).toContain('Never start a second editor')
+})
+
 it('reads a prompt file whatever its line ends and blank lines, and names a missing or empty one', () => {
   const dir = mkdtempSync(join(tmpdir(), 'prompt-file-'))
   // An absolute name reads that file; a bare name resolves under prompts/.

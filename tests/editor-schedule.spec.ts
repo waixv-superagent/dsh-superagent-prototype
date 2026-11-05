@@ -7,8 +7,8 @@ import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { EditorView } from '../src/app/editor.ts'
 import { engineSummary, parseEngineSnapshot, readEngineState } from '../src/app/editor-mcp.ts'
-import { acquire, advance, emptySchedule, heartbeat, ordered, personAct, personBlock, release, standing, submitJob, updateJob,
-  type EditorSchedule, type ScheduleContext } from '../src/app/editor-schedule.ts'
+import { acquire, advance, emptySchedule, heartbeat, ordered, personAct, personBlock, recordBypass, release, standing, submitJob,
+  updateJob, type EditorSchedule, type ScheduleContext } from '../src/app/editor-schedule.ts'
 import { EditorScheduler, SAFE_FILTER, fillCommand, jobSummary } from '../src/app/editor-scheduler.ts'
 import { KV } from '../src/kv.ts'
 
@@ -352,6 +352,23 @@ describe('EditorScheduler review fixes', () => {
     running = false
     expect(scheduler.tick().lease).toBeNull()
     expect(scheduler.job('j')).toMatchObject({ state: 'cancelled' })
+    scheduler.dispose()
+  })
+
+  it('records a bypass as an event without touching the lease or the queue', () => {
+    const store = memory()
+    const scheduler = new EditorScheduler({ store, now: () => T0, live: () => true, editor: () => free, logDir: tmpdir(), warn: () => {},
+      notify: async () => {}, commands: () => ({ project: '', build: '', restart: '', test: '' }) })
+    const held = acquire(emptySchedule(), { ticketId: 'a', purpose: 'test' }, context()).schedule
+    store.set(KV.editor.schedule, held)
+    scheduler.noteBypass('b', 'started the shared editor without the lease: stopped unrealeditor (pid 42)')
+    const after = scheduler.read()
+    expect(after.lease).toMatchObject({ holder: { kind: 'agent', ticketId: 'a' }, purpose: 'test' })
+    expect(after.queue).toEqual([])
+    expect(after.events.at(-1)).toMatchObject({ kind: 'bypass', by: 'agent', ticketIds: ['b'],
+      detail: 'started the shared editor without the lease: stopped unrealeditor (pid 42)' })
+    expect(recordBypass(after, { ticketId: 'c', detail: 'tried to stop pid 1' }, context()).events.at(-1))
+      .toMatchObject({ kind: 'bypass', ticketIds: ['c'] })
     scheduler.dispose()
   })
 })
