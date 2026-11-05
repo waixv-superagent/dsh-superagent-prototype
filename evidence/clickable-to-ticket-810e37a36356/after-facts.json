@@ -1,0 +1,44 @@
+{
+  "mode": "after",
+  "url": "http://127.0.0.1:3096/?token=***",
+  "viewport": "1440x900",
+  "theme": "dark",
+  "state": {
+    "editor": true,
+    "title": null,
+    "holder": "【示例】角色死亡后宝箱小黑人缺失 正在编译 · 15:59 起",
+    "holderButton": true,
+    "holderCursor": "auto",
+    "queueTicket": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "holderStyle": {
+    "text": "【示例】角色死亡后宝箱小黑人缺失 正在编译 · 15:59 起",
+    "button": true,
+    "color": "rgb(249, 250, 251)",
+    "cursor": "pointer",
+    "hovered": true,
+    "brand": ""
+  },
+  "holderAfter": {
+    "editor": false,
+    "title": "【示例】角色死亡后宝箱小黑人缺失",
+    "holder": null,
+    "holderButton": false,
+    "holderCursor": null,
+    "queueTicket": null
+  },
+  "queueStyle": {
+    "cursor": "pointer",
+    "background": "rgba(255, 255, 255, 0.08)",
+    "ticket": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "hovered": true
+  },
+  "queueAfter": {
+    "editor": false,
+    "title": "【示例】技能转向在极端输入下偏移",
+    "holder": null,
+    "holderButton": false,
+    "holderCursor": null,
+    "queueTicket": null
+  }
+}

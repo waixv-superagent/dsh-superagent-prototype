@@ -1,0 +1,44 @@
+{
+  "mode": "before",
+  "url": "http://127.0.0.1:3097/?token=***",
+  "viewport": "1440x900",
+  "theme": "dark",
+  "state": {
+    "editor": true,
+    "title": null,
+    "holder": "【示例】角色死亡后宝箱小黑人缺失 正在编译 · 15:59 起",
+    "holderButton": false,
+    "holderCursor": "auto",
+    "queueTicket": null
+  },
+  "holderStyle": {
+    "text": "【示例】角色死亡后宝箱小黑人缺失 正在编译 · 15:59 起",
+    "button": false,
+    "color": "rgb(249, 250, 251)",
+    "cursor": "auto",
+    "hovered": true,
+    "brand": ""
+  },
+  "holderAfter": {
+    "editor": true,
+    "title": null,
+    "holder": "【示例】角色死亡后宝箱小黑人缺失 正在编译 · 15:59 起",
+    "holderButton": false,
+    "holderCursor": "auto",
+    "queueTicket": null
+  },
+  "queueStyle": {
+    "cursor": "auto",
+    "background": "rgba(0, 0, 0, 0)",
+    "ticket": null,
+    "hovered": true
+  },
+  "queueAfter": {
+    "editor": true,
+    "title": null,
+    "holder": "【示例】角色死亡后宝箱小黑人缺失 正在编译 · 15:59 起",
+    "holderButton": false,
+    "holderCursor": "auto",
+    "queueTicket": null
+  }
+}
