@@ -150,6 +150,12 @@ Copy [examples/profile.cordis.patch.yml](../examples/profile.cordis.patch.yml) t
 
 After the first start, edit machine limits in **Settings → Deployment** or the DeepSeek Harness Plugin Manager. Changes apply without restart. `stateDir` cannot be changed there. Invalid values or unknown configuration keys prevent startup; the log identifies the key.
 
+### Client plugins and open pages
+
+The example profile disables `client-hmr`, the transport that live-swaps browser plugins inside an open page. Leave it off on an instance people use: a client plugin's bundle revision comes from its file metadata, so an install or a dependency change that re-resolves a client package changes the revision of every plugin that moves with it. The open page then tears down and re-imports those plugins in place; when they include the layout, sidebar, renderer or Session controller, the whole UI is rebuilt and the conversation and panel state are lost. The page did not navigate, so no document request reaches the server, but it looks and feels like a reload.
+
+With the transport off, browser plugin updates apply when the page next loads or when the service restarts; the [Upgrade](#upgrade) steps restart it. Keep the entry disabled unless you develop client plugins and want them hot-swapped.
+
 ## Start and stop
 
 ```sh
@@ -330,7 +336,7 @@ From an allowed GitHub account, open an Issue or post a comment containing `@<ag
 
 1. Wait until no Executor is in the middle of a turn.
 2. Back up `<stateDir>/orchestrator.sqlite`.
-3. Run `git pull && pnpm install && pnpm build`.
+3. Run `git pull && pnpm install && pnpm build`. Before the install, delete any stale `node_modules/.pnpm/dsh-superagent@file+*` copy of this bundle: two installed copies resolve different client packages, and the next re-resolution can swap the browser plugin versions under an open page (see [Client plugins and open pages](#client-plugins-and-open-pages)).
 4. Run `scripts/dsh-superagent restart` and inspect its status.
 
 A restart ends running Assignments and starts replacements with recovery notes. Team text and overridden prompt parts are retained; parts without overrides follow the new defaults. Review parts marked **Default updated** after upgrading.
@@ -389,6 +395,7 @@ Setup problems appear on the overview with a link to the fix, in the panel's lan
 | `dsh-superagent configuration has keys it does not use` (log) | Remove the named keys; the message says where each value lives now |
 | The log says the plugin is incompatible with the running dsh | Install a DeepSeek Harness version within the `engines.dsh` range |
 | The panel shows "Failed to load plugins" after a DeepSeek Harness upgrade | Restart the running instance |
+| The browser page flashes white or rebuilds itself while in use, and the server logs no page request | A client plugin was hot-swapped under the open page. Keep `client-hmr` disabled as in [Client plugins and open pages](#client-plugins-and-open-pages), delete the stale `node_modules/.pnpm/dsh-superagent@file+*` copy before the next `pnpm install`, and restart the service; a page loaded before the change needs one reload |
 | Nothing happens after a mention | Check that the author is on the Source's allowed list, the Source is on, and processing is not paused. On GitHub, a mention added by editing an Issue's body is not received; mention the agent in a comment |
 | Tickets stop with `LlmError: 503 …` and the main Session goes silent during a model-gateway outage | The host retries a Ticket that stopped on a passing failure on its own and tells the main Session to go on (docs/003); the `watchdog` entry on the overview names what waits. A short outage can also be ridden out inside one request by the provider's own retry policy: in the `llm-pi-ai:` settings section, `providers.<route>.retryPolicy` defaults to `normal` with five retries from 500 ms to 10 s, and a higher `maxRetries` with a `maxDelayMs` around a minute keeps a turn waiting instead of failing it; keep `mode: normal`, because `always` would retry a quota or credential failure that cannot heal |
 | A Ticket fails with `SessionQueryError` / `SessionFormatError` (for example `tool call id requires a nonempty string`) | The stored Session log is corrupt, so resuming it fails the same way every time. The host and the watchdog never retry it; the failed report says so. A person removes that Session log under `<dshHome>/sessions/<workspace>/<session>/` (the path is in the report) and retries the Ticket, or continues it with a fresh Session id |

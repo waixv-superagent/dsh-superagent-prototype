@@ -10,3 +10,11 @@
 # Feishu is optional: uncomment to enable its Source, then set the bot's lark-cli on the Feishu Source.
 # - id: dsh-superagent-feishu
 #   disabled: false
+# Do not hot-swap client plugins in an open page. When the Host re-resolves a client package, the
+# hot-reload transport tears down and re-imports the layout, sidebar, renderer and Session controller
+# inside every open browser; the whole UI is rebuilt in place and the conversation and panel state are
+# lost, which looks like the page reloading by itself. Plugin updates then apply on the next page load
+# or the restart a deployment performs anyway (docs/006-deployment.md, Upgrade).
+- id: client-hmr
+  name: "@deepseek-ai/dsh-client-hmr"
+  disabled: true
