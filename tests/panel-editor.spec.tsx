@@ -287,3 +287,64 @@ it('offers to let agents use an open editor while a person\'s editor holds the q
   await click('让 agent 用')
   expect(server.requests.filter(request => request.path === 'editor/act').map(request => request.body)).toEqual([{ action: 'yield' }])
 })
+
+it('opens the Ticket holding the editor from its whole schedule sentence', async () => {
+  const at = new Date(Date.now() - 5 * 60_000).toISOString()
+  const named = (id: string, title: string) => ({ id, title })
+  server.schedule = {
+    holder: { kind: 'agent', purpose: 'build', note: '', since: at, expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      tickets: [named('t5aaaaaaaaaa', '补跳跃测试')], draining: null },
+    queue: [], jobs: [], events: [], blocked: null, yielded: false, engine: null,
+  }
+  await mount()
+  await openEditor()
+  // The sentence is one entry: its Ticket's title and what it is doing are one button, not plain text.
+  const entry = document.querySelector<HTMLElement>('.dt-editor-schedule-holder button')!
+  expect(entry.className).toBe('dt-editor-holder-link')
+  expect(entry.getAttribute('title')).toBe('打开工单')
+  expect(entry.textContent).toMatch(/^补跳跃测试 正在编译 · \d\d:\d\d 起$/)
+  await click(entry)
+  expect(server.requests.some(request => request.path === 'tickets/t5aaaaaaaaaa' && request.method === 'GET')).toBe(true)
+})
+
+it('opens the Ticket a waiting entry names and keeps its action buttons on the wait', async () => {
+  const at = new Date(Date.now() - 5 * 60_000).toISOString()
+  server.schedule = {
+    holder: null, blocked: 'editor', yielded: false, engine: null, jobs: [], events: [],
+    queue: [{ id: 'q1', position: 1, purpose: 'use', note: 'PIE 看落地', at, person: false, front: false,
+      tickets: [{ id: 't6', title: '落地动画' }] }],
+  }
+  await mount()
+  await openEditor()
+  const row = document.querySelector<HTMLElement>('.dt-editor-queue-item')!
+  expect(row.getAttribute('data-ticket')).toBe('t6')
+  // The row is the entry: its text away from the title button opens the waiting Ticket.
+  await click(row.querySelector<HTMLElement>('.dt-editor-run-meta')!)
+  expect(server.requests.some(request => request.path === 'tickets/t6' && request.method === 'GET')).toBe(true)
+
+  // Back on the editor, 移出队列 still posts its own action and must not open the Ticket behind the row.
+  await click(tab(zh['tab.editor']))
+  await click(tab(zh.homeViewEditor))
+  const again = document.querySelector<HTMLElement>('.dt-editor-queue-item')!
+  const opened = server.requests.filter(request => request.path === 'tickets/t6').length
+  await click(again.querySelector<HTMLElement>('.dt-editor-queue-actions .dt-btn')!)
+  expect(server.requests.some(request => request.path === 'editor/act' && JSON.stringify(request.body) === JSON.stringify({ action: 'cancel', id: 'q1' })))
+    .toBe(true)
+  expect(server.requests.filter(request => request.path === 'tickets/t6').length).toBe(opened)
+})
+
+it('keeps a batched entry per Ticket so each name opens its own page', async () => {
+  const at = new Date(Date.now() - 5 * 60_000).toISOString()
+  const named = (id: string, title: string) => ({ id, title })
+  server.schedule = {
+    holder: { kind: 'job', jobId: 'j1', purpose: 'build', note: '', since: at, expiresAt: null,
+      tickets: [named('t5aaaaaaaaaa', '补跳跃测试'), named('t8', '闪避停止')], draining: null },
+    queue: [], jobs: [], events: [], blocked: null, yielded: false, engine: null,
+  }
+  await mount()
+  await openEditor()
+  expect(all('.dt-editor-schedule-holder button').map(name => name.textContent)).toEqual(['补跳跃测试', '闪避停止'])
+  expect(document.querySelector('.dt-editor-holder-link')).toBeNull()
+  await click(all('.dt-editor-schedule-holder button')[1]!)
+  expect(server.requests.some(request => request.path === 'tickets/t8' && request.method === 'GET')).toBe(true)
+})

@@ -879,6 +879,12 @@ button.dt-editor-timeline-name:focus-visible { outline: 2px solid var(--dsw-alia
 .dt-editor-schedule[data-holder='person'], .dt-editor-schedule[data-holder='blocked'] { border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 45%, transparent); }
 .dt-editor-schedule-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .dt-editor-schedule-holder { margin: 4px 0 2px; font-size: 15px; line-height: 22px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.dt-editor-holder-link { display: block; max-width: 100%; padding: 0; border: 0; background: none; font: inherit; text-align: left; color: inherit; cursor: pointer; }
+.dt-editor-holder-link:hover { color: var(--dsw-alias-brand-primary); text-decoration: underline; text-underline-offset: 2px; }
+.dt-editor-holder-link:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }
+.dt-editor-holder-name { padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+.dt-editor-holder-name:hover { color: var(--dsw-alias-brand-primary); text-decoration: underline; text-underline-offset: 2px; }
+.dt-editor-holder-name:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }
 .dt-editor-schedule-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .dt-editor-schedule-note { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt-editor-schedule-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; margin-top: 12px; }
@@ -891,6 +897,8 @@ button.dt-editor-timeline-name:focus-visible { outline: 2px solid var(--dsw-alia
 .dt-editor-queue, .dt-editor-jobs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .dt-editor-queue-item { display: flex; align-items: flex-start; gap: 10px; padding: 6px 4px; border-bottom: .5px solid var(--dsw-alias-border-l2); }
 .dt-editor-queue-item[data-person] { color: var(--dsw-alias-state-warn-primary); }
+.dt-editor-queue-item[data-ticket], .dt-editor-job[data-ticket] { cursor: pointer; }
+.dt-editor-queue-item[data-ticket]:hover, .dt-editor-job[data-ticket]:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .dt-editor-queue-pos { flex: none; width: 20px; height: 20px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-variant-numeric: tabular-nums; background: color-mix(in srgb, var(--dsw-alias-label-caption) 14%, transparent); }
 .dt-editor-queue-actions { flex: none; display: flex; gap: 2px; margin-left: auto; }
 .dt-editor-job { padding: 6px 4px; border-bottom: .5px solid var(--dsw-alias-border-l2); }

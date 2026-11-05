@@ -89,6 +89,11 @@ The editor view gains a schedule card between the hero and the timeline:
 - the queue in grant order, with front and remove
 - the jobs, with batched Ticket counts and a stop button for a running job
 
+Every Ticket named in the card opens its Ticket page, where the person sees what the worker is doing now: a single
+holding Ticket makes the whole sentence the entry, and a wait or job that covers one Ticket opens it from anywhere in
+its row, with front, remove and stop keeping their own action. A batched entry lists each Ticket as its own entry, so
+one row never has to guess which Ticket of the batch the person meant.
+
 Working rows show "占用中 · 跑测试" or "排第 2 · 编译". The timeline gains lease spans (labelled by purpose) and dashed wait spans per Ticket.
 
 ## Limits
