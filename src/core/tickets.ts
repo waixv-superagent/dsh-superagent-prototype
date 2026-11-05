@@ -621,6 +621,26 @@ export class Tickets extends EnginePart {
     return this.require(ticketId)
   }
   /**
+   * A person wrote the answer to a ticket's open question, through the panel: like a click on one of a card's choices it
+   * clears the question, becomes the person's message to the worker, and is delivered to the running Assignment so the
+   * worker continues from it.
+   * @throws UserError when the ticket is unknown or ended, its question is gone or was replaced, or the answer is empty.
+   */
+  answerAttentionText(ticketId: string, attentionId: string, text: string): Ticket {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    const attention = ticket.attention
+    if (!attention || attention.id !== attentionId) throw new UserError('notAttention')
+    const answer = text.trim()
+    if (!answer) throw new UserError('notAttentionAnswer')
+    const at = this.now()
+    this.replies.withdrawAttention(attention.id)
+    delete ticket.attention
+    this.addInput(ticket, { id: key('input', ticketId, 'answer', attentionId, at), kind: 'text', at,
+      text: `人对「${attention.question}」的答复：${answer.slice(0, 4000)}` })
+    return this.require(ticketId)
+  }
+  /**
    * A worker moves its ticket one phase forward: implement (only through a person's plan approval) → verify → deliver, the
    * last only with verification recorded. A step that skips a phase or goes backwards is refused, so the gate cannot be
    * talked around by reporting delivery early.

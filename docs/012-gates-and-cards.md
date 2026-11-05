@@ -193,8 +193,7 @@ P1 时工单的工作区还没检出（`ticket.execution.directory` 为空或未
 `message_id → { ticketId, planAt, url }` 记进 `KV.feishu.cards`（48 小时后清理）；回调没有工单号时靠它反查。
 `url` 来自紧接着的 `im +messages-mget` 的 `message_app_link`（形如
 `https://applink.feishu.cn/client/thread/open?…&thread_position=…`，`thread_position` 让它直接定位到这张卡）。
-面板里只有卡片入口（「去飞书回答」）留在消息级链接上：卡片用发卡时记下的 `url`，没有卡片时退回来源消息或会话链接，
-点开正好落到要回答的那张卡；工单页和话题页的「打开飞书原文」、话题 chip 则打开话题的**最新消息**：用同一话题链接去掉 `thread_position`
+面板里只有卡片入口（「去飞书回答」）留在消息级链接上：卡片或纯文本提问都用发卡/发消息时记下的 `url`，没有时先用该工单的飞书话题链接（打开到话题最新消息），再退回来源消息或会话链接，点开正好落到要回答的提问；工单页和话题页的「打开飞书原文」、话题 chip 则打开话题的**最新消息**：用同一话题链接去掉 `thread_position`
 （会话链接去掉 `position`），只有会话链接时先用 `chatId` 和 `threadId`（话题 id，旧话题从首个 Trigger 的 meta 取）
 补出话题链接，都拿不到才退回会话链接。过滤记录的来源链接仍指向被过滤的那条消息。链接按飞书的降级协议转成
 `feishu://applink/client/…`（Lark 品牌为 `lark://applink/…`）后再放进面板：它直接拉起已安装的客户端，
@@ -216,17 +215,19 @@ P1 时工单的工作区还没检出（`ticket.execution.directory` 为空或未
 
 worker 用 `orchestrator_report` 的 `human_action` + `options`（2–4 个短标签）提问时，主会话的 attention 回复不再只发
 文本，而是发一张卡片：问题正文 + 每个选项一个回调按钮（`{ v: 1, attention: <attention id>, choice: <选项下标> }`），底下
-写明「也可以直接在对话里回复」。卡片回复的 `message_id → { ticketId, attentionId, at, url }` 记进
-`KV.feishu.attentionCards`（48 小时清理）；`url` 是这张卡自己的 `message_app_link`（`im +messages-mget`，查询失败只少这个
-链接、不影响发卡），面板的「去飞书回答」用当前 attention 的这张卡定位问题；点击走 `engine.answerAttention`，把「人对「问题」选了：选项」作为这个人的
-一条 Input 交给 worker（不是 bot note，不会被自动输入压住），并清掉 attention。问题已被回答、替换或卡片过期时，回调只
-把卡片换成「已处理」，不改工单；仍然只有工单 actor 能点。飞书拒绝卡片时退回原来的纯文本回复。
+写明「也可以直接在对话里回复」。卡片回复或纯文本提问的 `message_id → { ticketId, attentionId, at, url }` 都记进
+`KV.feishu.attentionCards`（48 小时清理）；`url` 是那条消息自己的 `message_app_link`（`im +messages-mget`，查询失败只少这个
+链接、不影响发送），面板的「去飞书回答」用当前 attention 的这条消息定位问题。面板的提问块同时支持就地回答：点选项按钮走
+`POST tickets/:id/answer` 的 `option` → `engine.answerAttention`，写一段答复走同一路由的 `text` → `engine.answerAttentionText`；
+两者都把「人对「问题」选了／答复：…」作为这个人的一条 Input 交给 worker（不是 bot note，不会被自动输入压住），并清掉 attention，
+不必跳飞书。问题已被回答、替换或卡片过期时，飞书回调只把卡片换成「已处理」，不改工单；仍然只有工单 actor 能点。飞书拒绝卡片时退回原来的纯文本回复。
 
 提问卡同样接受 worker 的 `sections`（1–6 个 `{ label, text, fold? }`）：问题下面先排不分块，`fold: true` 的收进「补充」折叠，
 仍然是问题 + 选项按钮 + 「也可以直接回复」。不传时保持原来的单行问题卡片；文本兜底把分块逐条写出。
 
 提问卡只在真的需要点一下的关键节点上用，例如方案契合度确认、动手前的一次决定：`orchestrator_report` 只传 `human_action`
-时仍走普通对话回复，只有同时传 `options`（2–4 个）才发卡片。日常提问用纯文本更快更轻，不要为了发卡而发卡。
+时仍走普通对话回复，只有同时传 `options`（2–4 个）才发卡片。日常提问用纯文本更快更轻，不要为了发卡而发卡；纯文本提问同样会
+记录自己的消息链接，并被面板就地回答。
 
 ## 7. 实现顺序
 

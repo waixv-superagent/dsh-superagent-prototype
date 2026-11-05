@@ -487,6 +487,31 @@ it('falls back to the chat\'s client scheme link when the question card link is 
   expect(ticketDetail(host, 't1')!.reply?.url).toBe('feishu://applink/client/chat/open?openChatId=oc_1')
 })
 
+it('opens a text question\'s own message, keeping the newest one, and the ticket\'s topic when that link is unknown', () => {
+  const host = views()
+  const older = 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_9&thread_position=3'
+  const askedUrl = 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_9&thread_position=4'
+  const topicUrl = 'feishu://applink/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_9'
+  store.threads.save({ key: 'feishu:oc_1:om_root', ref: { source: 'feishu', id: 'oc_1:om_root' }, createdAt: at, subscriptions: ['t1'],
+    correlated: [], pending: [], meta: { url: 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_9&thread_position=2',
+      threadId: 'omt_9', facts: {} } })
+  store.tickets.save({ id: 't1', title: 'Fix', decisionId: 'd', channels: [feishuChannel('oc_1', 'om_q')], undelivered: [],
+    createdAt: at, updatedAt: at,
+    mandate: { strength: 'explicit', policyVersion: 'v', basis: { via: 'listed' }, actor: { source: 'feishu', id: 'ou_alice' }, scope: '' },
+    origin: { triggerId: 'e1', triggerIds: ['e1'] }, assignments: [], inputs: [],
+    attention: { id: 'a1', question: '纯文本提问也要落到那条消息' } })
+  store.set(KV.feishu.attentionCards, {
+    om_older: { ticketId: 't1', attentionId: 'a1', at: '2026-11-04T06:00:00.000Z', url: older },
+    om_asked: { ticketId: 't1', attentionId: 'a1', at: '2026-11-04T07:00:00.000Z', url: askedUrl },
+  })
+  // A plain text question has no card, but its message link is recorded like a card's; the newest recorded message wins.
+  expect(ticketDetail(host, 't1')!.reply?.url)
+    .toBe('feishu://applink/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_9&thread_position=4')
+  // Before the question message's link is known, the Ticket's own topic is closer than the whole chat.
+  store.set(KV.feishu.attentionCards, {})
+  expect(ticketDetail(host, 't1')!.reply?.url).toBe(topicUrl)
+})
+
 it('opens a Thread at its topic\'s newest message through the client scheme, upgrading a stored chat link', () => {
   const host = views()
   const messageUrl = 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1&thread_position=3'

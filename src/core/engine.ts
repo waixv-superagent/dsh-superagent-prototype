@@ -281,6 +281,14 @@ export class Engine {
     return this.repo.atomic(() => this.tickets.answerAttention(ticketId, attentionId, option))
   }
   /**
+   * A person wrote the answer to a ticket's open question, such as in the panel: like a card's choice the answer becomes a
+   * message to the worker and clears the question.
+   * @throws UserError when the ticket is unknown or ended, the question is gone, or the answer is empty.
+   */
+  answerAttentionText(ticketId: string, attentionId: string, text: string): Ticket {
+    return this.repo.atomic(() => this.tickets.answerAttentionText(ticketId, attentionId, text))
+  }
+  /**
    * A worker moves its ticket one phase forward: `verify` once implementation is done, `deliver` once verification passed.
    * @throws UserError when the ticket is unknown or ended, or the move skips a phase or goes back.
    */
@@ -414,7 +422,7 @@ export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThre
 export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'>
 /** What people ask of the Engine, through the panel or the main Session. */
 export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'redispatchTicket' | 'confirmTicket' | 'verifyTicket' | 'recordPipeline' | 'resumePipeline'
-  | 'reworkTicket' | 'decidePlan' | 'decidePriority' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
+  | 'reworkTicket' | 'decidePlan' | 'decidePriority' | 'answerAttention' | 'answerAttentionText' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
 /** What Settings tells the Engine. */
 export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */

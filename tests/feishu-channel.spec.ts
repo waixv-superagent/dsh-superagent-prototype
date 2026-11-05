@@ -108,6 +108,21 @@ describe('Feishu outbound replies', () => {
     expect(await sendFeishu(host, asked)).toBe('sent')
     expect(saved['feishu-attention-cards']).toMatchObject({ om_card: { ticketId: 't1', attentionId: 'att-1' } })
   })
+  it('records a text question\'s own message link, so the panel opens the question and not the chat', async () => {
+    const link = 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1&thread_position=9'
+    const lark = vi.fn(async (args: string[]) => args.includes('+messages-mget')
+      ? { data: { messages: [{ message_app_link: link }] } }
+      : { data: { message_id: 'om_text' } })
+    const saved: Record<string, unknown> = {}
+    const host = { commands: { lark }, state: { get: () => undefined, set: (key: string, value: unknown) => { saved[key] = value } } } as never
+    const asked = { ...message('这个取舍能不能定？'), attention: { ticketId: 't1', attentionId: 'att-1', options: [] } }
+    expect(await sendFeishu(host, asked)).toBe('sent')
+    const args = lark.mock.calls[0]![0] as string[]
+    // Without choices the question is still the plain text reply, not an empty card.
+    expect(args[args.indexOf('--msg-type') + 1]).toBe('post')
+    expect(lark).toHaveBeenCalledWith(['im', '+messages-mget', '--message-ids', 'om_text'])
+    expect(saved['feishu-attention-cards']).toMatchObject({ om_text: { ticketId: 't1', attentionId: 'att-1', url: link } })
+  })
   it('turns an AppLink into the client scheme that skips Feishu\'s browser landing page', () => {
     expect(feishuClientLink('https://applink.feishu.cn/client/thread/open?open_thread_id=omt_1&thread_position=9'))
       .toBe('feishu://applink/client/thread/open?open_thread_id=omt_1&thread_position=9')

@@ -62,6 +62,7 @@ export const USER_ERRORS = {
   attentionOptions: ['refused', 'A question offers 2 to 4 unique option labels of at most 24 characters'],
   attentionSections: ['refused', 'A question card\'s context sections are 1 to 6 blocks, each with a short unique label and its own text'],
   notAttentionOption: ['refused', 'That option is not one this question offers'],
+  notAttentionAnswer: ['refused', 'A written answer cannot be empty'],
   phaseOutOfOrder: ['refused', 'The ticket is in the {from} phase; a worker advances one phase at a time, and implement only once a person approved the plan'],
   notDeliverable: ['refused', 'A changelist, a Swarm review and verification belong to the deliver phase: pass its checks, then call orchestrator_phase with deliver'],
   notImplement: ['refused', 'The ticket is still in its plan phase: a person must approve the plan before this tool changes anything']

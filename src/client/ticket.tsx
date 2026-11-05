@@ -500,6 +500,45 @@ function RelationLine({ relation }: { relation: TicketPageView['relations'][numb
   </div></li>
 }
 
+/**
+ * The worker's open question, answered in place: each choice is one click, and any question also takes a written answer.
+ * The answer reaches the worker as its next input, as a click on a Feishu card does, so answering no longer needs Feishu.
+ */
+function AttentionAnswer({ ticket, onChanged }: { ticket: TicketPageView; onChanged: () => Promise<void> }) {
+  const { t, call, notify } = usePanel()
+  const attention = ticket.attention!
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const options = attention.options ?? []
+  const answer = async (body: { option?: string; text?: string }) => {
+    setBusy(true); setError('')
+    try {
+      await call('POST tickets/:id/answer', { id: ticket.id, body: { attentionId: attention.id, ...body } })
+      setNote('')
+      notify(t('answerSent'))
+      await onChanged()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally { setBusy(false) }
+  }
+  return <div className="dt-answer">
+    {options.length > 0 && <div className="dt-answer-options">
+      {options.map(option => <Button key={option} variant="outline" size="sm" disabled={busy}
+        onClick={() => { void answer({ option }) }}>{option}</Button>)}
+    </div>}
+    <textarea className="dt-textarea" rows={2} value={note} disabled={busy}
+      placeholder={t(options.length ? 'answerPlaceholderOptions' : 'answerPlaceholder')}
+      onChange={event => setNote(event.target.value)} />
+    <div className="dt-answer-actions">
+      <Button variant="primary" size="sm" disabled={busy || !note.trim()} onClick={() => { void answer({ text: note.trim() }) }}>
+        {t('answerSend')}</Button>
+      <span className="dt-hint">{t('answerHint')}</span>
+      {error && <span className="dt-error" role="alert">{error}</span>}
+    </div>
+  </div>
+}
+
 export function TicketPage({ id }: { id: string }) {
   const { t, call, notify } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET tickets/:id', { id }), [id])
@@ -569,6 +608,7 @@ export function TicketPage({ id }: { id: string }) {
     </div>}
     {data.attention && !data.plan?.waiting && <div className="dt-banner"><span className="dt-banner-label">{t('attentionPrefix')}</span><MarkdownLite
       text={data.attention.question} />
+      <AttentionAnswer ticket={data} onChanged={reload} />
       {data.reply && <div className="dt-banner-actions">
         <ActionLink href={data.reply.url} icon="message">{t('answerIn', { source: valueLabel(t, 'source', data.reply.source) })}</ActionLink>
       </div>}</div>}

@@ -123,6 +123,27 @@ it('decides a waiting plan on the Ticket page, with the evidence behind its own 
     body: { decision: 'revise', note: '走 B，先上工具链' } })
 })
 
+it('answers a waiting question in place, by a choice or in writing, without leaving the panel', async () => {
+  const t1 = server.ticketDetails.t1!
+  server.ticketDetails.t1 = { ...t1, stage: 'person', action: 'answer',
+    attention: { id: 'a1', question: '先上 A 还是先上 B？', options: ['先上 A', '先上 B'] },
+    reply: { source: 'feishu', url: 'feishu://applink/client/thread/open?open_thread_id=omt_1',
+      label: { zh: '飞书消息', en: 'Feishu message' } } }
+  await mount()
+  await click(all('.dt-deck-card-title').find(button => button.textContent === '修复回归')!)
+  expect(text()).toContain('先上 A 还是先上 B？')
+  expect(text()).toContain(zh.answerHint)
+  // A choice is one click; the Feishu link is still there as the way to the same question there.
+  await click('先上 A')
+  expect(server.requests.filter(request => request.path === 'tickets/t1/answer').at(-1))
+    .toMatchObject({ method: 'POST', body: { attentionId: 'a1', option: '先上 A' } })
+  // A written answer takes the same route, so any question is answerable without Feishu.
+  await type(document.querySelector<HTMLTextAreaElement>('.dt-answer textarea')!, '两个都先不动，等我确认')
+  await click(zh.answerSend)
+  expect(server.requests.filter(request => request.path === 'tickets/t1/answer').at(-1))
+    .toMatchObject({ method: 'POST', body: { attentionId: 'a1', text: '两个都先不动，等我确认' } })
+})
+
 it('copies the worker Session id from the Ticket page', async () => {
   const writes: string[] = []
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { writes.push(text) } } })
