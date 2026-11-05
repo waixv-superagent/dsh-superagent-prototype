@@ -720,6 +720,31 @@ export class Tickets extends EnginePart {
     ticket.priorityAsk = { ...ticket.priorityAsk, cardId }
     this.repo.tickets.save(ticket)
   }
+  /**
+   * A person picks a ticket out of the idle pool into the attention pool: its level becomes their `P1`, which releases it
+   * from the idle window, and a worker between turns starts again with this instruction, so the pick makes the work run
+   * rather than only relabeling it. A worker already running, or waiting for a slot, is not interrupted. A ticket that
+   * waits on a person's plan answer or question, a local check, or the pipeline is only raised: those gates stay as they
+   * were, and the pick never withdraws the wait or starts a turn behind it.
+   */
+  promote(ticketId: string, level: PriorityLevel, by: string, via: PriorityVia = 'panel'): Ticket {
+    this.decidePriority(ticketId, level, by, via)
+    const ticket = this.require(ticketId)
+    // Only pool work starts again: a ticket waiting on a person's plan answer or question, on a delivered change's local
+    // check, or on the pipeline is not the pool's, and raising its level must not withdraw that wait or start a turn.
+    if (ticket.plan?.waiting || ticket.attention || ticket.verification?.state === 'pending' || ticket.pipeline) return this.require(ticketId)
+    const latest = latestAssignment(ticket)
+    if (!latest || latest.state === 'ended') {
+      const at = this.now()
+      const assignment = this.newAssignment(ticket)
+      const input: TicketInput = { id: key('input', ticket.id, 'promote', at), kind: 'text', at, person: true,
+        text: `人从闲时池把这张单提到注意力池（${level}）：现在推进它。` }
+      ticket.inputs.push(input); ticket.undelivered.push(input.id); ticket.updatedAt = at
+      this.repo.tickets.save(ticket)
+      this.options.executor.start(ticket, assignment)
+    }
+    return this.require(ticketId)
+  }
   /** Record that a ticket waited in the idle pool and that depth let its work start, which the daily budget counts. */
   noteIdleLaunch(ticketId: string, level: IdleLevel): void {
     const ticket = this.repo.tickets.get(ticketId)

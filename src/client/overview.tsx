@@ -255,6 +255,13 @@ function DecisionCard({ ticket, onChanged, focused }: { ticket: TicketRow; onCha
   </article>
 }
 
+/** A ticket's level, so the board can say which work is urgent, which is mainline and which is discretionary. */
+function PriorityTag({ ticket }: { ticket: TicketRow }) {
+  const { t } = usePanel()
+  const tone = ticket.priority.level === 'P0' ? 'danger' : ticket.priority.level === 'P1' ? 'warning' : 'quiet'
+  return <Tag tone={tone} title={ticket.priority.hint}>{t(`priorityWord.${ticket.priority.level}`)}</Tag>
+}
+
 function RunRow({ ticket, focus }: { ticket: TicketRow; focus?: BoardFocus }) {
   const { t, navigate } = usePanel()
   const queued = ticket.stage === 'working' && ticket.action === 'queued'
@@ -268,12 +275,52 @@ function RunRow({ ticket, focus }: { ticket: TicketRow; focus?: BoardFocus }) {
     <div className="dt-run-main">
       <button type="button" className="dt-run-title" onClick={() => navigate(ticketRoute(ticket.id))}>{ticket.title}</button>
       <p className="dt-run-meta">
+        <PriorityTag ticket={ticket} />
         <span className="dt-run-stage">{label}</span>
+        {ticket.pool && !idle && !queued && <span className="dt-run-fact">{t('poolIdleRunning')}</span>}
         {ticket.assignments > 0 && <span className="dt-run-fact">{t('boardRunCount', { count: ticket.assignments })}</span>}
         <span className={stuck ? 'dt-run-time dt-run-time-stuck' : 'dt-run-time'}><When at={ticket.updatedAt} /></span>
       </p>
       {ticket.summary && <p className="dt-run-summary" title={ticket.summary}>{ticket.summary}</p>}
       {stuck && <p className="dt-run-alert">{staleLabel(t, ticket.updatedAt)}</p>}
+    </div>
+  </li>
+}
+
+/**
+ * One ticket in the idle pool: P2 work waits for an idle window, P3 is parked, and a person may lift either into the
+ * attention pool, which makes it mainline and starts its worker now. The row leads with the level and the request, so
+ * the pool reads as work worth choosing rather than as a dump of everything that did not run yet.
+ */
+function PoolRow({ ticket, onChanged }: { ticket: TicketRow; onChanged: () => Promise<void> }) {
+  const { t, call, notify, navigate } = usePanel()
+  const [busy, setBusy] = useState(false)
+  const parked = ticket.priority.level === 'P3'
+  const promote = async () => {
+    setBusy(true)
+    try {
+      await call('POST tickets/:id/promote', { id: ticket.id, body: { level: 'P1' } })
+      notify(t('poolPromoted'))
+      await onChanged()
+    } finally { setBusy(false) }
+  }
+  return <li className="dt-run dt-pool" data-state="pool" data-parked={parked || undefined}>
+    <span className="dt-run-dot" aria-hidden="true" />
+    <div className="dt-run-main">
+      <button type="button" className="dt-run-title" onClick={() => navigate(ticketRoute(ticket.id))}>{ticket.title}</button>
+      <p className="dt-run-meta">
+        <PriorityTag ticket={ticket} />
+        <KindTag kind={ticket.kind} source={ticket.kindSource} />
+        <span className="dt-run-stage">{parked ? t('poolParked') : t('poolWaits')}</span>
+        <span className="dt-run-time"><When at={ticket.createdAt} /></span>
+      </p>
+      {(ticket.summary || ticket.request) && <p className="dt-run-summary" title={ticket.summary || ticket.request}>
+        {ticket.summary || ticket.request}
+      </p>}
+      <div className="dt-pool-actions">
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => { void promote() }}>{t('poolPromote')}</Button>
+        <button type="button" className="dt-board-more" onClick={() => navigate(ticketRoute(ticket.id))}>{t('boardOpen')} →</button>
+      </div>
     </div>
   </li>
 }
@@ -419,7 +466,7 @@ function EndedCard({ ticket }: { ticket: TicketRow }) {
 
 /** One vertical lane of the board: a fixed header, a scrollable list, and an optional "see all" link. */
 function Lane({ tone, title, count, sub, action, empty, children }: {
-  tone: 'decision' | 'verify' | 'run' | 'pipeline' | 'ended'; title: string; count: number; sub: string; action?: ReactNode; empty: string
+  tone: 'decision' | 'verify' | 'run' | 'pool' | 'pipeline' | 'ended'; title: string; count: number; sub: string; action?: ReactNode; empty: string
   children?: ReactNode
 }) {
   return <section className="dt-board-col" data-tone={tone} aria-label={title}>
@@ -566,6 +613,8 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
     && (!ticket.pipeline?.manual || pipelineSmokeFailed(ticket.pipeline))).length
   const working = data.working ?? []
   const idle = data.idle ?? []
+  const pool = data.pool ?? []
+  const parked = data.parked ?? []
   const ended = data.ended ?? []
   const endedStats = data.endedStats ?? { completed: 0, verified: 0, pending: 0, agent: 0, none: 0, changelist: 0 }
   const needs = person.length + verification.length
@@ -575,7 +624,8 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
     && Date.now() - Date.parse(ticket.updatedAt) > STUCK_MS).length
   const oldest = verification.map(ticket => ticket.verification?.at ?? ticket.ended?.at).filter((at): at is string => !!at)
     .sort((left, right) => left.localeCompare(right))[0]
-  const note = [running > 0 ? t('boardRunningPart', { count: running }) : '', stuck > 0 ? t('boardStuckPart', { count: stuck }) : '',
+  const note = [running > 0 ? t('boardRunningPart', { count: running }) : '', pool.length + parked.length > 0
+    ? t('boardPoolPart', { count: pool.length + parked.length }) : '', stuck > 0 ? t('boardStuckPart', { count: stuck }) : '',
     oldest ? t('boardOldestVerify', { time: waitedFor(t, oldest) }) : ''].filter(Boolean).join(' · ')
   const openTickets = () => navigate({ page: 'execution', query: { filter: 'open' } })
   return <>
@@ -636,6 +686,18 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
           action={running ? <button type="button" className="dt-board-more" onClick={openTickets}>{t('boardOpen')} →</button> : undefined}>
           <ul className="dt-runlist">{working.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}
             {idle.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}</ul>
+        </Lane>
+
+        <Lane tone="pool" title={t('boardPoolTitle')} count={pool.length + parked.length} sub={t('boardPoolSub')}
+          empty={t('boardPoolEmpty')}
+          action={pool.length + parked.length ? <button type="button" className="dt-board-more"
+            onClick={() => navigate({ page: 'execution', query: { filter: 'idle' } })}>{t('boardPoolAll', { count: pool.length + parked.length })} →</button>
+            : undefined}>
+          <ul className="dt-runlist">{pool.map(ticket => <PoolRow key={ticket.id} ticket={ticket} onChanged={reload} />)}</ul>
+          {parked.length > 0 && <details className="dt-pool-parked">
+            <summary>{t('boardPoolParked', { count: parked.length })}</summary>
+            <ul className="dt-runlist">{parked.map(ticket => <PoolRow key={ticket.id} ticket={ticket} onChanged={reload} />)}</ul>
+          </details>}
         </Lane>
 
         <Lane tone="verify" title={t('boardVerifyTitle')} count={verification.length} sub={t('boardVerifySub')}

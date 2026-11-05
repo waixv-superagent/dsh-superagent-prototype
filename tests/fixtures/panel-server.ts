@@ -42,6 +42,8 @@ const TICKET = {
   id: 't1', title: '修复回归', state: 'open', kind: 'bug', kindSource: 'rule', actions: { retry: false, stop: true, confirm: false, verify: false, rework: false }, strength: 'explicit', source: 'feishu', ended: undefined,
   attention: undefined, assignments: 1, inputs: 2, undelivered: 0, deliveryError: undefined, sessionId: 'worker-t1', directory: '/w/t1',
   summary: 'working on it', createdAt: '2026-09-22T00:00:00Z', updatedAt: '2026-09-23T00:00:00Z',
+  priority: { level: 'P1', code: 'P1', word: '主线', hint: '今天的主线工作', source: 'default' }, pool: false,
+  request: '修复登录页回归',
   threads: [{ key: 'github:42', source: 'github', title: '#42 Fix login', url: 'https://github.com/acme/widgets/pull/42',
     facts: { number: { value: '#42' }, ci: { label: { zh: 'CI 失败', en: 'CI failed' }, value: '1', problem: true } } }],
 } satisfies TicketFields
@@ -114,6 +116,8 @@ export interface PanelServer {
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; verification: TicketRow[]; working: TicketRow[]; idle: TicketRow[]; pipeline: TicketRow[]; ended: TicketRow[]
+  /** The idle pool the board offers a person: P2 rows to pick, and the P3 rows it keeps collapsed. */
+  pool: TicketRow[]; parked: TicketRow[]
   /** Answers `GET tickets/search`; the Overview finder lets a test provide ranked hits. */
   ticketSearch?: (query: string) => ApiResponse<'GET tickets/search'>
   /** Answers `GET tickets/graph`, the relation view's tickets and edges. */
@@ -251,6 +255,7 @@ const overviewView = (): ApiResponse<'GET overview'> => {
       ...Object.values(server.settings.policy.sources).some(part => part.allowed.length) ? [] : [{ kind: 'no-allowed' as const }],
       ...server.failing.map(outgoing => ({ kind: 'outgoing' as const, outgoing }))],
     person: server.person, verification: server.verification, working: server.working, idle: server.idle,
+    pool: server.pool, parked: server.parked,
     pipeline: server.pipeline, ended: server.ended, editor: server.editor, billing: server.billing,
     endedStats: { completed: 1, verified: 0, pending: 1, agent: 1, none: 0, changelist: 1, archived: 0 },
     executor: { running: 2, queued: 0, maxWorkers: server.settings.executor.maxWorkers, idle: 1 },
@@ -379,6 +384,10 @@ function initial(): PanelServer {
     working: [ticketSummary({ id: 't5', title: '补 i18n 文案', summary: '第 12 步 · 修改 zh-CN.json' }),
       ticketSummary({ id: 't6', title: '升级依赖', summary: '后台 job · 60 秒无输出', updatedAt: '2026-09-22T23:30:00Z' })],
     idle: [], pipeline: [], ended: [ended],
+    pool: [ticketSummary({ id: 't2', title: '【战斗】巡逻时偶现步态滑步', priority: { level: 'P2', code: 'P2', word: '闲时', hint: '闲时处理 / 排期', source: 'default' },
+      pool: true, request: '【战斗】【怪物】巡逻时偶现步态滑步，复现条件不明。', createdAt: '2026-09-21T02:00:00Z', summary: '' }, { stage: 'idle' })],
+    parked: [ticketSummary({ id: 't3', title: '整理旧版设计文档', priority: { level: 'P3', code: 'P3', word: '暂存', hint: '只先存着，等更深的闲时', source: 'default' },
+      pool: true, request: '整理旧版设计文档，有空再看。', createdAt: '2026-09-20T02:00:00Z', summary: '' }, { stage: 'idle' })],
     threads: [threadSummary()], threadPages: threadPage,
     person: [ticketSummary({ attention: { id: 'q1', question: '需要确认按钮颜色' }, note: { text: '需要确认按钮颜色', error: false }, reply },
       { stage: 'person', action: 'answer' }),
@@ -416,7 +425,8 @@ type Route<K extends keyof Api> = { query?: readonly Query<K>[]; answer: (reques
   & (Api[K] extends { body: unknown } ? { body: true } : { body?: never })
 const page = <T>(items: T[]) => ({ items, total: items.length, next_offset: null })
 const ticketOf = (id: string) =>
-  [...server.tickets.open, ...server.person, ...server.tickets.ended].find(ticket => ticket.id === id) ?? server.ticketDetails[id]
+  [...server.tickets.open, ...server.person, ...server.tickets.ended, ...server.pool, ...server.parked]
+    .find(ticket => ticket.id === id) ?? server.ticketDetails[id]
 const SourceSave = z.object({ enabled: z.boolean(), config: z.unknown() })
 
 const ROUTES: { [K in keyof Api]: Route<K> } = {
@@ -478,6 +488,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET tickets/:id/activity': { answer: ({ params }) => server.activity(params.id) ?? {
     live: false, updatedAt: 0, tool: null, recent: [] } },
   'POST tickets/:id/plan': { body: true, answer: ({ params }) => ticketOf(params.id) ? { decided: true } : refuse(404, 'Ticket not found') },
+'POST tickets/:id/promote': { body: true, answer: ({ params }) => ticketOf(params.id) ? { level: 'P1' as const } : refuse(404, 'Ticket not found') },
   'POST tickets/:id/answer': { body: true, answer: ({ params }) => ticketOf(params.id) ? { answered: true } : refuse(404, 'Ticket not found') },
   'POST tickets/:id/retry': { answer: ({ params }) => {
     const ticket = ticketOf(params.id)

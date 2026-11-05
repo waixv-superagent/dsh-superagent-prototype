@@ -267,6 +267,28 @@ it('does not show a follow-up that reached a ticket as waiting for an Eval, thou
   expect(threadSummary(snapshot(host), store.threads.get('feishu:oc_1:om_root')!)).toMatchObject({ stage: 'queued', pending: 1 })
 })
 
+it('splits the machine lane from the idle pool, and keeps P3 parked until a person asks for it', () => {
+  const host = views()
+  live('m1')
+  store.tickets.save({ ...store.tickets.get('m1')!, title: '主线在跑', assignments: [{ id: 'a1', state: 'pending', createdAt: at }] })
+  live('p2')
+  store.tickets.save({ ...store.tickets.get('p2')!, title: '闲时池里的缺陷',
+    priority: { level: 'P2', source: 'default', at, note: 'human-mention' }, assignments: [{ id: 'a2', state: 'pending', createdAt: at }] })
+  live('p3')
+  store.tickets.save({ ...store.tickets.get('p3')!, title: '暂存的分析',
+    priority: { level: 'P3', source: 'human', at, by: 'ou_alice' },
+    assignments: [{ id: 'a3', state: 'ended', createdAt: at, startedAt: at, endedAt: at, report: { state: 'waiting', summary: '', at } }] })
+  const page = overview(host, {}, 'v1', load)
+  // A running lane row is the executor's work only; pooled work waits one lane over, and P3 stays a collapsed count.
+  expect(page.working.map(ticket => ticket.title)).toEqual(['主线在跑'])
+  expect(page.pool.map(ticket => ticket.title)).toEqual(['闲时池里的缺陷'])
+  expect(page.parked.map(ticket => ticket.title)).toEqual(['暂存的分析'])
+  // An old ticket without a stored priority still reads as mainline; a pooled row carries its level and the request it came from.
+  expect(page.working[0]!.priority).toMatchObject({ level: 'P1', source: 'default' })
+  expect(page.pool[0]!.priority).toMatchObject({ level: 'P2', source: 'default' })
+  expect(page.pool[0]!.pool).toBe(true)
+})
+
 it('archives completed Tickets from the board after seven days but keeps them in search', () => {
   const host = views()
   live('t1')

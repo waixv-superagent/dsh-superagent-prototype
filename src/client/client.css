@@ -519,6 +519,13 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-run-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-state-success-primary); }
 .dt-run[data-state='queued'] .dt-run-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dsw-alias-label-caption); }
 .dt-run[data-state='idle'] .dt-run-dot { background: var(--dsw-alias-label-caption); opacity: .5; }
+/* The idle pool: a hollow dot for P3 parked work, and one action row that lifts a ticket into the attention pool. */
+.dt-run[data-state='pool'] .dt-run-dot { background: var(--dsw-alias-label-caption); opacity: .55; }
+.dt-run[data-parked] .dt-run-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dsw-alias-label-caption); opacity: .8; }
+.dt-pool-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.dt-pool-parked { margin-top: 8px; }
+.dt-pool-parked > summary { cursor: pointer; padding: 4px 8px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.dt-pool-parked > summary:hover { color: var(--dsw-alias-label-primary); }
 .dt-run[data-stuck] .dt-run-dot { background: var(--dsw-alias-state-warn-primary); }
 .dt-run-main { min-width: 0; }
 .dt-run-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; padding: 0; border: 0; background: none; text-align: left; font: inherit; font-size: 13.5px; line-height: 19px; font-weight: 500; color: var(--dsw-alias-label-primary); cursor: pointer; }
@@ -613,11 +620,12 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-board-scroll[data-more='start'] { mask-image: linear-gradient(to right, transparent, #000 48px); }
 .dt-board-scroll[data-more='both'] { mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent); }
 /* The running lane keeps 168px at the 960px minimum so its title, count and "打开工单" header row stay inside the lane. */
-.dt-board { display: grid; grid-template-columns: 1.02fr minmax(168px, .78fr) 1.18fr 1.02fr .9fr; gap: 12px; align-items: stretch; min-width: 960px; }
+.dt-board { display: grid; grid-template-columns: 1fr minmax(160px, .72fr) minmax(170px, .8fr) 1.1fr .95fr .85fr; gap: 12px; align-items: stretch; min-width: 1100px; }
 .dt-board-col { --dt-col: var(--dsw-alias-label-caption); display: flex; flex-direction: column; min-width: 0; padding: 10px 10px 9px; border: .5px solid var(--dsw-alias-border-l2); border-top: 2px solid color-mix(in srgb, var(--dt-col) 68%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--dt-col) 3%, transparent); }
 .dt-board-col[data-tone='decision'] { --dt-col: var(--dsw-alias-state-business-primary); }
 .dt-board-col[data-tone='verify'] { --dt-col: #d4a300; }
 .dt-board-col[data-tone='run'] { --dt-col: var(--dsw-alias-state-success-primary); }
+.dt-board-col[data-tone='pool'] { --dt-col: #8b93a1; }
 .dt-board-col[data-tone='pipeline'] { --dt-col: #7c5cff; }
 .dt-board-col[data-tone='ended'] { --dt-col: var(--dsw-alias-label-caption); }
 .dt-board-col-head { display: flex; align-items: center; gap: 6px; min-height: 18px; }

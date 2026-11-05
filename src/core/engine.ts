@@ -272,6 +272,14 @@ export class Engine {
   decidePriority(ticketId: string, level: PriorityLevel, by: string, via: PriorityVia = 'feishu'): Ticket {
     return this.repo.atomic(() => this.tickets.decidePriority(ticketId, level, by, via))
   }
+  /**
+   * A person picks a ticket out of the idle pool into the attention pool: it becomes their `P1` and a worker between turns
+   * starts again at once, so the pick is a scheduling action, not a label.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  promoteTicket(ticketId: string, level: PriorityLevel = 'P1', by: string, via: PriorityVia = 'panel'): Ticket {
+    return this.repo.atomic(() => this.tickets.promote(ticketId, level, by, via))
+  }
   /** The message a TAPD ticket's priority question went out as, so the panel can open that card. */
   priorityCardSent(ticketId: string, cardId: string): void { this.repo.atomic(() => { this.tickets.notePriorityCard(ticketId, cardId) }) }
   /** The idle depth at which a `P2`/`P3` ticket's work started, kept as the idle pool's trace and the daily budget's count. */
@@ -432,7 +440,7 @@ export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThre
 export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'>
 /** What people ask of the Engine, through the panel or the main Session. */
 export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'redispatchTicket' | 'confirmTicket' | 'verifyTicket' | 'recordPipeline' | 'resumePipeline'
-  | 'reworkTicket' | 'decidePlan' | 'decidePriority' | 'answerAttention' | 'answerAttentionText' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
+  | 'reworkTicket' | 'decidePlan' | 'decidePriority' | 'promoteTicket' | 'answerAttention' | 'answerAttentionText' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
 /** What Settings tells the Engine. */
 export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */

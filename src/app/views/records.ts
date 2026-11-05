@@ -1,7 +1,8 @@
 /** Shared view projections for triggers, tickets, threads, decisions, and channel links. */
 import { z } from 'zod'
-import { canRetry, currentReport, followupOwners, latestReport, liveTicket, ownPull, settled, threadKey, ticketKind, ticketStage, type ActorRef, type ChannelRef, type Decision,
-  type DecisionKind, type Thread, type ThreadFacts, type Ticket, type TicketStage, type Trigger } from '../../core/index.ts'
+import { canRetry, currentReport, followupOwners, latestReport, liveTicket, ownPull, PRIORITY_LABELS, settled, threadKey, ticketKind, ticketPriority, ticketStage,
+  waitsForIdle, type ActorRef, type ChannelRef, type Decision, type DecisionKind, type Thread, type ThreadFacts, type Ticket, type TicketStage,
+  type Trigger } from '../../core/index.ts'
 import { allowedSender, listedBot } from '../../policy.ts'
 import type { ChannelLink, Localized } from '../../sources/kind.ts'
 import type { SourceRegistry } from '../../sources/registry.ts'
@@ -139,7 +140,12 @@ export function ticketSummary(ticket: Ticket) {
     : undefined
   // What kind of work it is, recorded at acceptance or derived for an older ticket, so the board can label and filter it.
   const kind = ticketKind(ticket)
+  // The level a ticket runs at, and whether its work waits in the idle pool: the board splits the machine queue from the
+  // discretionary pool with these, and a person promotes a pooled ticket by raising its level.
+  const level = ticketPriority(ticket), priority = PRIORITY_LABELS[level]
   return { id: ticket.id, title: ticket.title, state, ...stage, ...note ? { note } : {}, kind: kind.kind, kindSource: kind.source,
+    priority: { level, code: priority.code, word: priority.word, hint: priority.hint, source: ticket.priority?.source ?? 'default' },
+    pool: waitsForIdle(level),
     // A live Ticket whose pipeline merged was resumed by a person's later message: that round is not pipeline work, so the
     // panel must not offer the merge gate again. An ended Ticket keeps the observation for its record.
     ...pipeline && !(liveTicket(ticket) && pipeline.state === 'merged') ? { pipeline } : {},
@@ -211,7 +217,9 @@ export const ticketLine = (view: Snapshot, ticket: Ticket) => {
   // A gate derived from a pull request opens that request: the Thread the Ticket follows is where the person approves and merges it.
   const pipeline = line.pipeline
   const url = pipeline && !ticket.pipeline ? threads.find(thread => thread.key === ownPull(ticket)?.thread)?.url : undefined
-  return { ...line, threads, ...pipeline && url ? { pipeline: { ...pipeline, url } } : {} }
+  // The request as it arrived, so a pooled ticket says what it is about before any worker has analysed it (the cheap first look).
+  const origin = view.store.triggers.get(ticket.origin.triggerId)
+  return { ...line, threads, ...origin?.text ? { request: preview(origin.text, 160) } : {}, ...pipeline && url ? { pipeline: { ...pipeline, url } } : {} }
 }
 export function threadTitle(store: Pick<Store, 'read'>, thread: Thread): string {
   const label = attribute(thread.meta.label)
