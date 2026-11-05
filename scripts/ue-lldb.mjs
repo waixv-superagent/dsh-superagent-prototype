@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * UE C++ breakpoint capture through lldb-dap, without an IDE.
+ * UE C++ breakpoint capture without an IDE.
  *
- * The Unreal toolchain builds with clang-cl into CodeView PDBs, and the same LLVM that builds it
- * ships `lldb-dap.exe`. This script speaks DAP over stdio to that adapter: attach to a running
- * editor (or launch a program), set source and function breakpoints, wait for the process to stop,
- * and return the threads, stack frames and frame variables as JSON. It never resumes or kills a
- * process it attached to; a timeout detaches.
+ * The primary route is VS Code's own C/C++ debugger (`cppvsdbg`): a short-lived VS Code window opens
+ * with `scripts/ue-vscode`, the extension starts the attach/launch inside VS Code, and the stop is
+ * written as JSON. That engine is the one a person uses in VS Code, so it reads the clang-cl PDBs and
+ * the engine's NatVis. `lldb-dap` and the `lldb` command line remain fallbacks for environments
+ * without VS Code; they speak DAP or a batch script and produce the same capture shape.
  *
  * Usage (see `--help`):
  *   node scripts/ue-lldb.mjs capture --pid <editor-pid> --break Source/Game.cpp:42 --json
@@ -16,14 +16,17 @@
  * 4 the target exited before a breakpoint, 5 timed out.
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
-import { findEngineTool, findExecutable, runProcess, uePaths, withPath } from './ue-toolchain.mjs'
+import { basename, dirname, join, resolve } from 'node:path'
+import { findEngineTool, findExecutable, quoteArg, runProcess, uePaths, withPath } from './ue-toolchain.mjs'
 import { parseMessages } from './ue-wire.mjs'
 
 const DEFAULT_TIMEOUT_SECONDS = 120
 const REQUEST_TIMEOUT_MS = 30_000
+
+/** Waits, so polling for the VS Code capture file does not spin. */
+const sleep = timeoutMs => new Promise(resolvePromise => setTimeout(resolvePromise, timeoutMs))
 
 /** Parses `<file>:<line>` for a source breakpoint. The rightmost colon separates the line. */
 export function parseBreakpoint(text) {
@@ -110,6 +113,12 @@ class DapClient {
   }
 
   dispatch(message) {
+    // Adapters send reverse requests (vsdbg's "handshake", runInTerminal). A successful empty answer
+    // keeps them from waiting; vsdbg refuses to attach until its handshake has a response.
+    if (message.type === 'request') {
+      this.send({ seq: this.seq++, type: 'response', request_seq: message.seq, success: true, command: message.command, body: {} })
+      return
+    }
     if (message.type === 'response') {
       const pending = this.pending.get(message.request_seq)
       if (!pending) return
@@ -242,42 +251,20 @@ async function captureStop(dap, stopped, options) {
   return { stopped, threadId, threads, frames, variables }
 }
 
-async function dapCapture(paths, options) {
-  if (options.program && !existsSync(options.program)) {
-    throw Object.assign(new Error(`no such program: ${options.program}`), { exitCode: 2 })
-  }
-  const { adapter, env } = requireAdapter(paths)
-  if (options.print) {
-    process.stdout.write(`${adapter}\n`)
-    return 0
-  }
-  const commands = initCommands({ formatters: options.formatters })
-  const child = spawn(adapter, [], { env, cwd: options.cwd ?? process.cwd(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+/** Runs one capture through a DAP adapter: initialize, attach or launch, breakpoints, stop, capture. */
+async function dapSessionCapture(options, setup) {
+  const child = spawn(setup.adapter, setup.args ?? [], {
+    env: setup.env, cwd: setup.cwd ?? process.cwd(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+  })
   const dap = new DapClient(child)
-  const result = { mode: options.pid ? 'attach' : 'launch', lldb: adapter, breakpoints: [], functionBreakpoints: [], stop: undefined, threads: [], frames: [], variables: [] }
+  const result = {
+    backend: setup.label, mode: options.pid ? 'attach' : 'launch', adapter: setup.adapter,
+    breakpoints: [], functionBreakpoints: [], stop: undefined, threads: [], frames: [], variables: [],
+  }
   try {
-    await dap.request('initialize', {
-      adapterID: 'lldb',
-      clientID: 'ue-lldb',
-      clientName: 'ue-lldb',
-      linesStartAt1: true,
-      columnsStartAt1: true,
-      pathFormat: 'path',
-      supportsVariableType: true,
-      supportsRunInTerminalRequest: false,
-    })
-    if (options.pid) {
-      await dap.request('attach', { pid: options.pid, initCommands: commands }, options.launchTimeoutMs)
-    } else {
-      await dap.request('launch', {
-        program: options.program,
-        args: options.args,
-        cwd: options.cwd,
-        stopOnEntry: false,
-        console: 'internalConsole',
-        initCommands: commands,
-      }, options.launchTimeoutMs)
-    }
+    await dap.request('initialize', setup.initialize)
+    if (options.pid) await dap.request('attach', setup.attach(options.pid), options.launchTimeoutMs)
+    else await dap.request('launch', setup.launch(), options.launchTimeoutMs)
     // The adapter announces itself once the target exists and is stopped at its entry point.
     await dap.waitEvent('initialized', options.launchTimeoutMs)
     for (const group of groupBreakpoints(options.breakpoints)) {
@@ -326,8 +313,165 @@ async function dapCapture(paths, options) {
   }
 }
 
+async function dapCapture(paths, options) {
+  if (options.program && !existsSync(options.program)) {
+    throw Object.assign(new Error(`no such program: ${options.program}`), { exitCode: 2 })
+  }
+  const { adapter, env } = requireAdapter(paths)
+  if (options.print) {
+    process.stdout.write(`${adapter}\n`)
+    return 0
+  }
+  const commands = initCommands({ formatters: options.formatters })
+  return dapSessionCapture(options, {
+    adapter, env, label: 'lldb-dap',
+    initialize: {
+      adapterID: 'lldb', clientID: 'ue-lldb', clientName: 'ue-lldb',
+      linesStartAt1: true, columnsStartAt1: true, pathFormat: 'path', supportsVariableType: true,
+      supportsRunInTerminalRequest: false,
+    },
+    attach: pid => ({ pid, initCommands: commands }),
+    launch: () => ({
+      program: options.program, args: options.args, cwd: options.cwd, stopOnEntry: false,
+      console: 'internalConsole', initCommands: commands,
+    }),
+  })
+}
+
+/** The engine's NatVis, which makes UObject fields readable in the Visual Studio debugger. */
+function visualizerOf(paths) {
+  const file = join(paths.engine, 'Extras', 'VisualStudioDebugging', 'Unreal.natvis')
+  return existsSync(file) ? file : undefined
+}
+
+/** The VS Code CLI that opens the capture window. */
+function resolveCode() {
+  return findExecutable('code', { extra: [join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Microsoft VS Code', 'bin')] })
+}
+
+/** The C/C++ extension whose `cppvsdbg` engine owns the VS Code debug session. */
+export function resolveCpptools(root = process.env.USERPROFILE) {
+  if (!root) return undefined
+  const extensions = join(root, '.vscode', 'extensions')
+  if (!existsSync(extensions)) return undefined
+  const packages = readdirSync(extensions)
+    .filter(name => name.startsWith('ms-vscode.cpptools-'))
+    .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }))
+  for (const name of packages) {
+    const packageDirectory = join(extensions, name)
+    if (existsSync(join(packageDirectory, 'debugAdapters', 'vsdbg', 'bin', 'vsdbg.exe'))) return packageDirectory
+  }
+  return undefined
+}
+
+/**
+ * The extensions directory a capture window reads. It holds a copy of the C/C++ extension inside the
+ * project's Saved directory, so the capture never writes into the person's own VS Code installation.
+ */
+function extensionsCache(paths, cpptools) {
+  const root = join(paths.project, 'Saved', 'AgentVscode', 'extensions')
+  const target = join(root, basename(cpptools))
+  if (!existsSync(target)) {
+    mkdirSync(root, { recursive: true })
+    cpSync(cpptools, target, { recursive: true })
+  }
+  return root
+}
+
+/** Stops the capture window if the extension did not quit it itself. */
+function stopCaptureWindow(userDataDir) {
+  const script = 'Get-CimInstance Win32_Process | Where-Object { $_.Name -eq \'Code.exe\' -and '
+    + `$_.CommandLine -like '*${String(userDataDir).replaceAll("'", "''")}*' } | `
+    + 'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }'
+  spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: 'ignore' })
+}
+
+/**
+ * Captures through VS Code's own C/C++ debugger. `vsdbg` refuses a session started by any client but
+ * Microsoft VS Code, so the tool opens a short-lived VS Code window with `scripts/ue-vscode` and lets
+ * the extension start `cppvsdbg` there; the extension writes the stop as JSON and closes the window.
+ * The first run copies the C/C++ extension into `<project>/Saved/AgentVscode/extensions` (about 270 MB).
+ */
+async function vscodeCapture(paths, options) {
+  if (options.program && !existsSync(options.program)) {
+    throw Object.assign(new Error(`no such program: ${options.program}`), { exitCode: 2 })
+  }
+  const code = resolveCode()
+  const cpptools = resolveCpptools()
+  if (!code || !cpptools) {
+    throw Object.assign(new Error('VS Code with the C/C++ extension (ms-vscode.cpptools) is required for --backend vscode'), { exitCode: 2 })
+  }
+  if (options.print) {
+    process.stdout.write(`${code}\n${cpptools}\n`)
+    return 0
+  }
+  const extensions = extensionsCache(paths, cpptools)
+  const work = mkdtempSync(join(tmpdir(), 'ue-vscode-'))
+  const jobPath = join(work, 'job.json')
+  const outputPath = join(work, 'capture.json')
+  const logPath = join(work, 'job.log')
+  let succeeded = false
+  try {
+    writeFileSync(jobPath, `${JSON.stringify({
+      pid: options.pid, program: options.program, args: options.args, cwd: options.cwd,
+      breakpoints: options.breakpoints, frames: options.frames, vars: options.vars,
+      visualizerFile: visualizerOf(paths), timeoutMs: options.timeoutMs, output: outputPath, logPath,
+      terminate: Boolean(options.terminate && !options.pid),
+    }, null, 2)}\n`)
+    mkdirSync(join(work, 'workspace'), { recursive: true })
+    const arguments_ = [
+      `--user-data-dir=${join(work, 'user')}`,
+      `--extensions-dir=${extensions}`,
+      `--extensionDevelopmentPath=${join(import.meta.dirname, 'ue-vscode')}`,
+      '--new-window', '--disable-workspace-trust', '--disable-gpu', join(work, 'workspace'),
+    ]
+    const line = ['call', code, ...arguments_].map(quoteArg).join(' ')
+    const launched = await runProcess('cmd.exe', ['/d', '/s', '/c', line], {
+      env: { ...process.env, UE_CAPTURE_JOB: jobPath }, verbatim: true, timeoutMs: 60_000,
+    })
+    const deadline = Date.now() + options.timeoutMs
+    while (Date.now() < deadline && !existsSync(outputPath)) await sleep(500)
+    if (!existsSync(outputPath)) {
+      stopCaptureWindow(join(work, 'user'))
+      throw Object.assign(new Error(`VS Code wrote no capture within ${Math.round(options.timeoutMs / 1000)}s`
+        + `${launched.code === 0 ? '' : `; opening the window exited ${launched.code}`}`), { exitCode: 5 })
+    }
+    const captured = JSON.parse(readFileSync(outputPath, 'utf8'))
+    if (!captured.ok) {
+      throw Object.assign(new Error(`VS Code capture failed: ${captured.error} (job log: ${logPath})`), { exitCode: 3 })
+    }
+    succeeded = true
+    const result = {
+      backend: 'vscode', mode: options.pid ? 'attach' : 'launch', adapter: code,
+      breakpoints: options.breakpoints.map(breakpoint => ({ file: breakpoint.file, line: breakpoint.line, verified: true })),
+      functionBreakpoints: [],
+      stop: captured.stop,
+      threads: [],
+      frames: captured.frames ?? [],
+      variables: (captured.variables ?? []).map(variable => ({ frame: 0, ...variable })),
+    }
+    if (options.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
+    else process.stdout.write(formatCapture(result))
+    return 0
+  } finally {
+    stopCaptureWindow(join(work, 'user'))
+    if (!succeeded) {
+      process.stderr.write(`[ue-lldb] VS Code capture job kept at ${work}\n`)
+    } else {
+      // VS Code may still hold a file in the window profile for a moment; a leftover temp directory
+      // is harmless, a thrown cleanup error after a successful capture is not.
+      try {
+        rmSync(work, { recursive: true, force: true })
+      } catch {
+        // The OS releases it when the window has fully exited.
+      }
+    }
+  }
+}
+
 /** The short text form of a capture: where it stopped, the frames, and the top frame's variables. */
-export function formatCapture(result) {  const stop = result.stop ?? {}
+export function formatCapture(result) {
+  const stop = result.stop ?? {}
   const top = result.frames[0]
   const where = top ? `${top.file ?? '?'}:${top.line ?? '?'} in ${top.name}` : '(no frame)'
   const lines = [`stopped: ${stop.reason ?? 'unknown'} at ${where} (thread ${stop.threadId ?? '?'})`]
@@ -460,17 +604,30 @@ async function cliCapture(paths, options) {
   }
 }
 
-/** Runs the capture through lldb-dap, falling back to the lldb CLI when the adapter cannot attach. */
+/** Runs the capture through VS Code's C/C++ debugger, lldb-dap, or the lldb CLI. */
 async function capture(paths, options) {
-  if (options.backend === 'cli') return cliCapture(paths, options)
-  if (options.backend === 'dap') return dapCapture(paths, options)
-  try {
-    return await dapCapture(paths, options)
-  } catch (error) {
-    if (!options.pid) throw error
-    process.stderr.write(`[ue-lldb] lldb-dap failed (${error instanceof Error ? error.message : String(error)}); retrying with the lldb CLI\n`)
-    return cliCapture(paths, options)
+  const backends = options.backend === 'auto'
+    ? [
+        ...(resolveCode() && resolveCpptools() ? ['vscode'] : []),
+        'dap',
+        ...(options.pid ? ['cli'] : []),
+      ]
+    : [options.backend]
+  let lastError
+  for (const [index, backend] of backends.entries()) {
+    try {
+      if (backend === 'vscode') return await vscodeCapture(paths, options)
+      if (backend === 'dap') return await dapCapture(paths, options)
+      return await cliCapture(paths, options)
+    } catch (error) {
+      lastError = error
+      const next = backends[index + 1]
+      if (options.backend !== 'auto' || !next) throw error
+      process.stderr.write(`[ue-lldb] ${backend} failed (${error instanceof Error ? error.message : String(error)}); `
+        + `trying ${next}\n`)
+    }
   }
+  throw lastError
 }
 
 /** Parses the CLI; refuses a terminate request against an existing process. */
@@ -517,7 +674,7 @@ export function parseArgs(argv) {
     throw new Error(`refusing to attach to pid ${options.pid}`)
   }
   if (options.terminate && !options.program) throw new Error('--terminate only applies to --launch; an attached editor is never killed')
-  if (!['auto', 'dap', 'cli'].includes(options.backend)) throw new Error('--backend must be auto, dap or cli')
+  if (!['auto', 'vscode', 'dap', 'cli'].includes(options.backend)) throw new Error('--backend must be auto, vscode, dap or cli')
   if (!options.pid && !options.program) throw new Error('one of --pid or --launch is required')
   if (options.pid && options.program) throw new Error('--pid and --launch are exclusive')
   if (!options.breakpoints.length && !options.functions.length) throw new Error('at least one --break or --break-func is required')
@@ -542,8 +699,8 @@ Options
   --vars <count>          Variables per scope (default: 40)
   --formatters <file>     Import an LLDB Python formatter script (off by default; the engine's
                           UEDataFormatters.py aborts this lldb-dap build)
-  --backend <mode>        auto (default), dap or cli; auto retries an attach with the lldb CLI when
-                          lldb-dap cannot attach (the mode this installation's editor needs)
+  --backend <mode>        auto (default), vscode, dap or cli; auto tries the VS Code C/C++ debugger,
+                          then lldb-dap, then the lldb CLI for an attach
   --terminate             Let a launched program exit with the capture; an attached editor is never killed
   --json                  Print JSON instead of text
   --print                 Print the resolved lldb-dap and exit

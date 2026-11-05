@@ -11,4 +11,5 @@ export function normalizeVariables (frameIndex: number, scope: string, variables
 export function initCommands (options?: { formatters?: string }): string[]
 export function formatCapture (result: Record<string, any>): string
 export function parseArgs (argv: string[]): Record<string, any>
+export function resolveCpptools (root?: string): string | undefined
 export function main (argv?: string[]): Promise<number>

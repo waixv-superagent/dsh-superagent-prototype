@@ -24,7 +24,7 @@ end, so a tool it cannot drive is a tool it does not have.
 | --- | --- | --- |
 | Compile flags / index | Rider's own C++ engine | UnrealBuildTool `-Mode=GenerateClangDatabase` + clangd LSP |
 | Symbol, definition, references, diagnostics | `rider-call` (IDE must be open) | `node scripts/ue-clangd.mjs` |
-| Breakpoint, stack, frame variables | Rider UI + `debug-capture` (read-only) | `node scripts/ue-lldb.mjs capture` via lldb-dap, verified for ordinary programs; the editor path is blocked by the engine LLDB (§7) |
+| Breakpoint, stack, frame variables | Rider UI + `debug-capture` (read-only) | `node scripts/ue-lldb.mjs capture` through VS Code's C/C++ debugger (`cppvsdbg`); lldb-dap and the lldb CLI remain fallbacks |
 
 Rider stays as a fallback: nothing in the repository or the project removes it, and the skills keep the
 Rider path for interactive refactors (`rename_refactoring`, `safe_delete`) that clangd does not offer.
@@ -57,8 +57,10 @@ Live checks on 2026-11-06, after regenerating the database for `SunEditor Win64 
 | `ue-clangd status` | manifest matches the engine (`5.8.3`, `Fixed-5.7.1`); no stale reason |
 | `ue-clangd definition` on `USunAssetManager::Get` | `SunAssetManager.h:13:19`, 13.7 s |
 | `ue-clangd diagnostics` on `SunAssetManager.cpp` | 0 diagnostics; the stale database reported 23, including `KuroContentVariantPlatform.h` not found |
-| `ue-lldb capture` on a clang-cl console fixture | stopped at `fixture.cpp:4`; frames and locals (`value`, `result`) returned |
-| `ue-lldb capture --pid <DebugGame editor>` | attached and resolved a source breakpoint, but `continue` did not proceed in the batch run; function-breakpoint resolution crashed `lldb` (`0xC0000005`) and `lldb-dap` aborted (`0xC0000409`) after PDB type errors; see §7 |
+| `ue-lldb capture --launch <clang-cl fixture>` | stopped at `fixture.cpp:4`; frames and locals (`value`, `result`) returned |
+| `ue-lldb capture --backend vscode --launch <loop fixture>` | the C/C++ debugger started inside VS Code, stopped at `loop.cpp:1`, and returned the `f`/`main` frames and the `i` variable |
+| `ue-lldb capture --backend vscode --launch <Development editor>` | the `cppvsdbg` session started and launched the editor, but the editor stopped progressing at its Turnkey SDK stage and never reached `FEngineLoop::PreInit` or `UWorld::Tick` within the timeout; attaching to an already-started editor did not start a session |
+| `ue-lldb capture --pid <DebugGame editor>` (lldb) | attached and resolved a source breakpoint, but `continue` did not proceed in the batch run; function-breakpoint resolution crashed `lldb` (`0xC0000005`) and `lldb-dap` aborted (`0xC0000409`) after PDB type errors; see §7 |
 
 ## 4. `ue-clangd.mjs`
 
@@ -111,19 +113,30 @@ default: on this installation importing it aborts lldb-dap with `0xC0000409` and
 opt-in with `--formatters <file>` once a formatter is known to work with the adapter's Python build.
 Without it, UObject pointers print as addresses and the raw frame variables are still readable.
 
-On this installation LLDB cannot yet replace Rider for the **editor**: `lldb-dap`'s `launch` and
-`lldb process launch --stop-at-entry` answer `unknown error` for `UnrealEditor-Win64-DebugGame.exe`
-while a console fixture and `notepad.exe` launch normally; `lldb process attach` does attach and
-resolves a source breakpoint, but continuing the editor from the attach's `DbgBreakPoint` stop did not
-proceed in a batch run, and resolving a function breakpoint crashed lldb with `0xC0000005` after a long
-run of `Class ... does not have a complete definition` errors. The same type errors precede
-`lldb-dap`'s `0xC0000409` abort. The PDBs clang-cl produces for this engine carry forward-declared
-types this LLDB build cannot complete.
+The primary route is VS Code's own C/C++ debugger, the engine a person already uses in VS Code:
 
-The tool still has two backends: `dap` (the default, verified with a launched fixture) and `cli`
-(`lldb -b -s <script>`, which is what attaches on this installation). `--backend auto` tries `dap`
-and falls back to `cli` for an attach. Until the engine's LLDB is fixed, an editor breakpoint remains a
-Rider job; the runner scripts are still the foundation for closing that gap (see §7).
+```sh
+node scripts/ue-lldb.mjs capture --pid <editor-pid> --break LevelTick.cpp:1654 --json
+```
+
+`capture` opens a short-lived VS Code window with the small development extension in
+`scripts/ue-vscode`; the extension starts a `cppvsdbg` attach (or launch) session, waits for the stop,
+reads the threads, frames and variables, writes them as JSON and closes the window. The tool copies the
+installed C/C++ extension into `<project>/Saved/AgentVscode/extensions` on first use (about 270 MB) and
+runs the window with its own profile, so the person's VS Code installation and open window are not used
+or changed. The engine's `Unreal.natvis` is passed as the `visualizerFile`. The route is verified with a
+launched clang-cl program; the editor case is covered in §7.
+
+`--backend auto` tries this route first, then `lldb-dap`, then the `lldb` CLI for an attach. The other
+routes exist because this machine may not have VS Code or the C/C++ extension:
+
+- `vsdbg.exe` started directly is not usable: the Visual Studio debug engine refuses a client that is
+  not Microsoft VS Code (`C/C++ Debugging is supported only in Microsoft versions of VS Code`), so a
+  capture must run inside VS Code rather than drive the engine from outside.
+- The engine LLDB on this installation cannot attach to the editor: `lldb-dap` aborts (`0xC0000409`)
+  and `lldb` crashes (`0xC0000005`) while completing the editor PDB types, after many
+  `Class ... does not have a complete definition` errors. `lldb` still works for ordinary clang-cl
+  programs, which is what the `dap` and `cli` backends are verified with.
 
 The skill's existing rule still holds: a breakpoint in game module code only binds in a `DebugGame`
 (or `Debug`) build. In a `Development` editor the inlined function entry has no line to stop on, and
@@ -138,7 +151,7 @@ The skill's existing rule still holds: a breakpoint in game module code only bin
 | Definition / references | `ue-clangd definition` / `references` | one clangd startup plus a preamble; 13.7 s measured for a large module |
 | File diagnostics | `ue-clangd diagnostics` | same; no IDE needed; 0 diagnostics on a freshly generated database |
 | Compile database refresh | `ue-clangd index` | a UBT action-graph build; 181 s and 39,917 commands measured |
-| Breakpoint capture | `ue-lldb capture` | attach plus PDB load; the editor target cost 58.9 s in the measurement, module PDBs add on first breakpoint |
+| Breakpoint capture | `ue-lldb capture` | a VS Code window start plus the debug engine's PDB load; the first run also copies the C/C++ extension (about 270 MB) |
 
 ## 7. Limits and follow-ups
 
@@ -161,11 +174,16 @@ The skill's existing rule still holds: a breakpoint in game module code only bin
   and `workspace/symbol` returned results only for an opened translation unit in an earlier probe.
   Treat `symbol` as best-effort until this clangd build's index persistence is understood;
   `definition`, `references`, `hover` and `diagnostics` do not depend on it.
-- **UE editor breakpoints stay on Rider for now.** The engine LLDB aborts on the editor's PDB type
-  completion (measured in §3 and §5), so attaching, resolving a breakpoint and resuming an editor is
-  not reliable on this installation. A follow-up should either fix that LLDB build's PDB type handling
-  or add a backend for a debugger that handles UE PDBs (Visual Studio's debugger or `cdb`); the capture
-  shape in this repository is the seam for that backend.
+- **Breakpoints need VS Code and its C/C++ extension.** The capture opens a short-lived VS Code window
+  with its own profile and a cached copy of `ms-vscode.cpptools`; the person's own window is not reused.
+  The working capture is demonstrated on a launched clang-cl program. For the UE editor this route is
+  still blocked: `cppvsdbg` starts a session and launches the editor, but the editor stops progressing
+  at its Turnkey SDK stage and never reaches `FEngineLoop::PreInit`/`UWorld::Tick`, while attaching to an
+  editor that someone else started does not start a `cppvsdbg` session. Installing WinDbg/`cdb` was
+  attempted through `winget` and blocked by a 403 from the Microsoft download host. Until one of those is
+  solved, editor breakpoints remain in Rider; `lldb-dap`/`lldb` also do not debug the editor here (the
+  engine LLDB aborts on the editor PDB type completion: `0xC0000409`; `lldb -b` crashed with
+  `0xC0000005` after `Class ... does not have a complete definition` errors).
 - **A CLI attach timeout can leave the target stopped.** Killing `lldb` mid-attach may leave the
   debuggee suspended; keep the timeout short and stop the process afterwards when that happens.
 - **Verification.** `tests/ue-native.spec.ts` covers framing, argument building, URI/position conversion

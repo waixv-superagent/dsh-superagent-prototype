@@ -15,7 +15,7 @@ import {
 } from '../scripts/ue-clangd.mjs'
 import {
   formatCapture, groupBreakpoints, initCommands, normalizeFrames, normalizeVariables, parseArgs as parseLldbArgs,
-  parseBreakpoint, parseCliCapture,
+  parseBreakpoint, parseCliCapture, resolveCpptools,
 } from '../scripts/ue-lldb.mjs'
 
 const temporary: string[] = []
@@ -259,6 +259,15 @@ describe('lldb capture', () => {
     expect(parsed.variables[1]).toMatchObject({ name: 'DeltaSeconds', value: '0.016' })
   })
 
+  it('finds the C/C++ extension whose debugger runs inside VS Code', () => {
+    const home = workspace()
+    const bin = join(home, '.vscode', 'extensions', 'ms-vscode.cpptools-1.35.6-win32-x64', 'debugAdapters', 'vsdbg', 'bin')
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, 'vsdbg.exe'), '')
+    expect(resolveCpptools(home)).toBe(join(home, '.vscode', 'extensions', 'ms-vscode.cpptools-1.35.6-win32-x64'))
+    expect(resolveCpptools(join(home, 'empty'))).toBeUndefined()
+  })
+
   it('refuses unsafe or incomplete captures, and renders a stop', () => {
     expect(() => parseLldbArgs(['--pid', '1234', '--launch', 'x.exe', '--break', 'a.cpp:1'])).toThrow(/exclusive/)
     expect(() => parseLldbArgs(['--pid', '1234', '--terminate', '--break', 'a.cpp:1'])).toThrow(/never killed/)
@@ -270,6 +279,8 @@ describe('lldb capture', () => {
     expect(options.frames).toBe(2)
     expect(options.vars).toBe(5)
     expect(parseLldbArgs(['capture', '--pid', '1234', '--break', 'a.cpp:1']).pid).toBe(1234)
+    expect(parseLldbArgs(['--pid', '1234', '--break', 'a.cpp:1', '--backend', 'vscode']).backend).toBe('vscode')
+    expect(() => parseLldbArgs(['--pid', '1234', '--break', 'a.cpp:1', '--backend', 'nope'])).toThrow(/--backend/)
     const text = formatCapture({
       stop: { reason: 'breakpoint', threadId: 7 },
       frames: [{ index: 0, name: 'main', file: 'C:/ws/a.cpp', line: 9 }],
