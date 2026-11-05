@@ -2,7 +2,7 @@
 // The relation view of 概览: how Tickets started, superseded and blocked one another, in two layouts.
 import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { cloudLayout, edgeEnds, LIFE, NODE, nodeRadius, nodeTone, placeLabels, specks, timelineLayout } from '../src/client/graph.tsx'
+import { cloudLayout, edgeEnds, FUZZY, fuzzyAlpha, LIFE, NODE, nodeRadius, nodeTone, placeLabels, specks, timelineLayout } from '../src/client/graph.tsx'
 import { zh } from '../src/client/locales.ts'
 import { usePanel, mount, all, click, tab, settle } from './fixtures/panel.tsx'
 import { graphView, server } from './fixtures/panel-server.ts'
@@ -175,9 +175,11 @@ it('runs no standing loop under reduced motion, paints one still frame, and ring
   // Only the Ticket with `NODE.hub` relations wears the ring.
   expect(all('.dt-graph-ring')).toHaveLength(1)
   expect(node('今日复盘任务').querySelector('.dt-graph-ring')).not.toBeNull()
-  // The sheen's gradient is the cloud's own.
-  const gradient = document.querySelector('.dt-graph-cloud radialGradient')!.id
-  expect(node('今日复盘任务').querySelector('.dt-graph-sheen')!.getAttribute('fill')).toBe(`url(#${gradient})`)
+  // The sheen's gradient is the cloud's own, set inline: a fill attribute loses to the stylesheet's node fill, which would
+  // paint the sheen flat over the node.
+  const gradient = document.querySelector('.dt-graph-cloud radialGradient')!.id, sheen = node('今日复盘任务').querySelector<SVGCircleElement>('.dt-graph-sheen')!
+  expect(sheen.style.fill.replaceAll('"', '')).toBe(`url(#${gradient})`)
+  expect(sheen.getAttribute('fill')).toBeNull()
   // The hub is the one name shown before anything is hovered; hovering jumps straight to the lifted radius.
   expect(all('.dt-graph-label').map(label => label.textContent)).toEqual(['今日复盘任务'])
   await act(async () => { node('子单 a').focus() })
@@ -232,4 +234,104 @@ it('sizes cloud nodes by their relations, growing with each and capped, and ends
   expect(nodeRadius(1)).toBeLessThan(NODE.gleam)
   expect(nodeRadius(2)).toBeGreaterThanOrEqual(NODE.gleam)
   expect(edgeEnds({ x: 0, y: 0 }, { x: 100, y: 0, r: 8 })).toEqual({ x1: 0, y1: 0, x2: 90, y2: 0 })
+})
+
+/** The fixture graph with an unrelated Ticket and two guessed edges, one of them to that Ticket. */
+const guessedGraph = () => {
+  const graph = graphView()
+  const similar = (from: string, to: string, strength: number, reason: string) => ({ from, to, kind: 'similar' as const, via: 'fuzzy' as const,
+    strength, reason, at: '2026-09-22T10:00:00Z' })
+  return { ...graph, nodes: [...graph.nodes, { id: 't9', title: '孤立工单', stage: 'idle' as const, source: 'feishu', createdAt: '2026-09-22T10:00:00Z',
+    thread: 'github:43' }], edges: [...graph.edges, similar('t8', 't9', .49, '标题都有「普攻 / flying」；共享「CL 581604」；同一执行目标'),
+    similar('t5', 't7', .72, '标题都有「文案」')], total: 7 }
+}
+
+it('draws guessed edges in the cloud as faint dotted lines with no arrow, counts them apart, and switches them off', async () => {
+  reduceMotion()
+  fakeFrames()
+  server.graph = guessedGraph()
+  await openCloud()
+  // On by default: the Ticket with only a guess counts as related, and the guesses are counted apart from the relations.
+  expect(document.querySelector('.dt-graph-count')?.textContent).toBe('7 张工单 · 4 条关系 · 2 条推测')
+  expect(all('.dt-graph-legend-item').map(item => item.textContent)).toContain(zh['relation.similar'])
+  expect(all('.dt-hint').some(hint => hint.textContent?.includes(zh.graphFuzzyHint))).toBe(true)
+  const guesses = all('.dt-graph-cloud .dt-graph-edge[data-kind="similar"]')
+  expect(guesses).toHaveLength(2)
+  // Fainter the weaker, never stronger than the explicit edges' 14%.
+  expect(guesses.map(edge => Number(edge.style.strokeOpacity))).toEqual([fuzzyAlpha(.49), fuzzyAlpha(.72)].map(alpha => expect.closeTo(alpha, 5)))
+  expect(fuzzyAlpha(.3)).toBeCloseTo(FUZZY.alpha[0])
+  expect(fuzzyAlpha(.72)).toBeCloseTo(FUZZY.alpha[1])
+  expect(guesses[0]!.querySelector('title')?.textContent).toBe('修复移动普攻后接 Q 技能无法起飞 ↔ 孤立工单 · 推测相关 49% · '
+    + '按标题、共享模块/单号、时间推测，未经确认 · 标题都有「普攻 / flying」；共享「CL 581604」；同一执行目标')
+  // A guess is not a relation: it grows no node.
+  expect(dot('孤立工单').getAttribute('r')).toBe(nodeRadius(0).toFixed(2))
+  expect(dot('README 更新').getAttribute('r')).toBe(nodeRadius(1).toFixed(2))
+  // Hovering lights the guess without an arrow and says why along it, beside the hovered name.
+  await act(async () => { node('修复移动普攻后接 Q 技能无法起飞').focus() })
+  const lit = all('.dt-graph-cloud .dt-graph-edge[data-lit]')
+  expect(lit.map(edge => [edge.dataset.kind, edge.getAttribute('marker-end')])).toEqual([['blocks', 'url(#dt-graph-arrow-blocks)'], ['similar', null]])
+  expect(lit[1]!.style.strokeOpacity).toBe('')
+  expect(all('.dt-graph-why').map(why => why.textContent)).toEqual(['49% · 标题都有「普攻 / flying」；共…'])
+  expect(all('.dt-graph-label[data-hover]').map(label => label.textContent)).toEqual(['修复移动普攻后接 Q 技能无法起飞'])
+  await act(async () => { node('修复移动普攻后接 Q 技能无法起飞').blur() })
+  expect(all('.dt-graph-why')).toHaveLength(0)
+  // Off: the guesses, the Ticket they alone kept, their count and legend go; the relations stay as they were.
+  await click(zh.graphFuzzy)
+  await settle()
+  expect(all('.dt-graph-cloud .dt-graph-edge[data-kind="similar"]')).toHaveLength(0)
+  expect(all('.dt-graph-node')).toHaveLength(6)
+  expect(document.querySelector('.dt-graph-count')?.textContent).toBe('6 张工单 · 4 条关系')
+  expect(all('.dt-graph-legend-item').map(item => item.textContent)).not.toContain(zh['relation.similar'])
+  expect(dot('README 更新').getAttribute('r')).toBe(nodeRadius(1).toFixed(2))
+})
+
+it('never draws or counts guessed edges on the timeline, which has no switch for them', async () => {
+  server.graph = guessedGraph()
+  await openGraph()
+  expect(document.querySelector('.dt-graph-count')?.textContent).toBe('6 张工单 · 4 条关系')
+  expect(all('.dt-graph-edge').filter(edge => edge.tagName === 'path').map(edge => edge.dataset.kind)).toEqual(['spawned', 'spawned', 'supersedes', 'blocks'])
+  expect(all('button').some(button => button.textContent === zh.graphFuzzy)).toBe(false)
+  expect(all('.dt-graph-node').map(item => item.getAttribute('aria-label'))).not.toContain('孤立工单')
+})
+
+it('draws arrowheads as thin open chevrons sized in user units, tip on the line\'s end', async () => {
+  await openGraph()
+  const marker = document.querySelector('marker#dt-graph-arrow-spawned')!
+  expect(marker.getAttribute('markerUnits')).toBe('userSpaceOnUse')
+  expect(marker.getAttribute('refX')).toBe('6.5')
+  expect(marker.querySelector('path')!.getAttribute('d')).toBe('M1 2 L6.5 5 L1 8')
+  // The legend's samples are lines with no arrowhead.
+  expect(all('.dt-graph-legend line').some(line => line.getAttribute('marker-end'))).toBe(false)
+})
+
+it('pulls guessed pairs together far more weakly than related ones, the more weakly the less sure', () => {
+  const nodes = ['a', 'b', 'c', 'd', 'e', 'f'].map(id => ({ id }))
+  // Against an explicit pair's length in the same layout, since the fit scales the whole cloud into its box.
+  const gap = (edges: Parameters<typeof cloudLayout>[1]) => {
+    const at = cloudLayout(nodes, edges, 800, 500), d = (x: string, y: string) => Math.hypot(at.get(x)!.x - at.get(y)!.x, at.get(x)!.y - at.get(y)!.y)
+    return d('a', 'b') / d('c', 'd')
+  }
+  const spine = [{ from: 'c', to: 'd', kind: 'spawned' as const }, { from: 'e', to: 'f', kind: 'spawned' as const }]
+  const explicit = gap([...spine, { from: 'a', to: 'b', kind: 'spawned' }])
+  const strong = gap([...spine, { from: 'a', to: 'b', kind: 'similar', strength: .9 }])
+  const weak = gap([...spine, { from: 'a', to: 'b', kind: 'similar', strength: .3 }])
+  expect(explicit).toBeCloseTo(1, 1)
+  expect(explicit * 1.5).toBeLessThan(strong)
+  expect(strong).toBeLessThan(weak)
+})
+
+it('puts a guessed edge\'s reason along it where there is room, else drops it rather than cover a name or a node', () => {
+  const at = new Map([['h', { x: 100, y: 100, r: 5 }], ['o', { x: 300, y: 100, r: 5 }], ['m', { x: 240, y: 100, r: 4 }]])
+  const along = { from: 'h', to: 'o', t: FUZZY.along }
+  // The first point (62% out) sits on the node m, so the reason moves to the next one, half way.
+  const placed = placeLabels([{ id: 'h', text: '工单', force: true }, { id: 'why', text: '49% · 标题', along }], at, 400, 300)
+  expect(placed.map(label => [label.id, label.side, label.along?.t])).toEqual([['h', 'right', undefined], ['why', 'along', .5]])
+  // With every point on a node the reason is left out, and the names stay.
+  const crowded = new Map([...at, ['n1', { x: 200, y: 100, r: 4 }], ['n2', { x: 252, y: 100, r: 4 }], ['n3', { x: 176, y: 100, r: 4 }]])
+  expect(placeLabels([{ id: 'h', text: '工单', force: true }, { id: 'why', text: '49% · 标题', along }], crowded, 400, 300).map(label => label.id))
+    .toEqual(['h'])
+  // A name placed first keeps its place: the reason does not go over it.
+  const named = placeLabels([{ id: 'h', text: '一个很长很长很长很长的工单标题', force: true }, { id: 'why', text: '49% · 标题', along: { from: 'h', to: 'o', t: [.25] } }],
+    new Map([['h', at.get('h')!], ['o', at.get('o')!]]), 400, 300)
+  expect(named.map(label => label.id)).toEqual(['h'])
 })
