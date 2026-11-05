@@ -1,6 +1,6 @@
 /** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, checking a delivered change's pipeline, and reporting status. */
 import { z } from 'zod'
-import { LINKED_RELATION_KINDS, liveTicket, missingVerifyLabels, PLAN_DIFF_LIMITS, ticketPhase, VERIFY_LABELS, type EngineForExecutor,
+import { LINKED_RELATION_KINDS, analysisRunning, liveTicket, missingVerifyLabels, PLAN_DIFF_LIMITS, ticketPhase, VERIFY_LABELS, type EngineForExecutor,
   type Ticket } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
 import { matchDeliveryTarget, deliveryTargets } from '../delivery-targets.ts'
@@ -233,6 +233,9 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           }
         }
         // Claim the PR, record the report, and queue the relay atomically so a rejected PR claim or invalid report leaves no partial state, and a recorded report always reaches the main Session.
+        // An idle analysis is quiet by design (docs/025): its dossier waits for the person's morning attention, so it wakes
+        // neither the main Session nor a card; the verdict is what the board shows.
+        const analyzing = analysisRunning(current)
         const result = host.store.atomic(() => {
           const refused = pull && claimPull(host.github, ticketId, pull)
           if (refused) throw new Error(refused)
@@ -244,7 +247,7 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
             ...(args.reply_to_trigger_id ? { answers: args.reply_to_trigger_id } : {}),
             ...(Object.keys(delivery).length ? { delivery } : {}) }
           const updated = host.engine.report(ticketId, report)
-          const relay = reportRelay(updated, report)
+          const relay = analyzing ? undefined : reportRelay(updated, report)
           if (relay) host.sessions.relay(relay.id, relay.text)
           const notification = relay ? 'orchestrator' : 'internal_only'
           return { reported: true, notification, ...(updated.attention ? { attention: updated.attention } : {}) }

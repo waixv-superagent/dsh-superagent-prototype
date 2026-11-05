@@ -297,6 +297,39 @@ export type TicketOutcome = 'completed' | 'merged' | 'closed' | 'dropped' | 'sto
 export interface QuestionSection { label: string; text: string; fold?: boolean }
 /** A question for a person; `triggerId` is the human message that raised it, whose conversation it goes back to. */
 export interface Attention { id: string; question: string; /** The worker's choices, when it offers any; a card shows them and a click answers. */ options?: string[]; /** The context the worker adds, in its own order; absent keeps the card's default layout. */ sections?: QuestionSection[]; triggerId?: string }
+/** What a person does with a ticket the idle analysis sorted: put it in the attention pool, merge it into a duplicate, or let it sleep. */
+export type AnalysisVerdict = 'promote' | 'merge' | 'archive'
+/**
+ * The actionable advice an idle analysis ends with. The analysis is read-only: this is the one decision it records, and a
+ * person (or the board) still decides when the ticket runs. `mergeWith` names the tickets it likely duplicates; `cost` says
+ * what promoting it would take, so attention can be weighed rather than merely offered.
+ */
+export interface AnalysisAdvice {
+  verdict: AnalysisVerdict
+  /** Why, in one sentence a person can check against the dossier. */
+  reason: string
+  /** Ticket ids the analysis believes describe the same problem; at most three, never the ticket itself. */
+  mergeWith?: string[]
+  /** What promoting it would cost, such as `约 2 小时实现 + 一次编辑器验证`; optional. */
+  cost?: string
+  at: string
+}
+/**
+ * The read-only analysis a `P2`/`P3` ticket gets in an idle window (docs/025): `running` while its assignment runs, then
+ * `ready` with the worker's dossier and verdict, or `failed` when the worker could not finish. A ticket whose analysis is
+ * `ready` waits for a person; the idle gate never starts it again on its own.
+ */
+export interface TicketIdleAnalysis {
+  state: 'running' | 'ready' | 'failed'
+  /** The Assignment that ran it. */
+  assignmentId: string
+  /** The idle depth that admitted it. */
+  level: IdleLevel
+  startedAt: string
+  endedAt?: string
+  /** The verdict the worker recorded, absent when it reported no advice. */
+  advice?: AnalysisAdvice
+}
 /** One state the host found provably inconsistent on an open ticket and repaired on its own, kept as the system's trace. */
 export interface TicketRepair {
   at: string
@@ -325,10 +358,11 @@ export interface Ticket {
   /** The priority question a TAPD ticket asks before it may start; absent when the ticket never asked. */
   priorityAsk?: PriorityAsk
   /**
-   * A `P2`/`P3` ticket waiting in the idle pool: when it entered, and when and at which idle depth its work started. The
-   * daily budget counts the tickets whose `launchedIn` falls on the current day.
+   * A `P2`/`P3` ticket waiting in the idle pool: when it entered, when and at which idle depth its work started, and the
+   * read-only analysis it got in an idle window. The daily budget counts the tickets whose `launchedIn` falls on the
+   * current day.
    */
-  idle?: { enteredAt: string; launchedIn?: IdleLevel; launchedAt?: string }
+  idle?: { enteredAt: string; launchedIn?: IdleLevel; launchedAt?: string; analysis?: TicketIdleAnalysis }
   /**
    * What kind of work it is, decided at acceptance (`core/kind.ts`): every ticket created since kinds exist has one; read
    * it through `ticketKind`, which derives it for older tickets. A label for counting and filtering, never an authority.

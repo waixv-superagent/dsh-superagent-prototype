@@ -725,7 +725,19 @@ export class Tickets extends EnginePart {
     const ticket = this.repo.tickets.get(ticketId)
     if (!ticket || !liveTicket(ticket)) return
     const at = this.now()
-    ticket.idle = { enteredAt: ticket.idle?.enteredAt ?? at, launchedIn: level, launchedAt: at }
+    ticket.idle = { ...ticket.idle ?? { enteredAt: at }, enteredAt: ticket.idle?.enteredAt ?? at, launchedIn: level, launchedAt: at }
+    ticket.updatedAt = at
+    this.repo.tickets.save(ticket)
+  }
+  /**
+   * Records that an idle window admitted a pooled ticket for its read-only analysis (docs/025): until it reports, the
+   * worker's tools refuse writes and its assignment carries the analysis brief instead of delivery instructions.
+   */
+  beginIdleAnalysis(ticketId: string, assignmentId: string, level: IdleLevel): void {
+    const ticket = this.repo.tickets.get(ticketId)
+    if (!ticket || !liveTicket(ticket)) return
+    const at = this.now()
+    ticket.idle = { ...ticket.idle ?? { enteredAt: at }, analysis: { state: 'running', assignmentId, level, startedAt: at } }
     ticket.updatedAt = at
     this.repo.tickets.save(ticket)
   }
@@ -1054,6 +1066,10 @@ export class Tickets extends EnginePart {
     const assignment: Assignment = { id: key('assignment', ticket.id, String(ticket.assignments.length)), state: 'pending', createdAt: this.now() }
     ticket.assignments.push(assignment)
     delete ticket.delivery
+    // A new Assignment supersedes an analysis still marked running: it cannot report now, so the pool must not wait on it
+    // forever, and the ticket reads as the work the new Assignment is for.
+    const analysis = ticket.idle?.analysis
+    if (analysis?.state === 'running') ticket.idle = { ...ticket.idle!, analysis: { ...analysis, state: 'failed', endedAt: assignment.createdAt } }
     if (ticket.attention && ticket.attention.question !== PLAN_QUESTION) { this.replies.withdrawAttention(ticket.attention.id); delete ticket.attention }
     return assignment
   }

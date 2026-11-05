@@ -8,6 +8,7 @@ import type { SourceRegistry } from '../../sources/registry.ts'
 import { feishuClientLink, feishuTopicLink, isMessageLink } from '../../sources/feishu-channel.ts'
 import { workerSessionId } from '../../executor/dsh.ts'
 import type { Store } from '../store.ts'
+import { analysisView } from '../analysis.ts'
 import { attribute, markdown, plain, preview, readable } from './text.ts'
 
 export type LinkTarget = (channel: ChannelRef) => ChannelLink
@@ -122,6 +123,7 @@ export function ticketSummary(ticket: Ticket) {
   const stage = ticketStage(ticket)
   const note = ticketNote(ticket, stage)
   const state = liveTicket(ticket) ? 'open' as const : 'ended' as const
+  const analysis = analysisView(ticket)
   // A change delivered into a pull request the Ticket opened waits at the pipeline gate until a person approves and merges it.
   // The wait is derived from that open Thread, so a Ticket reported before this gate existed shows it too (docs/003).
   const ready = latestReport(ticket)
@@ -148,6 +150,8 @@ export function ticketSummary(ticket: Ticket) {
     ...ticket.verification ? { verification: ticket.verification } : {}, ...provenance ? { provenance } : {},
     attention: ticket.attention && { ...ticket.attention, question: markdown(ticket.attention.question) },
       assignments: ticket.assignments.length, inputs: ticket.inputs.length, undelivered: ticket.undelivered.length,
+    // The idle analysis's state and verdict, so a pool row can say what the machine found without opening the ticket.
+    ...(analysis ? { analysis } : {}),
     // Every started Assignment of a Ticket runs in its one shared worker Session.
     deliveryError: attribute(ticket.delivery?.error), sessionId: ticket.assignments.some(item => item.startedAt)
       ? workerSessionId(ticket.id) : '',

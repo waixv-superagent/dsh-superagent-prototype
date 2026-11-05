@@ -12,7 +12,8 @@ Each open Ticket has one stage, determined by what it is waiting for. Read the t
 | person / verify | Delivered work, a changelist or a review, still waits for the person's local check. The host follows the pipeline in parallel from delivery, but the local check is a mandatory gate and the first gate the Ticket page shows, so it comes before a question and the pipeline stage | Awaiting local verification |
 | person / answer | It has an Attention | Awaiting answer |
 | pipeline / running, blocked | Delivered work is followed through its review and pipeline from the moment the worker reports it, including a change delivered into a pull request the Ticket opened, which a person approves and merges there; it reads as this stage once the local check has passed. blocked covers a failing check the host cannot clear, an approval waiting for the submit, and a green review waiting for a person, and is pinned above running work | Pipeline · Blocked |
-| person / review | The latest Report is `ready`, no pull request the Ticket opened is still open, and no Input reached its worker after the Report | Awaiting review |
+| person / review | The latest Report is `ready`, no pull request the Ticket opened is still open, and no Input reached its worker after the Report |
+| idle (analysis) | Its read-only idle analysis is `ready` and that analysis's own Assignment reported it, with nothing newer arriving (docs/025): the verdict waits in the pool instead of filling the person lane, until a person promotes or answers the ticket | In the idle pool | Awaiting review |
 | person / blocked, failed | The latest Report is `blocked` or `failed`, and no person's message reached the Ticket since | Blocked · Failed |
 | working / queued | No Assignment, or a pending one | Queued |
 | idle | The latest Report is `waiting`, or the Assignment ended | Waiting for a Trigger |

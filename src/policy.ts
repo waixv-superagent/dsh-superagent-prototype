@@ -181,6 +181,16 @@ export const P4ConfigSchema = z.object({
  * The judgement itself is `core/idle.ts`; this is only what the deployment may tune.
  */
 const ClockTimeSchema = z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/, 'A time of day, HH:MM')
+/**
+ * What an idle-window launch does (docs/025): a read-only analysis that ends in a verdict, instead of implementation. The
+ * switch restores the earlier behavior; `related` bounds the likely-duplicate list the worker sees.
+ */
+const IdleAnalysisSchema = z.object({
+  enabled: z.boolean().default(IDLE_DEFAULTS.analysis.enabled)
+    .describe('Run idle-window launches as read-only analyses with a verdict; false starts the ticket\'s ordinary work instead.'),
+  related: z.number().int().min(0).max(3).default(IDLE_DEFAULTS.analysis.related)
+    .describe('How many likely related tickets an analysis brief names, from the relation graph\'s own guess.'),
+}).strict()
 export const IdleConfigSchema = z.object({
   enabled: z.boolean().default(IDLE_DEFAULTS.enabled),
   windows: z.array(z.object({ from: ClockTimeSchema, to: ClockTimeSchema, level: z.enum(['L1', 'L2', 'L3']) }).strict())
@@ -192,6 +202,7 @@ export const IdleConfigSchema = z.object({
   dailyItems: z.number().int().min(1).max(100).default(IDLE_DEFAULTS.dailyItems),
   analysisWorkers: z.number().int().min(1).max(4).default(IDLE_DEFAULTS.analysisWorkers),
   priorityAskMin: z.number().int().min(5).max(720).default(IDLE_DEFAULTS.priorityAskMin),
+  analysis: IdleAnalysisSchema.default(() => IdleAnalysisSchema.parse({})),
 }).strict()
 export type IdleSettings = z.infer<typeof IdleConfigSchema>
 /**

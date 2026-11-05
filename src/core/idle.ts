@@ -6,6 +6,7 @@
  * batch. Windows are configurable; their defaults are the addendum's.
  */
 import { waitsForIdle, type PriorityLevel } from './priority.ts'
+import { ANALYSIS_RELATED } from './analysis.ts'
 
 /** The three depths of idle time: a free slot's shallow triage, the evening window, and the silent night. */
 export type IdleLevel = 'L1' | 'L2' | 'L3'
@@ -15,6 +16,17 @@ export type ClockTime = string
 export interface IdleWindow { from: ClockTime; to: ClockTime; level: IdleLevel }
 /** A window in which the person is meant to be available, so only shallow work may use it; kept for the settings view. */
 export interface IdleRange { from: ClockTime; to: ClockTime }
+/**
+ * What an idle-window launch does (docs/025): by default it runs the ticket's read-only analysis, which gathers evidence and
+ * ends in a verdict for a person, instead of starting implementation nobody asked for yet. Turning it off restores the
+ * earlier behavior, where `P2`/`P3` work implements in an idle window.
+ */
+export interface IdleAnalysisConfig {
+  /** Run idle-window launches as read-only analyses with a verdict; `false` starts the ticket's ordinary work instead. */
+  enabled: boolean
+  /** How many likely related tickets an analysis brief names, from the relation graph's own guess. */
+  related: number
+}
 /** The configurable part of the judgement; the `executor.idle` settings block carries these values. */
 export interface IdleConfig {
   enabled: boolean
@@ -30,6 +42,8 @@ export interface IdleConfig {
   analysisWorkers: number
   /** Minutes a `P2`/`P3` ticket's priority question waits before the default applies. */
   priorityAskMin: number
+  /** What an idle-window launch does: a read-only analysis (the default) or the ticket's ordinary implementation. */
+  analysis: IdleAnalysisConfig
 }
 /** The addendum's defaults: lunch for `L1`, the evening for `L2`, the night for `L3`, and the working day protected. */
 export const IDLE_DEFAULTS: IdleConfig = {
@@ -41,6 +55,7 @@ export const IDLE_DEFAULTS: IdleConfig = {
   dailyItems: 6,
   analysisWorkers: 1,
   priorityAskMin: 30,
+  analysis: { enabled: true, related: ANALYSIS_RELATED },
 }
 /** The five signals of the judgement: queue, capacity, window, human quiet, and the guard. */
 export interface IdleSignals { queue: boolean; capacity: boolean; window: boolean; human: boolean; guard: boolean }

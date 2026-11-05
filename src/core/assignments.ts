@@ -3,6 +3,7 @@ import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, liveTicket, runningAssignment } from './model.ts'
 import type { Assignment, QuestionSection, ReportState, Ticket } from './model.ts'
+import { analysisAdviceFromSections, ANALYSIS_ADVICE_LABELS } from './analysis.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { REPAIR_LIMIT } from './invariants.ts'
 import { pendingPlan, validCardOptions, validQuestionSections, ticketPhase } from './plan.ts'
@@ -159,27 +160,38 @@ export class Assignments extends EnginePart {
   report(ticketId: string, report: WorkerReport): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    // What this report delivered, and whether it is an idle analysis (docs/025): that one delivers nothing, so its ready
+    // dossier is not a delivery and the plan phase does not refuse it; it may never carry code either.
+    const delivered = report.delivery?.changelist !== undefined || report.delivery?.review !== undefined
+    const assignment = runningAssignment(ticket) ?? latestAssignment(ticket)
+    if (!assignment) throw new UserError('unknownAssignment')
+    if (assignment.state === 'ended') throw new UserError('assignmentEnded')
+    const analysis = ticket.idle?.analysis
+    const analyzing = analysis?.state === 'running' && analysis.assignmentId === assignment.id
+    if (analyzing && (delivered || report.delivery)) throw new UserError('analysisReadOnly')
     // The P4 delivery facts belong to the deliver phase once a ticket went through the P1 gate: a plan not approved yet
     // refuses them, and so does an approved plan whose worker has not verified and entered deliver. Tickets that never had a
     // plan (the GitHub path) keep reporting as before.
     const phase = ticketPhase(ticket)
-    const delivered = report.delivery?.changelist !== undefined || report.delivery?.review !== undefined
     const gated = ticket.plan !== undefined
-    if ((delivered || report.state === 'ready') && (phase === 'plan' || gated && phase !== 'deliver')) throw new UserError('notDeliverable')
+    if (!analyzing && (delivered || report.state === 'ready') && (phase === 'plan' || gated && phase !== 'deliver')) throw new UserError('notDeliverable')
     if (report.question && (report.state === 'ready' || report.answers)) throw new UserError('questionWithResult')
     if (report.askedBy && !report.question) throw new UserError('askerWithoutQuestion')
     const options = report.options?.map(label => label.trim())
     if (options && (!report.question || !validCardOptions(options))) throw new UserError(report.question ? 'attentionOptions' : 'optionsWithoutQuestion')
-    if (report.sections && (!report.question || !validQuestionSections(report.sections))) throw new UserError('attentionSections')
+    // Sections ordinarily carry a question card's context; an idle analysis has no question and puts its verdict there
+    // instead (docs/025), so sections without a question are valid only for its running report.
+    if (report.sections && !validQuestionSections(report.sections)) throw new UserError('attentionSections')
+    if (report.sections && !report.question && !analyzing) {
+      const verdictSection = report.sections.some(section => (Object.values(ANALYSIS_ADVICE_LABELS) as string[]).includes(section.label.trim()))
+      throw new UserError(verdictSection ? 'notAnalysing' : 'attentionSections')
+    }
     const person = (id: string, channel: boolean) => {
       const trigger = this.repo.triggers.get(id)
       return !!trigger?.human && (!channel || !!trigger.channel) && this.reaches(ticket, trigger, false)
     }
     if (report.askedBy && !person(report.askedBy, true)) throw new UserError('notAsker')
     if (report.answers && !person(report.answers, false)) throw new UserError('notAnswerable')
-    const assignment = runningAssignment(ticket) ?? latestAssignment(ticket)
-    if (!assignment) throw new UserError('unknownAssignment')
-    if (assignment.state === 'ended') throw new UserError('assignmentEnded')
     const at = this.now()
     const previous = ticket.attention
     const ask = (question: string) => ({ id: key('attention', ticketId, question, at), question,
@@ -200,6 +212,22 @@ export class Assignments extends EnginePart {
     if (report.answers) this.takeUp(ticketId, report.answers)
     if (report.state === 'blocked' || report.state === 'failed') ticket.undelivered = ticket.undelivered.filter(id => !automatic(ticket.inputs.find(input => input.id === id)))
     this.repo.tickets.save(ticket)
+    // An idle analysis ends its turn, not the ticket: a ready dossier waits for a person, and the idle gate must not run the
+    // analysis again on its own. Any final report but a ready dossier leaves it failed rather than silently retried; a
+    // progress report keeps it running.
+    if (analyzing) {
+      const state = report.state === 'ready' ? 'ready' as const : report.state === 'progress' ? undefined : 'failed' as const
+      // The verdict arrives in the same report as the dossier, so one call records both and no advice can outlive the
+      // analysis it belongs to. A duplicate that does not exist is a mistake the worker fixes now (`unknownRelated`).
+      const parsed = report.sections ? analysisAdviceFromSections(report.sections) : undefined
+      const mergeWith = (parsed?.mergeWith ?? []).filter(id => id !== ticketId)
+      const unknown = mergeWith.find(id => !this.repo.tickets.get(id))
+      if (unknown) throw new UserError('unknownRelated', { ticket: unknown })
+      const advice = parsed ? { ...parsed, ...mergeWith.length ? { mergeWith } : {}, at } : analysis!.advice
+      ticket.idle = { ...ticket.idle!, analysis: { ...analysis!, ...(state ? { state, endedAt: at } : {}), ...(advice ? { advice } : {}) } }
+      this.repo.tickets.save(ticket)
+      return this.require(ticketId)
+    }
     // A ticket that follows Threads ends with them: a ready report ends it only once followsDone holds, with that outcome.
     const ready = !ticket.follows?.length ? 'completed' : this.tickets.followsDone(ticket)?.outcome
     // A dropped report after a close the ticket deferred ends it as the close did, which its final notice tells.

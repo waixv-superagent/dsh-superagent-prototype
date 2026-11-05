@@ -6,6 +6,17 @@ export type TicketStage = { stage: 'person'; action: 'delivery' | 'answer' | 're
   | { stage: 'pipeline'; action: 'running' | 'blocked' }
   | { stage: 'working'; action?: 'queued' } | { stage: 'idle' } | { stage: 'ended' }
 
+/**
+ * Whether a pooled ticket is holding a finished read-only analysis (docs/025): its own analysis assignment reported ready
+ * and nothing newer arrived, so its verdict is a proposal in the pool, not a delivered change a person must review.
+ */
+function analysisHolds(ticket: Ticket): boolean {
+  const analysis = ticket.idle?.analysis
+  if (analysis?.state !== 'ready') return false
+  const assignment = latestAssignment(ticket)
+  return !!assignment && assignment.id === analysis.assignmentId && assignment.report?.state === 'ready' && !ticket.undelivered.length
+}
+
 /** Classifies a ticket's stage; the rules follow the table in docs/003 in order, where the first matching row wins. */
 export function ticketStage(ticket: Ticket): TicketStage {
   if (ticket.ended) return { stage: 'ended' }
@@ -15,6 +26,8 @@ export function ticketStage(ticket: Ticket): TicketStage {
   // the person's check must read as verify, not as an answer or a pipeline item, until it is passed or returned (docs/003).
   if (awaitsVerification(ticket)) return { stage: 'person', action: 'verify' }
   if (ticket.attention) return { stage: 'person', action: 'answer' }
+  // A finished idle analysis stays in the pool: its verdict is what a person may pick, not a review item the board owes them.
+  if (analysisHolds(ticket)) return { stage: 'idle' }
   // A merged pipeline is history: it completed the Ticket once, and a person's later message may resume the Ticket for a
   // follow-up round, which is not pipeline work again (docs/003).
   if (ticket.pipeline && ticket.pipeline.state !== 'merged') return { stage: 'pipeline', action: ticket.pipeline.state === 'blocked' ? 'blocked' : 'running' }
