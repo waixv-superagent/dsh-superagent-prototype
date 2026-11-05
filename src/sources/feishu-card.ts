@@ -461,11 +461,6 @@ const pipelineButton = (label: string, ticketId: string, action: 'reviewers' | '
   tag: 'button', text: plain(label), type, width: 'fill',
   behaviors: [{ type: 'callback', value: { v: 1, pipeline: action, ticket: ticketId } }], ...extra,
 })
-/** One row of buttons, halves or thirds. */
-const buttonRow = (buttons: Record<string, unknown>[]): Record<string, unknown> => ({
-  tag: 'column_set', flex_mode: flexOf(buttons.length), horizontal_spacing: '8px',
-  columns: buttons.map(button => ({ tag: 'column', elements: [button] })),
-})
 /** A form with a multi-select of `options` and one submit button, for reviewers or package targets. */
 const choiceForm = (name: string, placeholder: string, options: readonly { label: string; value: string }[], submit: Record<string, unknown>): Record<string, unknown> => ({
   tag: 'form', name,
