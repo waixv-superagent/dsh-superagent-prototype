@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "items": [
+    { "id": "C1", "text": "复现入口支持重跑同一个 case", "ticket": "1a2b3c4d", "due": "2026-11-05", "from": "2026-11-04", "status": "done", "note": "工单已合并", "history": [] },
+    { "id": "C2", "text": "闲时池按最晚开始时间排序", "ticket": "2b3c4d5e", "due": "2026-11-05", "from": "2026-11-04", "status": "open", "note": null, "history": [] },
+    { "id": "C3", "text": "把同类失败归并成一类，只给人一行", "ticket": null, "due": "2026-11-05", "from": "2026-11-04", "status": "missed", "note": "未开单：昨天的承诺今天没有对应工单", "history": [] }
+  ]
+}

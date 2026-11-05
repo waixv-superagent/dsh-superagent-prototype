@@ -20,13 +20,14 @@ import { pathToFileURL } from 'node:url'
 import { parseArgs } from './daily-metrics.mjs'
 
 export const LEDGER_VERSION = 1
-export const TEMPLATE_VERSION = 3
+export const TEMPLATE_VERSION = 4
 export const STATUSES = ['open', 'done', 'partial', 'missed', 'dropped']
 const STATUS_LABEL = { open: '进行中', done: '已兑现', partial: '半兑现', missed: '未兑现', dropped: '已放弃' }
 const KIND_LABEL = { feature: '需求', bug: 'bug', self: '自迭代', inquiry: '问询', chat: '闲聊' }
 /** 叙述段：模型在 narrative.md 里用 `## <key>` 写这些段；缺段会在报告里显眼地标出来。 */
 export const NARRATIVE_SECTIONS = [
   ['summary', '三行结论'],
+  ['interview', '采访人的感受'],
   ['review', '四类复盘（需求 / bug / 闲聊 / 问询）'],
   ['bottlenecks', '瓶颈（现状 / 缺什么 / 谁该修）'],
   ['plan', '明日方案'],
@@ -223,7 +224,8 @@ const counterTable = (counter, labels = {}, head = ['项', '数量']) => {
 }
 
 /**
- * 渲染固定 8 节的自包含 HTML。第一屏：三行结论 + 与昨天对比的数字 + 昨天未兑现的承诺。
+ * 渲染固定 9 节的自包含 HTML。第一屏：三行结论 + 与昨天对比的数字 + 昨天未兑现的承诺。
+ * 第 02 节是「采访人的感受」：数字之外唯一写人的一节，只收原话与标为推断的解读。
  * 返回 `{ html, missing }`，`missing` 是缺的叙述段 key。
  */
 export function renderReport ({ metrics, previous, ledger, narrative = {} }) {
@@ -277,6 +279,7 @@ export function renderReport ({ metrics, previous, ledger, narrative = {} }) {
   const extra = Object.keys(narrative).filter(k => !known.has(k))
   const sections = [
     ['结论与第一屏', `${narrativeBlock(narrative, 'summary', missing)}<div class="kpis">${kpis}</div>${firstScreen}`],
+    ['采访人的感受', `${narrativeBlock(narrative, 'interview', missing)}<p class="small muted">这一节只放人的话与采访者的观察：原话逐字引用并标时间，不是原话的解读一律标「推断」；没有采访就写「今天没有采访」，不要用数字反推情绪。</p>`],
     ['一天怎么过的', `<h3>人类消息 → agent 工作（按小时，CST）</h3>${hourlyChart(m.hourly)}<h3>今天的工单</h3>${ticketRows}<h3>消息漏斗</h3>${funnel}<h3>交付</h3>${deliveries}`],
     ['承诺对账', ledgerRows],
     ['哪里卡住', `<h3>失败构成（一条报告只归一类）</h3>${counterTable(m.reports.causes, causeLabels, ['根因', '条数'])}${failures}<h3>assignment 结束原因</h3>${counterTable(m.assignments.endedReasons)}<h3>瓶颈</h3>${narrativeBlock(narrative, 'bottlenecks', missing)}`],
@@ -289,7 +292,7 @@ export function renderReport ({ metrics, previous, ledger, narrative = {} }) {
       extra.map(k => `<h3>${escapeHtml(k)}</h3>${markdown(narrative[k])}`).join('')}`],
   ]
   const body = sections.map(([title, html], i) => `<section id="s${i + 1}"><h2><span class="no">${String(i + 1).padStart(2, '0')}</span>${title}</h2>${html}</section>`).join('\n')
-  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>每日复盘 · ${escapeHtml(date)}</title><style>${CSS}</style></head><body><main><header><h1>每日复盘 · ${escapeHtml(date)}</h1><div class="sub">数字来自 daily-metrics（只读），叙述由模型基于这些数字撰写；口径见第 8 节。</div></header>\n${body}\n<footer>本报告由自动化代理生成（非人类）。发现数字与看板不一致时，以数据库与本机日志为准。</footer></main></body></html>\n`
+  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>每日复盘 · ${escapeHtml(date)}</title><style>${CSS}</style></head><body><main><header><h1>每日复盘 · ${escapeHtml(date)}</h1><div class="sub">数字来自 daily-metrics（只读），叙述由模型基于这些数字撰写；口径见第 ${sections.length} 节。</div></header>\n${body}\n<footer>本报告由自动化代理生成（非人类）。发现数字与看板不一致时，以数据库与本机日志为准。</footer></main></body></html>\n`
   return { html, missing }
 }
 

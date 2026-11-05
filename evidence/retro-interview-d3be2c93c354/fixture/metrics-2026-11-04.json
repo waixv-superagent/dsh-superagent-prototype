@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-11-04T16:10:00.000Z",
+  "window": {
+    "date": "2026-11-04",
+    "since": "2026-11-03T16:00:00.000Z",
+    "until": "2026-11-04T16:00:00.000Z",
+    "tz": "+08:00"
+  },
+  "sources": { "github": "waixv-superagent/dsh-superagent-prototype", "p4": "//sun/mainline" },
+  "tickets": {
+    "created": 5,
+    "ended": 2,
+    "open": 3,
+    "kinds": { "feature": 1, "bug": 2, "self": 2 },
+    "list": [
+      { "id": "aaaaaaaa", "title": "示例工单：快照对比", "kind": "self", "createdAt": "10:10", "assignments": 2, "toolCalls": 120, "outcome": "merged", "reports": ["ready"] },
+      { "id": "bbbbbbbb", "title": "示例工单：失败归因", "kind": "bug", "createdAt": "13:20", "assignments": 1, "toolCalls": 88, "outcome": "completed", "reports": ["ready"] },
+      { "id": "cccccccc", "title": "示例工单：排队", "kind": "feature", "createdAt": "18:40", "assignments": 1, "toolCalls": 40, "outcome": "open", "reports": ["progress"] }
+    ]
+  },
+  "assignments": { "started": 5, "ended": 5, "endedReasons": { "normal": 4, "hostRestarted": 1 } },
+  "reports": {
+    "total": 5,
+    "states": { "ready": 3, "failed": 1, "blocked": 1 },
+    "causes": { "quota": 1, "environment": 1 },
+    "failures": [
+      { "at": "12:40", "ticket": "bbbbbbbb", "state": "failed", "cause": "quota", "summary": "402 Insufficient Balance" }
+    ]
+  },
+  "restarts": { "interrupted": 0, "events": [] },
+  "intake": {
+    "total": 61,
+    "human": 61,
+    "bySource": { "feishu": 52, "tapd": 9 },
+    "decisions": { "accept": 4, "ignore": 55, "chat": 2 },
+    "fanoutOnly": 9,
+    "handbacks": 4,
+    "acks": 4
+  },
+  "delivery": {
+    "ready": 3,
+    "prsMerged": 2,
+    "clsSubmitted": 0,
+    "total": 5,
+    "prs": {
+      "merged": [{ "number": 98, "title": "示例 PR：证据包" }, { "number": 99, "title": "示例 PR：面板微调" }],
+      "closed": [],
+      "open": []
+    },
+    "cls": { "source": "p4", "submitted": [] }
+  },
+  "tools": { "calls": 3520, "sessions": 15 },
+  "hourly": [
+    { "hour": 10, "human": 3, "toolCalls": 110, "progress": 1, "deliveries": 0, "failed": 0 },
+    { "hour": 13, "human": 6, "toolCalls": 250, "progress": 2, "deliveries": 1, "failed": 1 },
+    { "hour": 18, "human": 4, "toolCalls": 180, "progress": 1, "deliveries": 0, "failed": 0 },
+    { "hour": 21, "human": 2, "toolCalls": 90, "progress": 1, "deliveries": 0, "failed": 0 }
+  ],
+  "limits": ["示例夹具：本文件只用于前后对比的基线页，不是真实取数"]
+}
