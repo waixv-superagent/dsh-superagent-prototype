@@ -22,10 +22,16 @@ describe('ticketStage', () => {
     ['answer before review', ticket({ attention, assignments: [reported('ready')] }), { stage: 'person', action: 'answer' }],
     ['answer before a failure', ticket({ attention, assignments: [reported('failed')] }), { stage: 'person', action: 'answer' }],
     ['a ready Report', ticket({ assignments: [reported('ready')] }), { stage: 'person', action: 'review' }],
-    // The pipeline runs on the host from delivery on, so it comes before the person's parallel local check.
-    ['a running pipeline before the local check', ticket({ pipeline: { state: 'running', at: '' }, verification: { at: '', state: 'pending' } }),
-      { stage: 'pipeline', action: 'running' }],
+    // The P4.5 local check is the mandatory gate the Ticket page shows first, so it comes before a question and the
+    // pipeline the host follows in parallel: a delivered Ticket awaiting the person's check is not "awaiting answer".
+    ['the local check before an answer', ticket({ attention, verification: { at: '', state: 'pending' } }), { stage: 'person', action: 'verify' }],
+    ['the local check before a running pipeline', ticket({ pipeline: { state: 'running', at: '' }, verification: { at: '', state: 'pending' } }),
+      { stage: 'person', action: 'verify' }],
+    ['the local check before a blocked pipeline and a question', ticket({ pipeline: { state: 'blocked', at: '', manual: true }, attention,
+      verification: { at: '', state: 'pending' } }), { stage: 'person', action: 'verify' }],
     ['a delivered ticket whose pipeline has not started', ticket({ verification: { at: '', state: 'pending' } }), { stage: 'person', action: 'verify' }],
+    // Without a pending local check a question still comes before the pipeline follow-up.
+    ['an answer before a running pipeline', ticket({ attention, pipeline: { state: 'running', at: '' } }), { stage: 'person', action: 'answer' }],
     ['a ready Report of an ended Assignment', ticket({ assignments: [reported('ready', { state: 'ended' })] }), { stage: 'person', action: 'review' }],
     ['a blocked Report', ticket({ assignments: [reported('blocked')] }), { stage: 'person', action: 'blocked' }],
     ['a failed Report', ticket({ assignments: [reported('failed')] }), { stage: 'person', action: 'failed' }],

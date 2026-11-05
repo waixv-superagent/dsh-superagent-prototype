@@ -1,0 +1,284 @@
+{
+ "GET overview": {
+  "problems": [],
+  "person": [],
+  "verification": [
+   {
+    "id": "9a1b2c3d4e5f60718293a4b5c6d7e8f9",
+    "title": "示例：已交付，等本地验证（同时有一个提问）",
+    "state": "open",
+    "stage": "person",
+    "action": "verify",
+    "kind": "feature",
+    "kindSource": "rule",
+    "pipeline": {
+     "state": "blocked",
+     "at": "2026-11-05T07:45:00.000Z",
+     "manual": true,
+     "step": "review",
+     "check": "Swarm 已通过，待人工审核",
+     "url": "https://swarm.example/reviews/9001",
+     "progress": {
+      "pass": 2,
+      "running": 0,
+      "fail": 0,
+      "total": 2
+     }
+    },
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": true,
+     "rework": true
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "verification": {
+     "at": "2026-11-05T07:04:42.000Z",
+     "state": "pending"
+    },
+    "attention": {
+     "id": "demo-attention",
+     "question": "这 9 处审核问题要谁继续处理？"
+    },
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-9a1b2c3d4e5f60718293a4b5c6d7e8f9",
+    "directory": "/tmp/board-demo",
+    "summary": "",
+    "createdAt": "2026-11-04T08:00:00.000Z",
+    "updatedAt": "2026-11-05T07:49:46.000Z",
+    "delivery": {
+     "lease": [],
+     "changelist": 9001,
+     "review": "9001",
+     "verification": "版本与前置：origin/main 示例构建，示例地图；CL 9001\n复现步骤：打开面板看板，再打开这张 Ticket\n预期与证据：交付后 Ticket 显示「待你验证」，看板进入「待你验证」列\n待你判断：这个分类是否符合你的预期"
+    },
+    "threads": [],
+    "reply": {
+     "source": "feishu",
+     "url": "feishu://applink/client/chat/open?openChatId=oc_demo",
+     "label": {
+      "zh": "示例话题",
+      "en": "Example thread"
+     }
+    }
+   }
+  ],
+  "pipeline": [],
+  "working": [],
+  "idle": [],
+  "ended": [],
+  "endedStats": {
+   "completed": 0,
+   "verified": 0,
+   "pending": 0,
+   "agent": 0,
+   "none": 0,
+   "changelist": 0,
+   "archived": 0
+  },
+  "executor": {
+   "running": 0,
+   "queued": 0,
+   "maxWorkers": 3,
+   "idle": 0
+  },
+  "flow": {
+   "received": 0,
+   "filtered": 0,
+   "triggers": 0,
+   "judged": 0,
+   "accepted": 0,
+   "evaluating": 0,
+   "dropped": 0
+  },
+  "editor": null,
+  "policyVersion": "3f1dc1cbd3fed5ff53df241ace579237"
+ },
+ "GET tickets": {
+  "items": [
+   {
+    "id": "9a1b2c3d4e5f60718293a4b5c6d7e8f9",
+    "title": "示例：已交付，等本地验证（同时有一个提问）",
+    "state": "open",
+    "stage": "person",
+    "action": "verify",
+    "kind": "feature",
+    "kindSource": "rule",
+    "pipeline": {
+     "state": "blocked",
+     "at": "2026-11-05T07:45:00.000Z",
+     "manual": true,
+     "step": "review",
+     "check": "Swarm 已通过，待人工审核",
+     "url": "https://swarm.example/reviews/9001",
+     "progress": {
+      "pass": 2,
+      "running": 0,
+      "fail": 0,
+      "total": 2
+     }
+    },
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": true,
+     "rework": true
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "verification": {
+     "at": "2026-11-05T07:04:42.000Z",
+     "state": "pending"
+    },
+    "attention": {
+     "id": "demo-attention",
+     "question": "这 9 处审核问题要谁继续处理？"
+    },
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-9a1b2c3d4e5f60718293a4b5c6d7e8f9",
+    "directory": "/tmp/board-demo",
+    "summary": "",
+    "createdAt": "2026-11-04T08:00:00.000Z",
+    "updatedAt": "2026-11-05T07:49:46.000Z",
+    "delivery": {
+     "lease": [],
+     "changelist": 9001,
+     "review": "9001",
+     "verification": "版本与前置：origin/main 示例构建，示例地图；CL 9001\n复现步骤：打开面板看板，再打开这张 Ticket\n预期与证据：交付后 Ticket 显示「待你验证」，看板进入「待你验证」列\n待你判断：这个分类是否符合你的预期"
+    },
+    "threads": [],
+    "reply": {
+     "source": "feishu",
+     "url": "feishu://applink/client/chat/open?openChatId=oc_demo",
+     "label": {
+      "zh": "示例话题",
+      "en": "Example thread"
+     }
+    }
+   }
+  ],
+  "total": 1,
+  "next_offset": null,
+  "kinds": {
+   "feature": 1
+  }
+ },
+ "GET tickets/9a1b2c3d4e5f60718293a4b5c6d7e8f9": {
+  "id": "9a1b2c3d4e5f60718293a4b5c6d7e8f9",
+  "title": "示例：已交付，等本地验证（同时有一个提问）",
+  "state": "open",
+  "stage": "person",
+  "action": "verify",
+  "kind": "feature",
+  "kindSource": "rule",
+  "pipeline": {
+   "state": "blocked",
+   "at": "2026-11-05T07:45:00.000Z",
+   "manual": true,
+   "step": "review",
+   "check": "Swarm 已通过，待人工审核",
+   "url": "https://swarm.example/reviews/9001",
+   "progress": {
+    "pass": 2,
+    "running": 0,
+    "fail": 0,
+    "total": 2
+   }
+  },
+  "actions": {
+   "retry": false,
+   "stop": true,
+   "confirm": false,
+   "verify": true,
+   "rework": true
+  },
+  "strength": "explicit",
+  "source": "feishu",
+  "verification": {
+   "at": "2026-11-05T07:04:42.000Z",
+   "state": "pending"
+  },
+  "attention": {
+   "id": "demo-attention",
+   "question": "这 9 处审核问题要谁继续处理？"
+  },
+  "assignments": [
+   {
+    "id": "demo-assignment",
+    "state": "ended",
+    "createdAt": "2026-11-05T06:00:00.000Z",
+    "startedAt": "2026-11-05T06:00:00.000Z",
+    "deliveredAt": "2026-11-05T07:04:42.000Z",
+    "idleAt": "2026-11-05T07:49:46.000Z",
+    "report": {
+     "state": "ready",
+     "at": "2026-11-05T07:04:42.000Z",
+     "summary": "已修复并交付 CL 9001 / Swarm 9001：只改示例资产的过渡表，不改代码与协议。"
+    },
+    "ref": "worker-9a1b2c3d4e5f60718293a4b5c6d7e8f9"
+   }
+  ],
+  "inputs": [],
+  "undelivered": 0,
+  "sessionId": "worker-9a1b2c3d4e5f60718293a4b5c6d7e8f9",
+  "directory": "/tmp/board-demo",
+  "summary": "",
+  "createdAt": "2026-11-04T08:00:00.000Z",
+  "updatedAt": "2026-11-05T07:49:46.000Z",
+  "delivery": {
+   "lease": [],
+   "changelist": 9001,
+   "review": "9001",
+   "verification": "版本与前置：origin/main 示例构建，示例地图；CL 9001\n复现步骤：打开面板看板，再打开这张 Ticket\n预期与证据：交付后 Ticket 显示「待你验证」，看板进入「待你验证」列\n待你判断：这个分类是否符合你的预期"
+  },
+  "threads": [],
+  "mandate": {
+   "strength": "explicit",
+   "policyVersion": "demo",
+   "basis": {
+    "via": "listed"
+   },
+   "actor": {
+    "source": "feishu",
+    "id": "ou_demo",
+    "name": {
+     "zh": "示例发起人",
+     "en": "示例发起人"
+    }
+   },
+   "scope": "示例：交付后等本地验证"
+  },
+  "basis": {
+   "facts": [],
+   "legacy": false
+  },
+  "paused": false,
+  "channels": [
+   {
+    "source": "feishu",
+    "url": "feishu://applink/client/chat/open?openChatId=oc_demo",
+    "label": {
+     "zh": "示例话题",
+     "en": "Example thread"
+    }
+   }
+  ],
+  "reply": {
+   "source": "feishu",
+   "url": "feishu://applink/client/chat/open?openChatId=oc_demo",
+   "label": {
+    "zh": "示例话题",
+    "en": "Example thread"
+   }
+  },
+  "relations": [],
+  "environment": []
+ }
+}

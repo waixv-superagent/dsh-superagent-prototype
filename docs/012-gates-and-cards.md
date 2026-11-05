@@ -72,7 +72,7 @@ design：  问题 / 选项 / 证据 / 推荐
 
 P4 之后的交付物**不会自动结束工单**：worker 报 `ready` 且带 changelist 或 review 时，`assignments.report()` 写入
 `verification: { at, state: 'pending' }`，同时从这一刻起由**主机侧**跟进 Swarm 流水线（`PipelineWatch`，见 009 第 5 节）；
-工单保持 open，阶段先报 `pipeline / running`（绿了待审是 `pipeline / blocked`），人的本地验收 `person / verify` 与流水线并行。
+工单保持 open，阶段先报 `person / verify`：本地验收是必过门，也是工单页第一块门，所以它排在提问和流水线之前；流水线由主机在后台并行跟进，本地验收通过后才转 `pipeline / running`（绿了待审是 `pipeline / blocked`）。
 没有交付物的分析单照旧直接结束。git 后端没有流水线，本地验收仍是最后一道门。
 
 字段与流转：

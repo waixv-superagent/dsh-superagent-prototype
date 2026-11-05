@@ -10,12 +10,14 @@ export type TicketStage = { stage: 'person'; action: 'delivery' | 'answer' | 're
 export function ticketStage(ticket: Ticket): TicketStage {
   if (ticket.ended) return { stage: 'ended' }
   if (ticket.delivery) return { stage: 'person', action: 'delivery' }
+  // The P4.5 local check is a mandatory human gate and the first gate the ticket page shows, so it comes before a question
+  // and the pipeline follow-up: the host watches the pipeline in parallel from delivery, but a delivered change waiting for
+  // the person's check must read as verify, not as an answer or a pipeline item, until it is passed or returned (docs/003).
+  if (awaitsVerification(ticket)) return { stage: 'person', action: 'verify' }
   if (ticket.attention) return { stage: 'person', action: 'answer' }
   // A merged pipeline is history: it completed the Ticket once, and a person's later message may resume the Ticket for a
-  // follow-up round, which is not pipeline work again (docs/003). A delivered change's pipeline runs on the host from the
-  // moment the worker delivers it, so it comes before the local check: the person's verification no longer starts it.
+  // follow-up round, which is not pipeline work again (docs/003).
   if (ticket.pipeline && ticket.pipeline.state !== 'merged') return { stage: 'pipeline', action: ticket.pipeline.state === 'blocked' ? 'blocked' : 'running' }
-  if (awaitsVerification(ticket)) return { stage: 'person', action: 'verify' }
   const assignment = latestAssignment(ticket)
   // A report speaks for the Ticket only while its worker has nothing newer to do, and a blocked or failed one only while the
   // worker still waits for a person (`currentReport`): otherwise the Ticket is working again on what was delivered after it.
