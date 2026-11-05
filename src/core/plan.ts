@@ -1,4 +1,5 @@
 /** The P1 plan gate (docs/012): a ticket's phases, the worker's fixed plan template, and the person's one-word decision. */
+import type { PlanDiff } from './diff.ts'
 import { liveTicket, type QuestionSection, type Ticket } from './model.ts'
 
 /** The phases a ticket passes, from the P1 plan gate to delivery; the submit after delivery stays a person's (P5). */
@@ -31,6 +32,12 @@ export interface Plan {
    * absent keeps the standard 8-line layout, which stays the style reference for bug-fix and requirement plan cards.
    */
   sections?: QuestionSection[]
+  /**
+   * The code change the plan proposes, as the worker's real unified diff (`git diff -U3` / `p4 diff -du`, or the same
+   * against an unapplied proposal made with read-only pipes). The card summarizes it and the panel renders the hunks
+   * inline or side by side, so a person reviews code before approving instead of reading a description of it.
+   */
+  diff?: PlanDiff
 }
 /** The labels of the fix plan template, in the order a worker writes them (docs/012 §2). */
 export const PLAN_LABELS = ['现象', '代码线', '资产线', '配置线', '修复锚点', '影响面', '验证方案', '预算'] as const

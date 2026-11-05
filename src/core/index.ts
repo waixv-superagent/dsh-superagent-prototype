@@ -8,6 +8,8 @@ export { REASONS, reasonText, said, type Reason, type ReasonCode } from './reaso
 export { MemoryRepositories } from './memory.ts'
 export { canRetry, ownPull, ticketStage, type TicketStage } from './stage.ts'
 export { waitingOf, type Waiting, type WaitWho } from './waiting.ts'
+export { parsePlanDiff, PLAN_DIFF_LIMITS, type PlanDiff, type PlanDiffFile, type PlanDiffHunk, type PlanDiffLine, type PlanDiffParse,
+  type PlanDiffStatus } from './diff.ts'
 export { ANALYSIS_PLAN_LABELS, DESIGN_PLAN_LABELS, missingPlanLabels, pendingPlan, planChoice, planDecision, planLines, planOverdue, planTemplate,
   PLAN_CARD_QUESTION, PLAN_GATE_HOURS, PLAN_LABELS, PLAN_OPTION_LIMITS, PLAN_QUESTION, PLAN_REPLY_HINT, PLAN_TEMPLATES, ticketPhase, TICKET_PHASES,
   validPlanOptions, type Plan, type PlanDecision, type PlanOption, type PlanTemplate, type PlanVia, type TicketPhase } from './plan.ts'

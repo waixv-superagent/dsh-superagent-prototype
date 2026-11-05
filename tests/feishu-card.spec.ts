@@ -287,7 +287,35 @@ describe('P1 plan card', () => {
     expect(message.text).toContain('选项：先上 A ｜ 先上 B ｜ 先不动')
     expect(JSON.stringify(resolvedCard(ticket, 'approve', '', '先上 A').card)).toContain('你选的是「先上 A」')
   })
+  it('summarizes a real code diff and points at the panel for the hunks, which a card cannot carry', () => {
+    const diff = {
+      base: 'origin/main',
+      added: 12,
+      removed: 3,
+      files: [
+        { path: 'Source/UI/AvatarList.cpp', status: 'modified' as const, added: 10, removed: 2, hunks: [] },
+        { path: 'Source/UI/AvatarList.h', status: 'modified' as const, added: 2, removed: 1, hunks: [] },
+        { path: 'Content/UI/icon.uasset', status: 'modified' as const, added: 0, removed: 0, binary: true, hunks: [] },
+      ],
+    }
+    const { card, text } = planCard(ticket, { text: PLAN, diff }, 'http://panel/ticket')
+    const body = JSON.stringify((card.body as { elements: Element[] }).elements)
+    expect(body).toContain('代码改动 · 3 个文件 · +12 −3')
+    expect(body).toContain('对比基线：origin/main')
+    expect(body).toContain('Source/UI/AvatarList.cpp +10 −2')
+    expect(body).toContain('Content/UI/icon.uasset（二进制）')
+    expect(body).toContain('[在面板看完整 diff（内联 / 并排）](http://panel/ticket)')
+    // The hunks themselves would be unreadable here and would blow the card's size; only the summary travels.
+    expect(body).not.toContain('@@')
+    expect(text).toContain('代码改动：3 个文件 +12 −3（对比 origin/main）')
+    expect(text).toContain('可切内联 / 并排')
+  })
+  it('keeps the card unchanged when the plan carries no diff', () => {
+    const body = JSON.stringify((planCard(ticket, { text: PLAN }).card.body as { elements: Element[] }).elements)
+    expect(body).not.toContain('代码改动')
+  })
 })
+
 describe('question card', () => {
   it('puts a worker question and its choices on a card whose buttons answer it', () => {
     const { card, text } = attentionCard('先上 A 还是先上 B？', 'att-1', ['先上 A', '先上 B'])

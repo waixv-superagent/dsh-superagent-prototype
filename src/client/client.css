@@ -412,6 +412,50 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-updated-tag { border-color: var(--dsw-alias-state-warn-primary); color: var(--dsw-alias-state-warn-primary); }
 .dt-default-updated { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 2px 12px; border-left: 2px solid var(--dsw-alias-state-warn-primary); }
 .dt-diff-fold { color: var(--dsw-alias-label-caption); font-style: italic; }
+/* A plan's code diff: a file index, then each file's hunks. Inline and side by side share the grid and the colours, so
+   switching layout never changes what a changed line looks like. Long lines scroll inside the hunk, not the page. */
+.dt-diff { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dt-diff-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dt-diff-title { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.dt-diff-title strong { font-size: 14px; font-weight: 600; }
+.dt-diff-count { color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.dt-diff-total, .dt-diff-file-stat { display: inline-flex; gap: 6px; font-family: var(--dsw-alias-font-mono); font-size: 12px; }
+.dt-diff-added { color: var(--dsw-alias-state-success-primary); }
+.dt-diff-removed { color: var(--dsw-alias-state-error-primary); }
+.dt-diff-modes { display: inline-flex; gap: 2px; margin-left: auto; padding: 2px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); }
+.dt-diff-base { color: var(--dsw-alias-label-tertiary); font-size: 12px; overflow-wrap: anywhere; }
+.dt-diff-index { overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 9px; background: var(--dsw-alias-bg-layer-2); }
+.dt-diff-index ul { display: flex; flex-wrap: wrap; margin: 0; padding: 0; list-style: none; }
+.dt-diff-index li { min-width: 0; max-width: 100%; border-right: 0.5px solid var(--dsw-alias-border-l3); border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
+.dt-diff-index button { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 10px; border: 0; background: none; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.dt-diff-index button:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.dt-diff-index code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--dsw-alias-font-mono); }
+.dt-diff-file { overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); }
+.dt-diff-file-head { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-1); font-size: 12px; scroll-margin-top: 16px; }
+.dt-diff-badge { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 4px; font-size: 10px; font-weight: 600; color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-3, var(--dsw-alias-bg-layer-2)); }
+.dt-diff-badge[data-status='added'] { color: var(--dsw-alias-state-success-primary); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 16%, transparent); }
+.dt-diff-badge[data-status='deleted'] { color: var(--dsw-alias-state-error-primary); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 16%, transparent); }
+.dt-diff-badge[data-status='renamed'] { color: var(--dsw-alias-state-warn-primary); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 16%, transparent); }
+.dt-diff-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--dsw-alias-font-mono); }
+.dt-diff-rename { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
+.dt-diff-file-stat { margin-left: auto; flex: 0 0 auto; }
+.dt-diff-binary { margin: 0; padding: 10px 12px; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.dt-diff-hunk { overflow-x: auto; }
+.dt-diff-hunk + .dt-diff-hunk { border-top: 0.5px solid var(--dsw-alias-border-l3); }
+.dt-diff-hunk-head { width: max-content; min-width: 100%; padding: 3px 10px; background: var(--dsw-alias-bg-layer-3, var(--dsw-alias-bg-layer-1)); color: var(--dsw-alias-label-tertiary); font-family: var(--dsw-alias-font-mono); font-size: 11px; line-height: 18px; white-space: pre; }
+.dt-diff-row { display: grid; grid-template-columns: 44px 44px 16px auto; width: max-content; min-width: 100%; font-family: var(--dsw-alias-font-mono); font-size: 12px; line-height: 20px; }
+.dt-diff-row[data-kind='add'] { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent); }
+.dt-diff-row[data-kind='del'] { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent); }
+.dt-diff-no { padding: 0 6px 0 2px; color: var(--dsw-alias-label-caption); text-align: right; user-select: none; }
+.dt-diff-sign { color: var(--dsw-alias-label-tertiary); text-align: center; user-select: none; }
+.dt-diff-code { min-width: 0; padding-right: 12px; white-space: pre; tab-size: 4; }
+.dt-diff-split-row { display: grid; grid-template-columns: auto auto; width: max-content; min-width: 100%; }
+.dt-diff-split-cell { display: grid; grid-template-columns: 40px 16px auto; min-width: 300px; font-family: var(--dsw-alias-font-mono); font-size: 12px; line-height: 20px; border-right: 0.5px solid var(--dsw-alias-border-l3); }
+.dt-diff-split-cell:last-child { border-right: 0; }
+.dt-diff-split-cell[data-kind='add'] { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent); }
+.dt-diff-split-cell[data-kind='del'] { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent); }
+.dt-diff-mark { padding: 0; border-radius: 2px; color: inherit; background: color-mix(in srgb, var(--dsw-alias-brand-primary) 22%, transparent); }
+.dt-plan-diff-missing { padding: 0 12px 8px; color: var(--dsw-alias-label-caption); font-size: 12px; line-height: 1.5; }
 .dt-compare { margin-left: auto; }
 .dt-admission th { white-space: nowrap; }
 .dt-admission thead tr:first-child th:not(:first-child) { color: var(--dsw-alias-label-secondary); font-weight: 500; }

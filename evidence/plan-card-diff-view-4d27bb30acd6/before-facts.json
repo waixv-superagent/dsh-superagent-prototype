@@ -1,0 +1,26 @@
+{
+  "mode": "before",
+  "viewport": "1440x1800",
+  "theme": "dark",
+  "facts": {
+    "title": "方案待确认",
+    "diff": false,
+    "files": [],
+    "totals": null,
+    "mode": null,
+    "inlineRows": 0,
+    "splitRows": 0,
+    "marks": [],
+    "baselineRows": [
+      "SkillRotateAPI.cpp",
+      "SunMoveMode.h",
+      "InstantEffect_Teleport.cpp/SweepTeleport.cpp"
+    ],
+    "baselineNotes": [
+      "改动 3 个源文件（SkillRotateAPI.cpp、SunMoveMode.h/.cpp、InstantEffect_Teleport.cpp/SweepTeleport.cpp）+ 2 个测试文件，约 30 行",
+      "改动 3 个源文件（SkillRotateAPI.cpp、SunMoveMode.h/.cpp、InstantEffect_Teleport.cpp/SweepTeleport.cpp）+ 2 个测试文件，约 30 行",
+      "改动 3 个源文件（SkillRotateAPI.cpp、SunMoveMode.h/.cpp、InstantEffect_Teleport.cpp/SweepTeleport.cpp）+ 2 个测试文件，约 30 行"
+    ],
+    "missing": null
+  }
+}

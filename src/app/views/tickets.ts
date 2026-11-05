@@ -183,6 +183,7 @@ function planView(ticket: Ticket) {
   return { text: plan.text, template, lines: planLines(plan.text, template), at: plan.at, waiting: !!pendingPlan(ticket),
     ...plan.question ? { question: plan.question } : {}, ...plan.options?.length ? { options: plan.options } : {},
     ...plan.sections?.length ? { sections: plan.sections } : {},
+    ...plan.diff ? { diff: plan.diff } : {},
     ...plan.deadline ? { deadline: plan.deadline } : {}, ...plan.approved ? { approved: plan.approved } : {},
     ...plan.feedback?.length ? { feedback: plan.feedback } : {} }
 }

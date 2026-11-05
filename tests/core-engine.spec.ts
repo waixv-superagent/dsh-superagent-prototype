@@ -2157,6 +2157,17 @@ describe('P1 plan gate', () => {
       { label: '代价', text: '复用控件少一个缓存层', fold: true },
     ] })
   })
+  it('stores the real unified diff a plan carries, and refuses text this panel cannot render', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    const diff = '--- a/Source/UI/AvatarList.cpp\n+++ b/Source/UI/AvatarList.cpp\n@@ -41,2 +41,3 @@\n-old\n+new\n+more\n context'
+    expect(() => h.engine.submitPlan(ticketId, PLAN, undefined, undefined, undefined, 'fix', 'just some prose'))
+      .toThrowError(expect.objectContaining({ code: 'planDiff' }))
+    const ticket = h.engine.submitPlan(ticketId, PLAN, undefined, undefined, undefined, 'fix', diff, 'origin/main')
+    expect(ticket.plan!.diff).toMatchObject({ base: 'origin/main', added: 2, removed: 1,
+      files: [{ path: 'Source/UI/AvatarList.cpp', status: 'modified', added: 2, removed: 1 }] })
+    expect(ticket.plan!.diff!.files[0]!.hunks[0]).toMatchObject({ oldStart: 41, oldLines: 2, newStart: 41, newLines: 3 })
+  })
   it('uses a light template for an analysis and refuses a line it leaves out', () => {
     const h = harness()
     const ticketId = accepted(h).ticketId!
