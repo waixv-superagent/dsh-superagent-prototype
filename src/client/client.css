@@ -1062,3 +1062,22 @@ button.dt-problem-title:hover { color: var(--dsw-alias-label-primary); text-deco
   .dt-graph-cloud .dt-graph-label, .dt-graph-cloud .dt-graph-why { animation: none; }
   .dt-graph-cloud .dt-graph-edge, .dt-graph-cloud .dt-graph-node, .dt-graph-cloud .dt-graph-dot, .dt-graph-cloud .dt-graph-ring { transition: none; }
 }
+
+/* Update dialog: versions, new commits and the steps of a running update. */
+.dt-modal.dt-upgrade-modal { width: min(520px, 100%); }
+.dt-upgrade-body { display: flex; flex-direction: column; gap: 12px; font-size: 13px; line-height: 20px; }
+.dt-upgrade-versions { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; }
+.dt-upgrade-commits { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
+.dt-upgrade-commits li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; }
+.dt-upgrade-run { display: flex; flex-direction: column; gap: 8px; }
+.dt-upgrade-outcome { margin: 0; font-weight: 500; }
+.dt-upgrade-run[data-state='failed'] .dt-upgrade-outcome, .dt-upgrade-run[data-state='down'] .dt-upgrade-outcome { color: var(--dsw-alias-state-error-primary); }
+.dt-upgrade-run[data-state='rolledBack'] .dt-upgrade-outcome { color: var(--dsw-alias-state-warn-primary); }
+.dt-upgrade-run[data-state='done'] .dt-upgrade-outcome { color: var(--dsw-alias-state-success-primary); }
+.dt-upgrade-error { margin: 0; padding: 8px; max-height: 160px; overflow: auto; border-radius: 8px; background: var(--dsw-alias-bg-module-platform); font-family: var(--ds-font-family-code, Menlo, monospace); font-size: 11px; line-height: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dt-upgrade-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.dt-upgrade-steps li { display: flex; align-items: center; gap: 8px; color: var(--dsw-alias-label-tertiary); }
+.dt-upgrade-steps li[data-state='done'] { color: var(--dsw-alias-state-success-primary); }
+.dt-upgrade-steps li[data-state='running'] { color: var(--dsw-alias-label-primary); }
+.dt-upgrade-steps li[data-state='running'] svg { animation: dt-spin 1s linear infinite; }
+.dt-upgrade-steps li[data-state='failed'] { color: var(--dsw-alias-state-error-primary); }

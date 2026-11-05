@@ -22,14 +22,41 @@ export const Config = s.object({
     .default(15000).description('Time limit of one context read during an assessment, in milliseconds.').volatile(),
   pipelineSkill: s.string().description('Local path to the pipeline follow-up skill or its SKILL.md; empty uses the built-in follow-up instructions.')
     .default(''),
+  upgrade: s.object({
+    checkout: s.string().default('').description('Absolute path of a git checkout of this repository whose remote branch the panel offers to install; empty turns update checks off.'),
+    remote: s.string().pattern(/^[A-Za-z0-9_.\/-]+$/).default('origin').description('The remote of the checkout to fetch.'),
+    branch: s.string().pattern(/^[A-Za-z0-9_.\/-]+$/).default('main').description('The branch of that remote to install.'),
+    install: s.string().default('').description('Absolute path of the installed package directory the build replaces; empty uses the directory this plugin runs from.'),
+    startCommand: s.string().default('').description('Command line that starts the service again after the switch, such as a start script; empty starts the same command this process runs.'),
+    holdFile: s.string().default('').description('Absolute path of a file that keeps an external watchdog from starting the service while the switch replaces it; created during the switch and removed after.'),
+    pnpm: s.string().default('pnpm').description('The pnpm command used to install, check and build.'),
+    intervalMin: s.number().min(1).max(1440).step(1).default(10).description('Minutes between update checks.'),
+    idleTimeoutMin: s.number().min(1).max(240).step(1).default(30).description('Minutes an update waits for running workers before it gives up.'),
+  }).default({} as never).description('One-click update from the fork: check, build in a separate worktree, wait for running workers, switch and roll back on failure.'),
 })
 export type DeploymentConfig = ReturnType<typeof Config>
+/** The machine's update settings; `checkout` empty means the panel neither checks for nor offers updates. */
+export interface UpgradeConfig {
+  checkout: string
+  remote: string
+  branch: string
+  install: string
+  startCommand: string
+  holdFile: string
+  pnpm: string
+  intervalMin: number
+  idleTimeoutMin: number
+}
+export const NO_UPGRADE: UpgradeConfig = { checkout: '', remote: 'origin', branch: 'main', install: '', startCommand: '', holdFile: '',
+  pnpm: 'pnpm', intervalMin: 10, idleTimeoutMin: 30 }
 export interface Machine {
   stateDir: string
   promptMaxChars: Volatile<number>
   admissionContextMaxPages: Volatile<number>
   admissionContextTimeoutMs: Volatile<number>
   pipelineSkill: string
+  /** Absent in a machine built before updates existed, which reads as updates turned off. */
+  upgrade?: UpgradeConfig
 }
 const MOVED: Record<string, string> = {
   repository: 'on the GitHub Source', branchPrefix: 'in the prepare command of the Execution settings', github: 'on the GitHub Source',
@@ -42,7 +69,11 @@ export function machineOf(config: DeploymentConfig): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
   if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; docs/006-deployment.md lists the keys`)
   const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, pipelineSkill } = config
-  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, pipelineSkill }
+  const upgrade = { ...NO_UPGRADE, ...(config.upgrade ?? {}) } as UpgradeConfig
+  for (const key of ['checkout', 'install', 'holdFile'] as const) {
+    if (upgrade[key] && !isAbsolute(upgrade[key])) throw new Error(`dsh-superagent configuration upgrade.${key} must be an absolute path`)
+  }
+  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, pipelineSkill, upgrade }
 }
 
 export const GithubAccountsSchema = z.object({

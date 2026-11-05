@@ -2,6 +2,7 @@
  * Typed fake management API server for panel tests. Implements every route in `src/app/api.ts` and records any
  * undeclared query parameter or body mismatch in `server.misuse`, which `usePanelServer` asserts is empty after each test.
  */
+import type { UpgradeView } from '../../src/app/upgrade.ts'
 import { afterEach, beforeEach, expect, vi } from 'vitest'
 import { z } from 'zod'
 import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -86,7 +87,11 @@ export const MACHINE = { stateDir: '/srv/dsh-superagent', promptMaxChars: 100000
   admissionContextTimeoutMs: 15000 }
 
 type Settings = ReturnType<typeof SettingsSchema.parse>
+/** A host whose update checks are off: no checkout configured. */
+export const NO_UPDATE: UpgradeView = { enabled: false, installed: null, remote: { ref: 'origin/main', sha: null, checkedAt: null, error: null },
+  behind: [], more: false, available: false, blocked: null, run: null, running: 0 }
 export interface PanelServer {
+  upgrade?: UpgradeView
   joined?: Record<string, string>; joining?: Record<string, string>
   joinError?: string
   settings: Settings; revisions: Record<string, number>
@@ -532,6 +537,10 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET policy/history': { answer: () => server.history },
   'POST policy-sync/:id': { answer: ({ params }) => ({ policy: server.settings.policy.sources[params.id] }) },
   'POST setup/check': { answer: () => ({ restarting: true }) },
+  'GET upgrade': { answer: () => server.upgrade ?? NO_UPDATE },
+  'POST upgrade/check': { answer: () => server.upgrade ?? NO_UPDATE },
+  'POST upgrade': { body: true, answer: () => server.upgrade?.run ?? refuse(409, 'Update refused: unchecked', { upgrade: 'unchecked' }) },
+  'POST upgrade/cancel': { answer: () => ({ cancelled: false }) },
   'GET models': { answer: () => ({ default: { provider: 'host', model: 'default' }, routableProviders: [], failures: [],
     groups: [{ id: 'worker-provider', name: 'Worker provider', models: [{ id: 'worker-model', name: 'Worker model',
       reasoning: { efforts: [{ id: 'high', name: 'High' }] } }] }] }) },

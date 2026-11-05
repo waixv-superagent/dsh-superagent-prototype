@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { basename, delimiter, join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Config, executable, machineOf, resolveDeployment, resolveFeishuBot, type Machine, type Probe } from '../src/deployment.ts'
+import { NO_UPGRADE, Config, executable, machineOf, resolveDeployment, resolveFeishuBot, type Machine, type Probe } from '../src/deployment.ts'
 import { commandLine } from '../src/infra/commands.ts'
 import { gitEnv } from './fixtures/git.ts'
 
@@ -73,7 +73,10 @@ describe('configuration schema', () => {
     expect({ ...read, promptMaxChars: read.promptMaxChars.get(), admissionContextMaxPages: read.admissionContextMaxPages.get(),
       admissionContextTimeoutMs: read.admissionContextTimeoutMs.get() })
       .toEqual({ stateDir: join(dir, 'state'), promptMaxChars: 100000, admissionContextMaxPages: 10, admissionContextTimeoutMs: 15000,
-        pipelineSkill: '' })
+        pipelineSkill: '', upgrade: NO_UPGRADE })
+    // Update checks are off until a checkout is set, and a relative checkout is refused.
+    expect(machineOf(Config(minimal({ upgrade: { checkout: '/srv/fork' } }))).upgrade).toMatchObject({ checkout: '/srv/fork', remote: 'origin', branch: 'main' })
+    expect(() => machineOf(Config(minimal({ upgrade: { checkout: 'fork' } })))).toThrow('upgrade.checkout')
     expect(() => Config(minimal({ stateDir: 'relative/dir' }))).toThrow()
     expect(() => Config(minimal({ stateDir: '~/dir' }))).toThrow()
   })

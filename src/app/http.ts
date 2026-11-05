@@ -23,6 +23,7 @@ import type { SourceRegistry } from '../sources/registry.ts'
 import type { Outbox } from './outbox.ts'
 import type { Sessions } from './sessions.ts'
 import type { Watchdog } from './watchdog.ts'
+import { UpgradeRefused, type Upgrade } from './upgrade.ts'
 import type { StallWatch } from './stall-watch.ts'
 import type { Store } from './store.ts'
 import type { TextCache } from './cache.ts'
@@ -60,6 +61,8 @@ export interface HttpHost {
   readonly editorScheduler?: Pick<EditorScheduler, 'tick' | 'engine' | 'act' | 'cancelJob'>
   /** Rolling model spend the overview's billing strip reads; absent on a host built before it. */
   readonly billing?: Pick<Billing, 'view'>
+  /** The one-click update the sidebar badge offers; absent on a host built before it. */
+  readonly upgrade?: Pick<Upgrade, 'view' | 'check' | 'begin' | 'cancel'>
   readonly health: Record<string, Health>
   readonly machine: Machine
   readonly masterId: string
@@ -108,6 +111,7 @@ function failure(error: unknown): [number, Record<string, unknown>] {
   }
   if (error instanceof SetupError) return [400, { error: error.message, setup: error.problem }]
   if (error instanceof RouteError) return [error.status, { error: error.message }]
+  if (error instanceof UpgradeRefused) return [409, { error: error.message, upgrade: error.code }]
   if (error instanceof UserError) return [error.missing ? 404 : 400, { error: error.message, code: error.code, values: error.values }]
   if (error instanceof SettingsConflict || error instanceof PromptConflict) return [409, { error: error.message }]
   return [500, { error: error instanceof Error ? error.message : String(error) }]
@@ -182,6 +186,7 @@ const EditorActRequest = z.discriminatedUnion('action', [
   z.object({ action: z.literal('preempt'), reason: z.string().trim().max(300).optional() }).strict(),
   z.object({ action: z.enum(['front', 'cancel', 'cancel-job']), id: z.string().trim().min(1).max(64) }).strict(),
 ])
+const UpgradeRequest = z.object({ force: z.boolean().optional() }).strict()
 const VerificationRequest = z.object({ note: z.string().trim().max(2000).optional() })
 /** A follow-up observation: `merged` completes, `blocked` needs a person, `running` records a check still in flight. */
 const PipelineRequest = z.object({ state: z.enum(['running', 'blocked', 'merged']),
@@ -193,6 +198,7 @@ function routes(runtime: HttpHost): Routes {
   const ticket = (id: string) => { if (!store.tickets.get(id)) throw new RouteError(404, 'Ticket not found'); return id }
   const executor = () => ({ ...executorLoad(store, runtime.executor.activeCount()),
     maxWorkers: store.settings().executor.maxWorkers })
+  const upgrade = () => { if (!runtime.upgrade) throw new RouteError(404, 'This host has no update'); return runtime.upgrade }
   const promptBody = (input: { body: (maxBytes?: number) => Promise<unknown> }) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096)
   return {
     'GET state': () => stateView(runtime),
@@ -314,6 +320,10 @@ function routes(runtime: HttpHost): Routes {
     'GET policy/history': () => policyHistory(store, runtime.sources, policyVersion(store.settings())),
     'POST policy-sync/:id': async ({ params }) => ({ policy: await runtime.settings.sync(params.id) }),
     'POST setup/check': () => { runtime.checkSetup(); return { restarting: true } },
+    'GET upgrade': () => upgrade().view(),
+    'POST upgrade/check': async () => { await upgrade().check(); return upgrade().view() },
+    'POST upgrade': async ({ body }) => upgrade().begin(UpgradeRequest.parse(await body(1_024)).force ?? false),
+    'POST upgrade/cancel': async () => ({ cancelled: await upgrade().cancel() }),
     'GET models': () => runtime.models(),
     'GET prompts': ({ query }) => { const { revision, offset } = PromptsQuery.parse(query); return promptsView(runtime, revision, offset) },
     'PUT prompts': async input => {
