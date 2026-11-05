@@ -7,12 +7,17 @@ const CATALOG: ModelCatalog = {
   default: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' },
   routableProviders: ['ai-gateway', 'deepseek-account'],
   groups: [
-    { id: 'ai-gateway', name: 'kurogames', models: [{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' }] },
+    { id: 'ai-gateway', name: 'kurogames', models: [{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
+      { id: 'claude-opus-5.5', name: 'Opus 5.5' }] },
     { id: 'deepseek-account', name: 'DeepSeek Account', models: [{ id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash' }] },
   ],
   failures: [],
 }
 const PRICES = new Map<string, ModelPrice>([['deepseek-v4.1-flash', { prompt: 2, completion: 8, cacheRead: 0.04, cacheWrite: 2 }]])
+const ALL_PRICES = new Map<string, ModelPrice>([
+  ['deepseek-v4.1-flash', { prompt: 2, completion: 8, cacheRead: 0.04, cacheWrite: 2 }],
+  ['claude-opus-5.5', { prompt: 28, completion: 140, cacheRead: 1.4, cacheWrite: 35 }],
+])
 const CLOCK = Date.UTC(2026, 10, 4, 8, 30, 0)
 
 function fakeStore(saved?: BillingSnapshot, settings: unknown = SettingsSchema.parse({})) {
@@ -26,13 +31,14 @@ function fakeStore(saved?: BillingSnapshot, settings: unknown = SettingsSchema.p
   }
 }
 
-function billingOf({ store = fakeStore(), now = () => CLOCK, priced = true }: {
+function billingOf({ store = fakeStore(), now = () => CLOCK, priced = true, prices = PRICES }: {
   store?: ReturnType<typeof fakeStore>
   now?: () => number
   priced?: boolean
+  prices?: ReadonlyMap<string, ModelPrice>
 } = {}) {
   return new Billing({ store: store as never, now, catalog: async () => CATALOG,
-    prices: async provider => provider === 'ai-gateway' && priced ? PRICES : null })
+    prices: async provider => provider === 'ai-gateway' && priced ? prices : null })
 }
 
 const message = (seq: number, at: number, provider = 'ai-gateway', model = 'deepseek-v4.1-flash',
@@ -63,9 +69,13 @@ it('prices the rolling hour, names the latest route, and warns when a role uses 
   expect(view.providers).toHaveLength(1)
   expect(view.providers[0]).toMatchObject({ provider: 'ai-gateway', name: 'kurogames', model: 'DeepSeek V4.1 Flash',
     requests: 3, tokens: 3 * 1700, cost: 3 * ONE_CALL })
+  expect(view.routes).toHaveLength(1)
+  expect(view.routes[0]).toMatchObject({ provider: 'ai-gateway', name: 'kurogames', model: 'DeepSeek V4.1 Flash',
+    modelId: 'deepseek-v4.1-flash', requests: 3, tokens: 3 * 1700, cost: 3 * ONE_CALL })
+  expect(view.top).toMatchObject({ modelId: 'deepseek-v4.1-flash', cost: 3 * ONE_CALL })
   expect(view.current).toMatchObject({ provider: 'ai-gateway', name: 'kurogames', model: 'DeepSeek V4.1 Flash', at: CLOCK - 30_000 })
   expect(view.configured.find(role => role.role === 'worker')).toMatchObject({ provider: 'deepseek-account',
-    name: 'DeepSeek Account', model: 'deepseek-flash' })
+    name: 'DeepSeek Account', model: 'deepseek-flash', modelName: 'DeepSeek-V4.1-Flash' })
   expect(view.buckets).toHaveLength(60)
   const used = view.buckets.filter(bucket => bucket.tokens > 0)
   expect(used).toHaveLength(3)
@@ -93,8 +103,27 @@ it('counts an unpriced route by its tokens and never invents money', async () =>
   expect(view.total.unpricedTokens).toBe(1700)
   expect(view.providers[0]).toMatchObject({ provider: 'deepseek-account', name: 'DeepSeek Account', cost: null,
     tokens: 1700, unpricedTokens: 1700 })
+  expect(view.routes[0]).toMatchObject({ provider: 'deepseek-account', name: 'DeepSeek Account', modelId: 'deepseek-flash',
+    cost: null, tokens: 1700, unpricedTokens: 1700 })
+  expect(view.top).toMatchObject({ modelId: 'deepseek-flash', cost: null })
   expect(view.current).toMatchObject({ provider: 'deepseek-account', name: 'DeepSeek Account', model: 'DeepSeek-V4.1-Flash' })
   expect(view.buckets.reduce((sum, bucket) => sum + bucket.cost, 0)).toBe(0)
+})
+
+it('separates two models on one provider so the expensive model is not hidden behind the provider total', async () => {
+  const billing = billingOf({ prices: ALL_PRICES })
+  billing.observe('worker-a', message(1, CLOCK - 120_000, 'ai-gateway', 'deepseek-v4.1-flash'))
+  billing.observe('worker-b', message(1, CLOCK - 60_000, 'ai-gateway', 'claude-opus-5.5',
+    { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 }))
+  const view = await billing.view()
+  expect(view.providers).toHaveLength(1)
+  expect(view.routes).toHaveLength(2)
+  expect(view.routes.map(route => route.modelId)).toEqual(['claude-opus-5.5', 'deepseek-v4.1-flash'])
+  expect(view.routes[0]).toMatchObject({ model: 'Opus 5.5', cost: (1000 * 28 + 100 * 140) / 1_000_000, tokens: 1100 })
+  expect(view.top).toMatchObject({ modelId: 'claude-opus-5.5' })
+  expect(view.current).toMatchObject({ provider: 'ai-gateway', model: 'Opus 5.5', at: CLOCK - 60_000 })
+  expect(view.total.cost).toBeCloseTo((1000 * 28 + 100 * 140) / 1_000_000 + ONE_CALL, 10)
+  expect(view.providers[0]!.cost).toBeCloseTo(view.total.cost!, 10)
 })
 
 it('restores the persisted window after a restart', async () => {

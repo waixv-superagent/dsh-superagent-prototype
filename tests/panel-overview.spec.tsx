@@ -42,7 +42,7 @@ it('leads with a verdict and a five-lane board: decisions, verification, pipelin
   expect(all('.dt-verify-card')[1]!.querySelectorAll('.dt-verify-foot button').length).toBe(2)
 })
 
-it('shows the charging provider and the rolling hour directly above the board, warning about a role on a personal account', async () => {
+it('shows the charging provider, the consumed tokens and the public-price estimate directly above the board', async () => {
   await mount()
   await openOverview()
   const strip = document.querySelector('.dt-billing')
@@ -50,12 +50,14 @@ it('shows the charging provider and the rolling hour directly above the board, w
   expect(strip?.querySelector('.dt-billing-label')?.textContent).toBe(zh.billingNow)
   expect(strip?.querySelector('.dt-billing-provider')?.textContent).toBe('kurogames')
   expect(strip?.querySelector('.dt-billing-model')?.textContent).toBe('DeepSeek V4.1 Flash')
-  expect(strip?.querySelector('.dt-billing-money')?.textContent).toBe('¥1.23')
+  expect(strip?.querySelector('.dt-billing-tokens')?.textContent).toBe('468.3k tokens')
+  expect(strip?.querySelector('.dt-billing-money')?.textContent).toBe('≈¥1.23')
   expect(strip?.querySelector('.dt-billing-money')?.getAttribute('data-source')).toBe('estimate')
   expect(strip?.querySelector('.dt-billing-source')?.textContent).toBe(zh.billingEstimate)
   expect(strip?.querySelector('.dt-billing-quota')).toBeNull()
   expect(strip?.querySelector('.dt-billing-window-label')?.textContent).toBe(zh.billingWindow)
   expect(strip?.querySelectorAll('.dt-billing-bar')).toHaveLength(60)
+  expect(strip?.querySelector('.dt-billing-more')?.textContent).toBe('另 1 个模型')
   expect(all('.dt-billing-now .dt-tag').map(tag => tag.textContent)).toEqual(['执行走 DeepSeek Account'])
   // The strip is the board's last element before its lanes, not a detached banner somewhere in the page.
   expect(strip?.nextElementSibling?.classList.contains('dt-board-scroll')).toBe(true)
@@ -64,16 +66,59 @@ it('shows the charging provider and the rolling hour directly above the board, w
 it('keeps an unpriced route visible by its tokens instead of inventing a money figure', async () => {
   const at = Date.now()
   server.billing = { ...server.billing, priced: false, current: { provider: 'deepseek-account', name: 'DeepSeek Account',
-    model: 'deepseek-flash', at },
-  providers: [{ provider: 'deepseek-account', name: 'DeepSeek Account', model: 'deepseek-flash', cost: null, tokens: 12_345,
+    model: 'DeepSeek-V4.1-Flash', at },
+  providers: [{ provider: 'deepseek-account', name: 'DeepSeek Account', model: 'DeepSeek-V4.1-Flash', cost: null, tokens: 12_345,
     requests: 3, lastAt: at, unpricedTokens: 12_345 }],
+  routes: [{ provider: 'deepseek-account', name: 'DeepSeek Account', model: 'DeepSeek-V4.1-Flash', modelId: 'deepseek-flash',
+    cost: null, tokens: 12_345, requests: 3, lastAt: at, unpricedTokens: 12_345 }],
+  top: { provider: 'deepseek-account', name: 'DeepSeek Account', model: 'DeepSeek-V4.1-Flash', modelId: 'deepseek-flash',
+    cost: null, tokens: 12_345, requests: 3, lastAt: at, unpricedTokens: 12_345 },
   total: { cost: null, tokens: 12_345, requests: 3, unpricedTokens: 12_345 } }
   await mount()
   await openOverview()
   expect(document.querySelector('.dt-billing-money')?.textContent).toBe(zh.billingUnpriced)
   expect(document.querySelector('.dt-billing-provider')?.textContent).toBe('DeepSeek Account')
   expect(document.querySelector('.dt-billing-provider')?.hasAttribute('data-unpriced')).toBe(true)
-  expect(document.querySelector('.dt-billing-total')?.textContent).toBe('12.3k tokens')
+  expect(document.querySelector('.dt-billing-tokens')?.textContent).toBe('12.3k tokens')
+})
+
+it('names the model that dominates the spend when the latest request came from another route', async () => {
+  const at = Date.now()
+  server.billing = { ...server.billing, current: { provider: 'deepseek-account', name: 'DeepSeek Account',
+    model: 'DeepSeek-V4.1-Flash', at },
+  routes: [
+    { provider: 'ai-gateway', name: 'kurogames', model: 'Opus 5.5', modelId: 'claude-opus-5.5', cost: 916.35, tokens: 31_801_069,
+      requests: 116, lastAt: at - 30_000, unpricedTokens: 0 },
+    { provider: 'deepseek-account', name: 'DeepSeek Account', model: 'DeepSeek-V4.1-Flash', modelId: 'deepseek-flash',
+      cost: null, tokens: 12_345, requests: 3, lastAt: at, unpricedTokens: 12_345 },
+  ],
+  top: { provider: 'ai-gateway', name: 'kurogames', model: 'Opus 5.5', modelId: 'claude-opus-5.5', cost: 916.35, tokens: 31_801_069,
+    requests: 116, lastAt: at - 30_000, unpricedTokens: 0 },
+  total: { cost: 916.35, tokens: 31_813_414, requests: 119, unpricedTokens: 12_345 } }
+  await mount()
+  await openOverview()
+  const top = document.querySelector('.dt-billing-top')
+  expect(top?.textContent).toContain(zh.billingTop)
+  expect(top?.textContent).toContain('Opus 5.5')
+  expect(top?.textContent).toContain('≈¥916.35')
+  expect(document.querySelector('.dt-billing-tokens')?.textContent).toBe('31.8M tokens')
+  expect(document.querySelector('.dt-billing-money')?.textContent).toBe('≈¥916.35')
+  expect(document.querySelector('.dt-billing-provider')?.textContent).toBe('DeepSeek Account')
+})
+
+it('does not warn about a different model on the same provider', async () => {
+  const at = Date.now()
+  const claude = { provider: 'ai-gateway', name: 'kurogames', model: 'Opus 5.5', modelId: 'claude-opus-5.5', cost: 2.5,
+    tokens: 100_000, requests: 2, lastAt: at, unpricedTokens: 0 }
+  server.billing = { ...server.billing, routes: [claude], top: claude,
+    configured: server.billing.configured.map(role => role.role === 'worker'
+      ? { ...role, provider: 'ai-gateway', name: 'kurogames', model: 'claude-opus-5.5', modelName: 'Opus 5.5' } : role),
+    current: { provider: 'ai-gateway', name: 'kurogames', model: 'Opus 5.5', at } }
+  await mount()
+  await openOverview()
+  expect(all('.dt-billing-now .dt-tag')).toEqual([])
+  expect(document.querySelector('.dt-billing-provider')?.textContent).toBe('kurogames')
+  expect(document.querySelector('.dt-billing-model')?.textContent).toBe('Opus 5.5')
 })
 
 it('leads with the gateway\'s settled hour and the quota left, with the per-minute bars drawn from the bill', async () => {

@@ -51,6 +51,24 @@ export interface BillingProvider {
   readonly unpricedTokens: number
 }
 
+/** One provider+model route's usage in the strip, so a model that dominates the spend is not hidden behind its provider. */
+export interface BillingRoute {
+  readonly provider: string
+  readonly name: string
+  /** Display name of the model. */
+  readonly model: string
+  /** Raw model id used for the price lookup and the configured-role comparison. */
+  readonly modelId: string
+  /** Null when this route publishes no price for the model it used. */
+  readonly cost: number | null
+  readonly tokens: number
+  readonly requests: number
+  /** Epoch milliseconds of the latest request on this route. */
+  readonly lastAt: number
+  /** Tokens whose model had no published price, so the money figure excludes them. */
+  readonly unpricedTokens: number
+}
+
 /** One minute of the rolling window, oldest first on the strip. */
 export interface BillingBucket { readonly at: number; readonly cost: number; readonly tokens: number }
 
@@ -59,7 +77,10 @@ export interface BillingRole {
   readonly role: 'default' | 'orchestrator' | 'worker'
   readonly provider: string
   readonly name: string
+  /** Raw model id, as the role chose it. */
   readonly model: string
+  /** Display name of that model. */
+  readonly modelName: string
 }
 
 /** The billing account's own quota for its current period, as the route's gateway settles it. */
@@ -99,7 +120,7 @@ export interface GatewayAccount {
   readonly covered?: { readonly from: number; readonly to: number }
 }
 
-/** The billing strip's data: what is charging now and what the last hour cost. */
+/** The billing strip's data: what is charging now, what the window consumed, what it cost at published prices, and what the route's gateway settled. */
 export interface BillingView {
   /** The gateway account's quota for its period; absent when the route has none or it could not be read. */
   readonly quota?: BillingQuota
@@ -107,10 +128,15 @@ export interface BillingView {
   readonly settled?: BillingSettled
   readonly windowMinutes: number
   readonly currency: 'CNY'
-  /** The provider of the latest request in the window, or the deployment default when nothing ran. */
+  /** The provider and model of the latest request in the window, or the deployment default when nothing ran. */
   readonly current: { readonly provider: string; readonly name: string; readonly model: string; readonly at: number | null }
   readonly configured: readonly BillingRole[]
+  /** Provider totals, kept for clients that only need the route-level figure. */
   readonly providers: readonly BillingProvider[]
+  /** Per provider+model totals: the unit that explains where the money went. */
+  readonly routes: readonly BillingRoute[]
+  /** The route with the highest priced cost, or the highest token use when no route is priced. */
+  readonly top: BillingRoute | null
   readonly total: { readonly cost: number | null; readonly tokens: number; readonly requests: number; readonly unpricedTokens: number }
   readonly buckets: readonly BillingBucket[]
   /** Whether any usage in the window could be priced. */
@@ -278,7 +304,7 @@ export class Billing {
     const catalog = await this.catalog()
     const names = catalogNames(catalog)
     const windowStart = minuteOf(now) - (BILLING_WINDOW_MINUTES - 1) * BUCKET_MS
-    const totals = new Map<string, { provider: string; model: string; cost: number | null; tokens: number; requests: number;
+    const totals = new Map<string, { provider: string; modelId: string; cost: number | null; tokens: number; requests: number;
       lastAt: number; unpricedTokens: number; priced: boolean }>()
     const buckets: BillingBucket[] = []
     const prices = new Map<string, ReadonlyMap<string, ModelPrice> | null>()
@@ -291,14 +317,14 @@ export class Billing {
         const tokens = tokensOf(spend)
         bucketTokens += tokens
         const price = await this.priceOf(provider, model, prices)
-        let row = totals.get(provider)
+        let row = totals.get(key)
         if (!row) {
-          row = { provider, model, cost: null, tokens: 0, requests: 0, lastAt: 0, unpricedTokens: 0, priced: false }
-          totals.set(provider, row)
+          row = { provider, modelId: model, cost: null, tokens: 0, requests: 0, lastAt: 0, unpricedTokens: 0, priced: false }
+          totals.set(key, row)
         }
         row.tokens += tokens
         row.requests += spend.requests
-        if (spend.lastAt > row.lastAt) { row.lastAt = spend.lastAt; row.model = model }
+        if (spend.lastAt > row.lastAt) row.lastAt = spend.lastAt
         if (price) {
           const cost = priceOf(spend, price)
           bucketCost += cost
@@ -310,15 +336,39 @@ export class Billing {
       }
       buckets.push({ at, cost: bucketCost, tokens: bucketTokens })
     }
-    // A provider counted before its price lookup finishes must not read as priced for zero requests later.
-    for (const row of totals.values()) if (!row.priced) row.cost = null
-    const providers = [...totals.values()].sort((left, right) => (right.cost ?? -1) - (left.cost ?? -1) || right.tokens - left.tokens)
-      .map(row => ({ ...row, name: names.provider(row.provider), model: names.model(row.provider, row.model) }))
-    const pricedProviders = providers.filter(row => row.cost !== null)
-    const totalCost = pricedProviders.length ? pricedProviders.reduce((sum, row) => sum + (row.cost ?? 0), 0) : null
-    const totalTokens = providers.reduce((sum, row) => sum + row.tokens, 0)
-    const unpricedTokens = providers.reduce((sum, row) => sum + row.unpricedTokens, 0)
-    const latest = providers.filter(row => row.lastAt > 0).sort((left, right) => right.lastAt - left.lastAt)[0]
+    const routes: BillingRoute[] = [...totals.values()].map(row => ({
+      provider: row.provider, name: names.provider(row.provider), modelId: row.modelId,
+      model: names.model(row.provider, row.modelId), cost: row.priced ? row.cost : null,
+      tokens: row.tokens, requests: row.requests, lastAt: row.lastAt, unpricedTokens: row.unpricedTokens,
+    })).sort((left, right) => (right.cost ?? -1) - (left.cost ?? -1) || right.tokens - left.tokens)
+    // Provider totals keep the earlier shape for a client that reads only them; the money and the headline use routes.
+    const byProvider = new Map<string, { provider: string; model: string; cost: number | null; tokens: number; requests: number;
+      lastAt: number; unpricedTokens: number; priced: boolean; unpriced: boolean }>()
+    for (const route of routes) {
+      let row = byProvider.get(route.provider)
+      if (!row) {
+        row = { provider: route.provider, model: route.model, cost: null, tokens: 0, requests: 0, lastAt: 0, unpricedTokens: 0,
+          priced: false, unpriced: false }
+        byProvider.set(route.provider, row)
+      }
+      row.tokens += route.tokens
+      row.requests += route.requests
+      row.unpricedTokens += route.unpricedTokens
+      if (route.lastAt > row.lastAt) { row.lastAt = route.lastAt; row.model = route.model }
+      if (route.cost === null) row.unpriced = true
+      else { row.cost = (row.cost ?? 0) + route.cost; row.priced = true }
+    }
+    const providers = [...byProvider.values()].map(row => ({ provider: row.provider, name: names.provider(row.provider),
+      model: row.model, cost: row.priced && !row.unpriced ? row.cost : null, tokens: row.tokens, requests: row.requests,
+      lastAt: row.lastAt, unpricedTokens: row.unpricedTokens }))
+      .sort((left, right) => (right.cost ?? -1) - (left.cost ?? -1) || right.tokens - left.tokens)
+    const pricedRoutes = routes.filter(route => route.cost !== null)
+    const totalCost = pricedRoutes.length ? pricedRoutes.reduce((sum, route) => sum + (route.cost ?? 0), 0) : null
+    const totalTokens = routes.reduce((sum, route) => sum + route.tokens, 0)
+    const unpricedTokens = routes.reduce((sum, route) => sum + route.unpricedTokens, 0)
+    const latest = routes.filter(route => route.lastAt > 0).sort((left, right) => right.lastAt - left.lastAt)[0]
+    const top = routes.length ? [...routes].sort((left, right) => (right.cost ?? -1) - (left.cost ?? -1)
+      || right.tokens - left.tokens)[0]! : null
     const fallback = catalog.default
     const current = latest
       ? { provider: latest.provider, name: latest.name, model: latest.model, at: latest.lastAt }
@@ -329,7 +379,9 @@ export class Billing {
       current,
       configured: configuredRoles(this.host.store.settings(), catalog, names),
       providers,
-      total: { cost: totalCost, tokens: totalTokens, requests: providers.reduce((sum, row) => sum + row.requests, 0), unpricedTokens },
+      routes,
+      top,
+      total: { cost: totalCost, tokens: totalTokens, requests: routes.reduce((sum, route) => sum + route.requests, 0), unpricedTokens },
       buckets,
       priced: totalCost !== null,
       updatedAt: now,
@@ -484,9 +536,10 @@ function catalogNames(catalog: ModelCatalog): { provider(id: string): string; mo
 
 /** Every configured role's effective selection, with the deployment default named `default`. */
 function configuredRoles(settings: ReturnType<Store['settings']>, catalog: ModelCatalog,
-  names: { provider(id: string): string }): BillingRole[] {
+  names: { provider(id: string): string; model(provider: string, id: string): string }): BillingRole[] {
   const role = (name: 'default' | 'orchestrator' | 'worker', selection: { provider: string; model: string }): BillingRole =>
-    ({ role: name, provider: selection.provider, name: names.provider(selection.provider), model: selection.model })
+    ({ role: name, provider: selection.provider, name: names.provider(selection.provider), model: selection.model,
+      modelName: names.model(selection.provider, selection.model) })
   return [role('default', catalog.default), role('orchestrator', settings.eval.model ?? catalog.default),
     role('worker', settings.executor.model ?? catalog.default)]
 }
