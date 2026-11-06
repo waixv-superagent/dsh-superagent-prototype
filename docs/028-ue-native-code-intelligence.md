@@ -1,4 +1,4 @@
-# 026 — UE C++ code intelligence without Rider
+# 028 — UE C++ code intelligence without Rider
 
 Status: implemented and verified on 2026-11-06 as `scripts/ue-clangd.mjs` and `scripts/ue-lldb.mjs`;
 the clangd index/queries ran on the SunGame workspace and a launched Development editor was stopped at
