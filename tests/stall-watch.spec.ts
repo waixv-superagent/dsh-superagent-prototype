@@ -21,7 +21,8 @@ const running = (startedAt: number, extra: Partial<Assignment> = {}): Assignment
   ({ id: 'a1', state: 'running', createdAt: iso(startedAt), startedAt: iso(startedAt), ...extra })
 const idleActivity: ActivityView = { live: false, updatedAt: 0, tool: null, recent: [] }
 
-function harness (tickets: Ticket[], options: { activity?: ActivityView; background?: boolean; stall?: object; request?: string } = {}) {
+function harness (tickets: Ticket[], options: { activity?: ActivityView; background?: boolean; stall?: object; request?: string;
+  idleHeld?: (ticket: Ticket) => boolean } = {}) {
   const sent: OutboundMessage[] = []
   const health = { value: { state: 'ready', detail: '' } as { state: string; detail: string } }
   const entry: HealthEntry = { get: () => health.value as never, set: value => { health.value = value }, release: () => {} }
@@ -30,7 +31,7 @@ function harness (tickets: Ticket[], options: { activity?: ActivityView; backgro
   const host: StallWatchHost = { tickets: { open: () => state.tickets }, settings: () => settings,
     activity: { read: () => state.activity }, background: () => state.background, channel: item => item.channels[0],
     request: () => options.request ?? '帮我看看跳跃', outbox: { send: message => { sent.push(message) } }, health: entry,
-    paused: () => state.paused, now: () => state.now }
+    paused: () => state.paused, now: () => state.now, ...(options.idleHeld ? { idleHeld: options.idleHeld } : {}) }
   return { watch: new StallWatch(host), sent, health, state }
 }
 
@@ -97,6 +98,18 @@ describe('StallWatch', () => {
     expect(h.watch.poll()).toMatchObject([{ kind: 'queued', minutes: 31 }])
     expect(h.sent[0]!.text).toContain('已排队 31 分钟')
     expect(harness([ticket([{ id: 'a1', state: 'pending', createdAt: iso(NOW - 20 * MIN) }])]).watch.poll()).toEqual([])
+  })
+
+  it('leaves a queued ticket the idle gate is holding, and reports one it admitted that still never starts', () => {
+    // A P2/P3 ticket waits in the idle pool for hours by design while the mainline runs: that is not a slot that never came
+    // free, which is what the queued alert reports. Once the gate admits it and it still waits, it is an ordinary stall.
+    const queued = ticket([{ id: 'a1', state: 'pending', createdAt: iso(NOW - 31 * MIN) }])
+    const held = harness([queued], { idleHeld: () => true })
+    expect(held.watch.poll()).toEqual([])
+    expect(held.sent).toEqual([])
+    expect(held.health.value.state).toBe('ready')
+    const admitted = harness([queued], { idleHeld: () => false })
+    expect(admitted.watch.poll()).toMatchObject([{ kind: 'queued', minutes: 31 }])
   })
 
   it('stays silent while paused, for a ticket that waits for a person, is idle or ended, or has no conversation', () => {

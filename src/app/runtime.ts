@@ -277,6 +277,9 @@ export class Runtime extends Service implements SourceHost {
       // The stall alert says once in a Ticket's conversation that it made no progress, instead of waiting for a person to ask.
       this.stallWatch = new StallWatch({ tickets: store.tickets, settings: () => store.settings(), activity: this.activity,
         background: id => this.executor.inBackground(id),
+        // A `P2`/`P3` Ticket the idle gate has not admitted waits by design, however long the mainline runs; the queued alert
+        // is for a slot that never came free, so the gate's own verdict decides which it is.
+        idleHeld: ticket => !this.idlePool.admission(ticket, this.executor.load()).admitted,
         channel: ticket => ticket.replyChannel ?? store.triggers.get(ticket.origin.triggerId)?.channel ?? ticket.channels[0],
         request: ticket => store.triggers.get(ticket.origin.triggerId)?.text ?? '', outbox,
         health: board.claim('stall', { state: 'ready', detail: 'No open ticket is stalled' }),

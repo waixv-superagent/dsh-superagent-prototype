@@ -100,7 +100,7 @@ export interface ExecutorHost {
   readonly context: Context
   /** Where the Executor reports what happened to Assignments and Inputs. */
   readonly engine: Pick<EngineForExecutor, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed' | 'report'
-    | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'idleLaunch' | 'startIdleAnalysis'>
+    | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'idleLaunch' | 'startIdleAnalysis' | 'dropUnstartedIdle'>
   readonly store: Pick<Store, 'tickets' | 'triggers' | 'set' | 'settings' | 'atomic' | 'afterCommit'>
   /** The GitHub repository this deployment watches, one of the configured delivery targets; empty without a GitHub Source. */
   readonly repository: string
@@ -446,15 +446,21 @@ export class DshExecutor implements Executor {
     const admission = this.host.idleAdmission?.(ticket, this.load())
     if (admission && !admission.admitted) throw new Later(`Waiting for an idle window: ${admission.reason}`)
     this.slots.reserve(ticketId, 'launch')
+    const level = admission?.level, analysing = admission?.analysis && level ? level : undefined
     try {
-      // Record which depth let the ticket start, so the idle pool's daily budget and the board can say why it ran now.
-      if (admission?.level) this.host.engine.idleLaunch(ticketId, admission.level)
       // The pool's first launch is a read-only analysis (docs/025): record it before the worker starts, so the tool guard and
       // the launch message both read it, and the ticket cannot also carry implementation instructions into the same turn.
-      if (admission?.analysis && admission.level) this.host.engine.startIdleAnalysis(ticketId, assignment.id, admission.level)
-      await this.launch(ticket, assignment); this.transient.delete(`launch:${assignmentId}`)
+      if (analysing) this.host.engine.startIdleAnalysis(ticketId, assignment.id, analysing)
+      await this.launch(ticket, assignment)
+      // The idle pool counts what it started, so its depth is recorded once the worker is running and not before (docs/019):
+      // a launch this attempt held would otherwise stay marked as an idle worker, and its own retry — and every other P2/P3
+      // ticket — would wait behind a worker that never ran.
+      if (level) this.host.engine.idleLaunch(ticketId, level)
+      this.transient.delete(`launch:${assignmentId}`)
     }
     catch (error) {
+      // A held or failed launch started nothing, so what this attempt recorded for the pool is taken back before it retries.
+      this.host.engine.dropUnstartedIdle(ticketId)
       // Shutdown or pause re-queues the launch for resume, and transient network/provider errors retry with backoff.
       // A failed prepare command is not retried automatically because an existing directory counts as prepared, so retrying
       // would treat whatever a failed prepare command left behind in the directory as a prepared workspace; instead the
@@ -786,6 +792,10 @@ export class DshExecutor implements Executor {
   resume(): void {
     // Launch pending tickets oldest first (in acceptance order).
     for (const ticket of this.host.store.tickets.open().sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+      // A record the idle pool holds for work that never started — left by a held launch, or by the Assignment a restart
+      // replaced — would make the pool wait on a worker it never ran and spend its daily budget on it (docs/019). The startup
+      // drops them, so the pool starts from what really ran rather than from what an older launch attempt only recorded.
+      this.host.engine.dropUnstartedIdle(ticket.id)
       const running = runningAssignment(ticket), latest = latestAssignment(ticket)
       if (running) {
         // A restart within this process left DSH's Sessions, jobs and subagents running: they stop first. The inbox keeps an
