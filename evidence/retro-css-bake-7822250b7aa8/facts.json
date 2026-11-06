@@ -1,0 +1,679 @@
+{
+  "scenario": "synthetic 2026-11-06 daily retro fixture, rendered by scripts/daily-retro.mjs",
+  "viewport": {
+    "width": 1280,
+    "height": 1000,
+    "deviceScaleFactor": 1,
+    "theme": "light",
+    "locale": "zh-CN"
+  },
+  "baseline": "origin/main scripts/daily-retro.mjs (old CSS)",
+  "changed": "this branch scripts/daily-retro.mjs (v2 CSS)",
+  "before": {
+    "title": "每日复盘 · 2026-11-06",
+    "viewport": {
+      "width": 1280,
+      "height": 1000,
+      "dpr": 1
+    },
+    "document": {
+      "width": 1280,
+      "height": 4266,
+      "horizontalOverflow": false
+    },
+    "textHash": "1567531870:3340",
+    "rects": {
+      "main": {
+        "x": 100,
+        "y": 0,
+        "width": 1080,
+        "height": 4266
+      },
+      "s1": {
+        "x": 124,
+        "y": 134,
+        "width": 1032,
+        "height": 539
+      },
+      "s3": {
+        "x": 124,
+        "y": 953,
+        "width": 1032,
+        "height": 1098
+      },
+      "s4": {
+        "x": 124,
+        "y": 2087,
+        "width": 1032,
+        "height": 296
+      },
+      "s5": {
+        "x": 124,
+        "y": 2419,
+        "width": 1032,
+        "height": 736
+      }
+    },
+    "body": {
+      "background-color": "rgb(255, 255, 255)",
+      "color": "rgb(31, 35, 40)",
+      "font-size": "14px",
+      "font-family": "-apple-system, \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+      "line-height": "23.1px"
+    },
+    "main": {
+      "max-width": "1080px",
+      "padding-left": "24px",
+      "padding-right": "24px",
+      "margin-left": "100px"
+    },
+    "header": {
+      "border-bottom-width": "0px",
+      "border-bottom-color": "rgb(31, 35, 40)",
+      "padding-bottom": "0px"
+    },
+    "h1": {
+      "font-size": "26px",
+      "font-weight": "700",
+      "letter-spacing": "normal"
+    },
+    "h2": {
+      "font-size": "19px",
+      "border-top-width": "0px",
+      "border-top-color": "rgb(31, 35, 40)",
+      "padding-top": "0px"
+    },
+    "h2no": {
+      "font-size": "19px",
+      "color": "rgb(101, 109, 118)",
+      "font-weight": "500",
+      "min-width": "0px"
+    },
+    "h3": {
+      "font-size": "15px",
+      "margin-top": "20px"
+    },
+    "kpis": {
+      "display": "grid",
+      "grid-template-columns": "163.656px 163.672px 163.672px 163.656px 163.672px 163.672px",
+      "gap": "10px",
+      "background-color": "rgba(0, 0, 0, 0)",
+      "border-top-width": "0px",
+      "border-top-color": "rgb(31, 35, 40)"
+    },
+    "kpi": {
+      "background-color": "rgb(246, 248, 250)",
+      "padding": "10px 12px"
+    },
+    "kpiN": {
+      "font-size": "22px",
+      "font-weight": "700",
+      "font-variant-numeric": "normal"
+    },
+    "d": {
+      "border-top-width": "0px",
+      "border-top-color": "rgb(207, 34, 46)",
+      "font-size": "12px"
+    },
+    "alert": {
+      "background-color": "rgb(255, 245, 245)",
+      "border-left-width": "1px",
+      "border-left-color": "rgb(245, 194, 199)",
+      "padding": "10px 14px"
+    },
+    "tableWrap": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "border-top-width": "0px",
+      "border-radius": "0px"
+    },
+    "th": {
+      "background-color": "rgb(246, 248, 250)",
+      "font-size": "13px",
+      "padding": "6px 8px",
+      "border-bottom-color": "rgb(216, 222, 228)"
+    },
+    "td": {
+      "padding": "6px 8px",
+      "border-bottom-color": "rgb(216, 222, 228)",
+      "font-size": "13px"
+    },
+    "tag": {
+      "background-color": "rgb(246, 248, 250)",
+      "border-radius": "10px",
+      "font-size": "12px"
+    },
+    "code": {
+      "background-color": "rgb(246, 248, 250)",
+      "border-radius": "4px",
+      "font-size": "12.5px"
+    },
+    "legend": {
+      "font-size": "12.5px",
+      "gap": "6px 16px"
+    },
+    "hours": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "padding": "0px",
+      "border-top-width": "0px"
+    },
+    "htrack": {
+      "height": "16px",
+      "background-color": "rgb(246, 248, 250)",
+      "border-radius": "3px"
+    },
+    "stMissed": {
+      "color": "rgb(207, 34, 46)",
+      "font-weight": "600"
+    },
+    "stDot": "none",
+    "kpiCount": 8,
+    "kpiRows": 2,
+    "payload": {
+      "kpis": 8,
+      "tables": 7,
+      "rows": 27
+    }
+  },
+  "after": {
+    "title": "每日复盘 · 2026-11-06",
+    "viewport": {
+      "width": 1280,
+      "height": 1000,
+      "dpr": 1
+    },
+    "document": {
+      "width": 1280,
+      "height": 5674,
+      "horizontalOverflow": false
+    },
+    "textHash": "1567531870:3340",
+    "rects": {
+      "main": {
+        "x": 80,
+        "y": 0,
+        "width": 1120,
+        "height": 5674
+      },
+      "s1": {
+        "x": 112,
+        "y": 231,
+        "width": 1056,
+        "height": 680
+      },
+      "s3": {
+        "x": 112,
+        "y": 1314,
+        "width": 1056,
+        "height": 1403
+      },
+      "s4": {
+        "x": 112,
+        "y": 2781,
+        "width": 1056,
+        "height": 366
+      },
+      "s5": {
+        "x": 112,
+        "y": 3212,
+        "width": 1056,
+        "height": 926
+      }
+    },
+    "body": {
+      "background-color": "rgb(247, 245, 240)",
+      "color": "rgb(29, 35, 41)",
+      "font-size": "15px",
+      "font-family": "\"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans SC\", \"Hiragino Sans GB\", system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "line-height": "26.25px"
+    },
+    "main": {
+      "max-width": "1120px",
+      "padding-left": "32px",
+      "padding-right": "32px",
+      "margin-left": "80px"
+    },
+    "header": {
+      "border-bottom-width": "2px",
+      "border-bottom-color": "rgb(29, 35, 41)",
+      "padding-bottom": "22px"
+    },
+    "h1": {
+      "font-size": "32px",
+      "font-weight": "600",
+      "letter-spacing": "0.64px"
+    },
+    "h2": {
+      "font-size": "22px",
+      "border-top-width": "1px",
+      "border-top-color": "rgb(207, 200, 187)",
+      "padding-top": "16px"
+    },
+    "h2no": {
+      "font-size": "34px",
+      "color": "rgb(111, 128, 153)",
+      "font-weight": "300",
+      "min-width": "52px"
+    },
+    "h3": {
+      "font-size": "17px",
+      "margin-top": "34px"
+    },
+    "kpis": {
+      "display": "grid",
+      "grid-template-columns": "262.75px 262.75px 262.75px 262.75px",
+      "gap": "1px",
+      "background-color": "rgb(227, 222, 212)",
+      "border-top-width": "2px",
+      "border-top-color": "rgb(29, 35, 41)"
+    },
+    "kpi": {
+      "background-color": "rgb(255, 255, 255)",
+      "padding": "16px 18px 14px"
+    },
+    "kpiN": {
+      "font-size": "28px",
+      "font-weight": "600",
+      "font-variant-numeric": "tabular-nums"
+    },
+    "d": {
+      "border-top-width": "1px",
+      "border-top-color": "rgb(227, 222, 212)",
+      "font-size": "13px"
+    },
+    "alert": {
+      "background-color": "rgb(251, 241, 238)",
+      "border-left-width": "3px",
+      "border-left-color": "rgb(180, 35, 24)",
+      "padding": "16px 22px 10px"
+    },
+    "tableWrap": {
+      "background-color": "rgb(255, 255, 255)",
+      "border-top-width": "1px",
+      "border-radius": "4px"
+    },
+    "th": {
+      "background-color": "rgb(242, 239, 233)",
+      "font-size": "13px",
+      "padding": "9px 12px",
+      "border-bottom-color": "rgb(207, 200, 187)"
+    },
+    "td": {
+      "padding": "9px 12px",
+      "border-bottom-color": "rgb(227, 222, 212)",
+      "font-size": "13.5px"
+    },
+    "tag": {
+      "background-color": "rgb(242, 239, 233)",
+      "border-radius": "3px",
+      "font-size": "13px"
+    },
+    "code": {
+      "background-color": "rgb(255, 255, 255)",
+      "border-radius": "3px",
+      "font-size": "13px"
+    },
+    "legend": {
+      "font-size": "13px",
+      "gap": "6px 20px"
+    },
+    "hours": {
+      "background-color": "rgb(255, 255, 255)",
+      "padding": "18px 20px",
+      "border-top-width": "1px"
+    },
+    "htrack": {
+      "height": "14px",
+      "background-color": "rgb(242, 239, 233)",
+      "border-radius": "2px"
+    },
+    "stMissed": {
+      "color": "rgb(180, 35, 24)",
+      "font-weight": "600"
+    },
+    "stDot": "\"\"",
+    "kpiCount": 8,
+    "kpiRows": 2,
+    "payload": {
+      "kpis": 8,
+      "tables": 7,
+      "rows": 27
+    }
+  },
+  "narrow": {
+    "viewportWidth": 820,
+    "before": {
+      "title": "每日复盘 · 2026-11-06",
+      "viewport": {
+        "width": 820,
+        "height": 1000,
+        "dpr": 1
+      },
+      "document": {
+        "width": 820,
+        "height": 4600,
+        "horizontalOverflow": false
+      },
+      "textHash": "1567531870:3340",
+      "rects": {
+        "main": {
+          "x": 0,
+          "y": 0,
+          "width": 820,
+          "height": 4600
+        },
+        "s1": {
+          "x": 24,
+          "y": 134,
+          "width": 772,
+          "height": 539
+        },
+        "s3": {
+          "x": 24,
+          "y": 973,
+          "width": 772,
+          "height": 1247
+        },
+        "s4": {
+          "x": 24,
+          "y": 2256,
+          "width": 772,
+          "height": 420
+        },
+        "s5": {
+          "x": 24,
+          "y": 2712,
+          "width": 772,
+          "height": 736
+        }
+      },
+      "body": {
+        "background-color": "rgb(255, 255, 255)",
+        "color": "rgb(31, 35, 40)",
+        "font-size": "14px",
+        "font-family": "-apple-system, \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+        "line-height": "23.1px"
+      },
+      "main": {
+        "max-width": "1080px",
+        "padding-left": "24px",
+        "padding-right": "24px",
+        "margin-left": "0px"
+      },
+      "header": {
+        "border-bottom-width": "0px",
+        "border-bottom-color": "rgb(31, 35, 40)",
+        "padding-bottom": "0px"
+      },
+      "h1": {
+        "font-size": "26px",
+        "font-weight": "700",
+        "letter-spacing": "normal"
+      },
+      "h2": {
+        "font-size": "19px",
+        "border-top-width": "0px",
+        "border-top-color": "rgb(31, 35, 40)",
+        "padding-top": "0px"
+      },
+      "h2no": {
+        "font-size": "19px",
+        "color": "rgb(101, 109, 118)",
+        "font-weight": "500",
+        "min-width": "0px"
+      },
+      "h3": {
+        "font-size": "15px",
+        "margin-top": "20px"
+      },
+      "kpis": {
+        "display": "grid",
+        "grid-template-columns": "185.5px 185.5px 185.5px 185.5px",
+        "gap": "10px",
+        "background-color": "rgba(0, 0, 0, 0)",
+        "border-top-width": "0px",
+        "border-top-color": "rgb(31, 35, 40)"
+      },
+      "kpi": {
+        "background-color": "rgb(246, 248, 250)",
+        "padding": "10px 12px"
+      },
+      "kpiN": {
+        "font-size": "22px",
+        "font-weight": "700",
+        "font-variant-numeric": "normal"
+      },
+      "d": {
+        "border-top-width": "0px",
+        "border-top-color": "rgb(207, 34, 46)",
+        "font-size": "12px"
+      },
+      "alert": {
+        "background-color": "rgb(255, 245, 245)",
+        "border-left-width": "1px",
+        "border-left-color": "rgb(245, 194, 199)",
+        "padding": "10px 14px"
+      },
+      "tableWrap": {
+        "background-color": "rgba(0, 0, 0, 0)",
+        "border-top-width": "0px",
+        "border-radius": "0px"
+      },
+      "th": {
+        "background-color": "rgb(246, 248, 250)",
+        "font-size": "13px",
+        "padding": "6px 8px",
+        "border-bottom-color": "rgb(216, 222, 228)"
+      },
+      "td": {
+        "padding": "6px 8px",
+        "border-bottom-color": "rgb(216, 222, 228)",
+        "font-size": "13px"
+      },
+      "tag": {
+        "background-color": "rgb(246, 248, 250)",
+        "border-radius": "10px",
+        "font-size": "12px"
+      },
+      "code": {
+        "background-color": "rgb(246, 248, 250)",
+        "border-radius": "4px",
+        "font-size": "12.5px"
+      },
+      "legend": {
+        "font-size": "12.5px",
+        "gap": "6px 16px"
+      },
+      "hours": {
+        "background-color": "rgba(0, 0, 0, 0)",
+        "padding": "0px",
+        "border-top-width": "0px"
+      },
+      "htrack": {
+        "height": "16px",
+        "background-color": "rgb(246, 248, 250)",
+        "border-radius": "3px"
+      },
+      "stMissed": {
+        "color": "rgb(207, 34, 46)",
+        "font-weight": "600"
+      },
+      "stDot": "none",
+      "kpiCount": 8,
+      "kpiRows": 2,
+      "payload": {
+        "kpis": 8,
+        "tables": 7,
+        "rows": 27
+      }
+    },
+    "after": {
+      "title": "每日复盘 · 2026-11-06",
+      "viewport": {
+        "width": 820,
+        "height": 1000,
+        "dpr": 1
+      },
+      "document": {
+        "width": 820,
+        "height": 6699,
+        "horizontalOverflow": false
+      },
+      "textHash": "1567531870:3340",
+      "rects": {
+        "main": {
+          "x": 0,
+          "y": 0,
+          "width": 820,
+          "height": 6699
+        },
+        "s1": {
+          "x": 18,
+          "y": 215,
+          "width": 784,
+          "height": 957
+        },
+        "s3": {
+          "x": 18,
+          "y": 1569,
+          "width": 784,
+          "height": 2159
+        },
+        "s4": {
+          "x": 18,
+          "y": 3792,
+          "width": 784,
+          "height": 427
+        },
+        "s5": {
+          "x": 18,
+          "y": 4283,
+          "width": 784,
+          "height": 920
+        }
+      },
+      "body": {
+        "background-color": "rgb(247, 245, 240)",
+        "color": "rgb(29, 35, 41)",
+        "font-size": "15px",
+        "font-family": "\"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans SC\", \"Hiragino Sans GB\", system-ui, -apple-system, \"Segoe UI\", sans-serif",
+        "line-height": "26.25px"
+      },
+      "main": {
+        "max-width": "1120px",
+        "padding-left": "18px",
+        "padding-right": "18px",
+        "margin-left": "0px"
+      },
+      "header": {
+        "border-bottom-width": "2px",
+        "border-bottom-color": "rgb(29, 35, 41)",
+        "padding-bottom": "22px"
+      },
+      "h1": {
+        "font-size": "32px",
+        "font-weight": "600",
+        "letter-spacing": "0.64px"
+      },
+      "h2": {
+        "font-size": "22px",
+        "border-top-width": "1px",
+        "border-top-color": "rgb(207, 200, 187)",
+        "padding-top": "16px"
+      },
+      "h2no": {
+        "font-size": "28px",
+        "color": "rgb(111, 128, 153)",
+        "font-weight": "300",
+        "min-width": "42px"
+      },
+      "h3": {
+        "font-size": "17px",
+        "margin-top": "34px"
+      },
+      "kpis": {
+        "display": "grid",
+        "grid-template-columns": "390.5px 390.5px",
+        "gap": "1px",
+        "background-color": "rgb(227, 222, 212)",
+        "border-top-width": "2px",
+        "border-top-color": "rgb(29, 35, 41)"
+      },
+      "kpi": {
+        "background-color": "rgb(255, 255, 255)",
+        "padding": "16px 18px 14px"
+      },
+      "kpiN": {
+        "font-size": "28px",
+        "font-weight": "600",
+        "font-variant-numeric": "tabular-nums"
+      },
+      "d": {
+        "border-top-width": "1px",
+        "border-top-color": "rgb(227, 222, 212)",
+        "font-size": "13px"
+      },
+      "alert": {
+        "background-color": "rgb(251, 241, 238)",
+        "border-left-width": "3px",
+        "border-left-color": "rgb(180, 35, 24)",
+        "padding": "16px 22px 10px"
+      },
+      "tableWrap": {
+        "background-color": "rgb(255, 255, 255)",
+        "border-top-width": "1px",
+        "border-radius": "4px"
+      },
+      "th": {
+        "background-color": "rgb(242, 239, 233)",
+        "font-size": "13px",
+        "padding": "9px 12px",
+        "border-bottom-color": "rgb(207, 200, 187)"
+      },
+      "td": {
+        "padding": "9px 12px",
+        "border-bottom-color": "rgb(227, 222, 212)",
+        "font-size": "13.5px"
+      },
+      "tag": {
+        "background-color": "rgb(242, 239, 233)",
+        "border-radius": "3px",
+        "font-size": "13px"
+      },
+      "code": {
+        "background-color": "rgb(255, 255, 255)",
+        "border-radius": "3px",
+        "font-size": "13px"
+      },
+      "legend": {
+        "font-size": "13px",
+        "gap": "6px 20px"
+      },
+      "hours": {
+        "background-color": "rgb(255, 255, 255)",
+        "padding": "18px 20px",
+        "border-top-width": "1px"
+      },
+      "htrack": {
+        "height": "14px",
+        "background-color": "rgb(242, 239, 233)",
+        "border-radius": "2px"
+      },
+      "stMissed": {
+        "color": "rgb(180, 35, 24)",
+        "font-weight": "600"
+      },
+      "stDot": "\"\"",
+      "kpiCount": 8,
+      "kpiRows": 4,
+      "payload": {
+        "kpis": 8,
+        "tables": 7,
+        "rows": 27
+      }
+    },
+    "sameText": true
+  },
+  "sameText": true,
+  "v2HandEditedFullPageHash": "bb9f6436fc582024a1db6018e77de3ce9cf3d9477814fd6beab5be14007846f8",
+  "renderedRealFullPageHash": "bb9f6436fc582024a1db6018e77de3ce9cf3d9477814fd6beab5be14007846f8"
+}

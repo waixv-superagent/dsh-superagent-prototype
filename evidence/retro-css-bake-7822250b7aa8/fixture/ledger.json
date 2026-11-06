@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "C1",
+      "text": "把复盘 v2 的视觉固化进渲染脚本的 CSS，不再每天手改",
+      "ticket": "a1b2c3d4",
+      "due": "2026-11-06",
+      "from": "2026-11-05",
+      "status": "done",
+      "note": "合成样例：渲染脚本的样式块已替换为 v2",
+      "history": []
+    },
+    {
+      "id": "C2",
+      "text": "给小时图补上窄屏断点，避免横向溢出",
+      "ticket": "c3d4e5f6",
+      "due": "2026-11-05",
+      "from": "2026-11-04",
+      "status": "partial",
+      "note": "合成样例：断点已在图例，表格仍会溢出",
+      "history": []
+    },
+    {
+      "id": "C3",
+      "text": "把失败清单从表格改成一张一张卡片",
+      "ticket": null,
+      "due": "2026-11-05",
+      "from": "2026-11-04",
+      "status": "missed",
+      "note": "合成样例：未开单",
+      "history": []
+    },
+    {
+      "id": "C4",
+      "text": "复盘模板加固定的采访节",
+      "ticket": "d4e5f6a7",
+      "due": "2026-11-07",
+      "from": "2026-11-05",
+      "status": "open",
+      "note": null,
+      "history": []
+    },
+    {
+      "id": "C5",
+      "text": "复盘定时任务在 23:30 自动触发",
+      "ticket": null,
+      "due": "2026-11-07",
+      "from": "2026-11-06",
+      "status": "open",
+      "note": null,
+      "history": []
+    },
+    {
+      "id": "C6",
+      "text": "把模板版本写进报告附录",
+      "ticket": "a1b2c3d4",
+      "due": "2026-11-04",
+      "from": "2026-11-03",
+      "status": "dropped",
+      "note": "合成样例：并入模板发版说明",
+      "history": []
+    }
+  ]
+}
