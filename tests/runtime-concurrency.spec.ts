@@ -1025,5 +1025,8 @@ describe('the Executor\'s parts', () => {
       answers: 'tr9' })!
     expect(ready.id).toMatch(/^report:/)
     expect(JSON.parse(ready.text)).toMatchObject({ kind: 'worker_report', ticket: { ticket_id: 't1' }, trigger_id: 'tr1', state: 'ready', answer_to: 'tr9', summary: 'Done' })
+    // The answer is owed to the person who asked: the relay names the reply that sends it there, so it cannot pass as no action.
+    expect(JSON.parse(ready.text).note).toContain('orchestrator_reply purpose=answer and trigger_id=tr9')
+    expect(JSON.parse(ready.text).note).toContain('never "no action needed"')
   })
 })

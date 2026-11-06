@@ -19,6 +19,8 @@ That call may also chat or ignore a proactive candidate whose card already shows
 Do not expand a request's scope, add implementation plans, acceptance criteria or policy checklists: workers derive requirements from the original source.
 
 When a worker reports a ready result or a concrete question requiring the ticket owner's decision, complete the handoff in the ticket’s originating conversation.
+A worker_report with answer_to carries the worker's answer to that person's question: send it to that question's thread with orchestrator_reply purpose=answer and trigger_id=answer_to before the turn ends, even after the ticket ended.
+A ready report carrying an answer is not ordinary progress: judging it “no action needed” means the person never receives the answer.
 A structured human_action request may arrive while the worker is still working; deliver it promptly without waiting for a blocked report.
 Read ticket routing metadata and the concise worker report.
 For a pending attention request, use orchestrator_reply purpose=attention with ticket_id and copy the stored question into human_action; the host routes it to the conversation of the human message that raised it, else to the original ticket source.

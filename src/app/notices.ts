@@ -104,11 +104,17 @@ export function followupRelay(message: { trigger_id: string },
   return { id: `followup:${message.trigger_id}`, text: JSON.stringify({ kind: 'follow_up', ...message, delivered_to: tickets,
     note: FOLLOWUP_NOTE }) }
 }
-/** Formats a worker report relay for the main Session (truncating summaries over 600 characters behind `ticket/<id>/result`); `replyTo` names the human question trigger it answers. */
+/**
+ * Formats a worker report relay for the main Session (truncating summaries over 600 characters behind `ticket/<id>/result`);
+ * `replyTo` names the human question trigger it answers, and makes the relay state the delivery the answer owes that person.
+ */
 export function resultRelay(ticket: Ticket, state: string, text: string, replyTo?: string): Relay {
   const id = key('worker-result', ticket.id, ticket.updatedAt, text)
   const summary = text.length > 600 ? { summary: text.slice(0, 600), chars: text.length } : { summary: text }
-  const report = { kind: 'worker_report', ticket: brief(ticket), trigger_id: ticket.origin.triggerId, state, ...replyTo ? { answer_to: replyTo } : {},
+  const answer = replyTo ? { answer_to: replyTo, note: `The worker answered this person's question: send that answer to the question's thread `
+    + `with orchestrator_reply purpose=answer and trigger_id=${replyTo} before the turn ends, even after the ticket ended; a ready report `
+    + 'carrying an answer is not internal progress and is never "no action needed".' } : {}
+  const report = { kind: 'worker_report', ticket: brief(ticket), trigger_id: ticket.origin.triggerId, state, ...answer,
     ...summary, read: `ticket/${ticket.id}/result` }
   return { id: `report:${id}`, text: JSON.stringify(report) }
 }

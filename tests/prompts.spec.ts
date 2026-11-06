@@ -62,6 +62,16 @@ it('tells a worker to take the shared editor lease before using UnrealEditor', (
   expect(worker).toContain('orchestrator_editor op=acquire')
   expect(worker).toContain('Never start a second editor')
 })
+
+it('tells the orchestrator that a worker report carrying an answer owes it to the person\'s thread', () => {
+  // A ready report with answer_to is the person's answer, not internal progress: a main Session that judges it
+  // "no action needed" leaves the question unanswered, so the rule and the relay both name the reply that sends it.
+  const main = composePrompt(defaultPrompts(), 'orchestrator'), worker = composePrompt(defaultPrompts(), 'worker')
+  expect(main).toContain('A worker_report with answer_to carries the worker\'s answer to that person\'s question')
+  expect(main).toContain('orchestrator_reply purpose=answer and trigger_id=answer_to')
+  expect(main).toContain('“no action needed”')
+  expect(worker).not.toContain('orchestrator_reply purpose=answer and trigger_id=answer_to')
+})
 it('tells a worker leading an agent team to ask for the roster and verify its teammates itself', () => {
   // docs/003 promises the leader runs verification; a teammate's summary is not evidence.
   const worker = composePrompt(defaultPrompts(), 'worker')
