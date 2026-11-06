@@ -11,7 +11,7 @@ import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
 import { allowedSender, settingsPolicy } from '../policy.ts'
@@ -43,6 +43,7 @@ import { EditorScheduler, killTree } from './editor-scheduler.ts'
 import { EditorGuard } from './editor-guard.ts'
 import { EditorGatekeeper } from './editor-gatekeeper.ts'
 import { ReproRunner } from './repro-runner.ts'
+import { BuildRunner } from './build-runner.ts'
 import { reproRoot } from './repro.ts'
 import { notifyPlan as sendPlanCard } from './plan.ts'
 import { notifyPriority as sendPriorityCard } from './priority.ts'
@@ -93,6 +94,8 @@ export class Runtime extends Service implements SourceHost {
   readonly editorGuard: EditorGuard
   /** Runs the local reproduction cases a person clicks on the editor page (docs/024). */
   readonly repro: ReproRunner
+  /** Runs the person's compile-and-launch targets under the shared editor's slot (docs/021). */
+  readonly build: BuildRunner
   readonly billing: Billing
   readonly pipeline: PipelineChecks
   readonly pipelineWatch: PipelineWatch
@@ -204,6 +207,24 @@ export class Runtime extends Service implements SourceHost {
       // time, and keeps each run's output and report so a case re-runs against the editor that is already open (docs/024).
       this.repro = new ReproRunner({ store, root: () => reproRoot(store.settings().executor.editor.project, machine.stateDir),
         logDir: join(machine.stateDir, 'repro-logs'), warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
+      // The person's compile-and-launch targets run as host processes under the shared editor's slot: a run refuses
+      // while an agent or a host job holds it, claims the slot for its duration, and gives it back when it ends (docs/021).
+      this.build = new BuildRunner({ store, logDir: join(machine.stateDir, 'build-logs'),
+        targets: () => store.settings().executor.editor.targets,
+        project: () => store.settings().executor.editor.project,
+        cwd: () => { const project = store.settings().executor.editor.project; return project ? dirname(resolve(project)) : machine.stateDir },
+        blocked: () => {
+          const holder = this.editorScheduler.read().lease?.holder.kind
+          return holder === 'agent' ? 'agent' : holder === 'job' ? 'job' : null
+        },
+        takeSlot: () => {
+          const alreadyPerson = this.editorScheduler.read().lease?.holder.kind === 'person'
+          this.editorScheduler.act({ kind: 'claim' })
+          const granted = this.editorScheduler.read().lease?.holder.kind === 'person'
+          return { granted, owned: granted && !alreadyPerson }
+        },
+        releaseSlot: () => { this.editorScheduler.act({ kind: 'release' }) },
+        warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       // The board's billing strip reads actual Session usage priced from the routes' published lists, and the gateway account's own
       // settled hour and quota when the default route is a gateway it can read.
       this.billing = new Billing({ store, catalog: () => ctx.sessionController.modelCatalog(),
@@ -378,12 +399,13 @@ export class Runtime extends Service implements SourceHost {
     this.editorScheduler.start()
     this.editorGatekeeper.start()
     this.repro.start()
+    this.build.tick()
     this.runtimeHealth.set({ state: 'ready', detail: 'Orchestrator is ready', at: now() })
   }
   private httpHost(): HttpHost {
     const runtime = this
-    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, repro, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing, stallWatch, upgrade } = this
-    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, repro, billing, upgrade, health, machine, masterId, ready, sourceLinks, watchdog, stallWatch,
+    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, repro, build, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing, stallWatch, upgrade } = this
+    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, repro, build, billing, upgrade, health, machine, masterId, ready, sourceLinks, watchdog, stallWatch,
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
@@ -416,6 +438,7 @@ export class Runtime extends Service implements SourceHost {
       this.editor.dispose()
       this.editorScheduler.dispose()
       this.repro.dispose()
+      this.build.dispose()
       for (const dispose of this.disposers.reverse()) dispose()
       // A flush failure must not keep the host from stopping and starting again: the event log is durable for the next open,
       // whose write path truncates a torn tail, and the failure is logged instead of rejecting the stop.
@@ -433,3 +456,4 @@ export class Runtime extends Service implements SourceHost {
     }
   }
 }
+

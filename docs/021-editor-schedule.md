@@ -70,7 +70,6 @@ The gatekeeper's health entry (`editor-gatekeeper`) says how many processes belo
 ## Host-run jobs and batching
 
 `EditorScheduler` (`src/app/editor-scheduler.ts`) runs a job once its wait is granted. It uses the command configured under Execution settings → editor:
-
 | Setting | Meaning |
 | --- | --- |
 | `project` | The `.uproject` path. ue-mcp's bridge files are read beside it, and `<project>` in a command is replaced with it. |
@@ -107,6 +106,15 @@ its row, with front, remove and stop keeping their own action. A batched entry l
 one row never has to guess which Ticket of the batch the person meant.
 
 Working rows show "占用中 · 跑测试" or "排第 2 · 编译". The timeline gains lease spans (labelled by purpose) and dashed wait spans per Ticket.
+
+## A person's compile and launch
+
+The editor page also carries the person's own one-click path, so a compile-and-launch does not require Rider (docs/005):
+
+- **Targets** are configured under Execution settings → editor → **编译启动目标**, one `name=command` per line. The command does the whole job — compile and start the editor — so the panel never guesses an engine or a project layout; `<project>` is replaced with the configured `.uproject`.
+- **One at a time, under the shared slot.** `BuildRunner` (`src/app/build-runner.ts`) runs a target as a host process with its output under `<stateDir>/build-logs`, one run at a time. It refuses while an agent or a host job holds the editor, claims the person's slot for the run (so the scheduler cannot grant it away mid-build), and gives the slot back when the process ends. A run the host started survives in `KV.build.runs`; the next host marks it `interrupted`.
+- **Visible.** The editor page's **编译并启动** card shows the target picker, the command as configured, the live output tail, the exit code and the last runs, with Stop while it runs.
+- **Not a lease bypass.** The card is a person's action through the host, not a worker's shell call; the gatekeeper never owns its process, but the scheduler's slot is held, so agents stay out.
 
 ## Limits
 

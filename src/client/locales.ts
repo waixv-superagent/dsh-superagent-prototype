@@ -653,6 +653,28 @@ const TEXT = {
   problemSetupFeishu: ['飞书机器人检查未通过，飞书来源暂停', 'Feishu bot check failed; the Feishu Source is paused'],
   // Local reproduction cases (docs/024): a person runs a local case against the editor that is already open and reads its report.
   reproTitle: ['复现用例', 'Reproduction cases'],
+  /** The person's compile-and-launch targets on the editor page (docs/021). */
+  buildTitle: ['编译并启动', 'Compile and launch'],
+  buildSub: ['选一个构建目标，宿主替你编译并启动编辑器；运行期间它占着编辑器槽位。', 'Pick a target; the host compiles and starts the editor for you and holds the editor slot while it runs.'],
+  buildTargetLabel: ['构建目标', 'Build target'],
+  buildRun: ['编译并启动', 'Compile and launch'],
+  buildStop: ['停止', 'Stop'],
+  buildRunning: ['运行中', 'Running'],
+  buildNoOutput: ['还没有输出。', 'No output yet.'],
+  buildNoTargets: ['还没有配置构建目标。到「设置 › 执行 › 编辑器」里加一条：名字 + 编译启动命令。', 'No build target is configured yet. Add one under Settings › Execution › editor: a name and the compile-and-launch command.'],
+  buildConfigure: ['去设置里添加', 'Add one in settings'],
+  buildCommandHint: ['实际执行的命令', 'The command that runs'],
+  buildBlockedAgent: ['agent 正占着编辑器；先让它让出再编译启动。', 'An agent holds the editor; let it yield first.'],
+  buildBlockedJob: ['宿主的编辑器作业还在跑；等它结束再编译启动。', 'A host-run editor job holds the editor; wait for it to end.'],
+  buildExit: ['退出码 {code}', 'exit {code}'],
+  'buildState.running': ['运行中', 'Running'],
+  'buildState.succeeded': ['成功', 'Succeeded'],
+  'buildState.failed': ['失败', 'Failed'],
+  'buildState.cancelled': ['已停止', 'Stopped'],
+  'buildState.interrupted': ['被中断', 'Interrupted'],
+  editorTargets: ['编译启动目标', 'Compile-and-launch targets'],
+  editorTargetsHint: ['一行一个「名字=命令」；命令做完整件事（编译并启动），<project> 会替换成上面的 .uproject。', 'One “name=command” per line; the command does the whole job (compile and launch), and <project> is replaced with the .uproject above.'],
+  editorTargetsEmpty: ['还没配置目标', 'No target yet'],
   reproSub: ['本地脚本，不进仓库；点“运行”在已开的编辑器上重跑，跑完看报告。', 'Local scripts outside the repository; run one against the editor that is already open, then read its report.'],
   reproRootLabel: ['目录', 'Folder'],
   reproEmpty: ['这个目录还没有用例。每个用例建一个文件夹，写入 case.json：command 是要跑的命令，report 是跑完要打开的文件。', 'No case yet. Give each case a folder with a case.json: command is what runs, report is the file to open afterwards.'],
@@ -1425,6 +1447,14 @@ const TEXT = {
   'userError.reproNotRunning': ['这次运行已经结束了。', USER_ERRORS.reproNotRunning[1]],
   'userError.reproBlockedAgent': ['agent 正占着编辑器；先让它让出再运行本地用例。', USER_ERRORS.reproBlockedAgent[1]],
   'userError.reproBlockedJob': ['宿主的编辑器作业还在跑；等它结束再运行本地用例。', USER_ERRORS.reproBlockedJob[1]],
+  'userError.buildBusy': ['已有一次编译启动在跑，先停掉它再开下一个。', USER_ERRORS.buildBusy[1]],
+  'userError.buildBlockedAgent': ['agent 正占着编辑器；先让它让出再编译启动。', USER_ERRORS.buildBlockedAgent[1]],
+  'userError.buildBlockedJob': ['宿主的编辑器作业还在跑；等它结束再编译启动。', USER_ERRORS.buildBlockedJob[1]],
+  'userError.buildEditorBusy': ['编辑器没有交到你手里；等占用的 agent 让出后再试。', USER_ERRORS.buildEditorBusy[1]],
+  'userError.unknownBuildTarget': ['设置里没有这个构建目标：{target}。', USER_ERRORS.unknownBuildTarget[1]],
+  'userError.buildTargetEmpty': ['构建目标 {target} 没有填命令；到「设置 › 执行 › 编辑器」补上。', USER_ERRORS.buildTargetEmpty[1]],
+  'userError.unknownBuildRun': ['找不到这次编译启动的记录：{run}。', USER_ERRORS.unknownBuildRun[1]],
+  'userError.buildNotRunning': ['这次编译启动已经结束了。', USER_ERRORS.buildNotRunning[1]],
   'userError.modelUnavailable': ['{block} 的模型不可用：{error}', USER_ERRORS.modelUnavailable[1]],
   'userError.promptTooLong': ['提示词配置超过 {limit} 个字符。', USER_ERRORS.promptTooLong[1]],
   'userError.promptPlaceholders': ['「{part}」的模板必须保留占位符 {placeholders}，由系统填入内容。', USER_ERRORS.promptPlaceholders[1]],
@@ -1476,3 +1506,4 @@ export const GLOSSARY_VALUES = {
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap { dshSuperagent: DshSuperagentKey }
 }
+

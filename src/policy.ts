@@ -228,6 +228,12 @@ export const EditorConfigSchema = z.object({
   restart: z.string().trim().max(1000).default(''),
   /** Runs one automation filter headless; `<filter>` is replaced by the worker's filter. */
   test: z.string().trim().max(1000).default(''),
+  /**
+   * The person's compile-and-launch targets on the editor page (docs/021): each runs its command as a host process under
+   * the shared editor's slot. `<project>` is replaced with the `.uproject`; the command does the compile and the launch.
+   */
+  targets: z.array(z.object({ name: z.string().trim().min(1).max(80), command: z.string().trim().min(1).max(2000) }).strict())
+    .max(20).default([]),
 }).strict()
 /** Executor settings: worker model, concurrency, ticket directory root (empty defaults to `<stateDir>/work`), `prepare` command, blocked commands, and the delivery backend. */
 export const ExecutorConfigSchema = z.object({

@@ -16,6 +16,9 @@ import type { Editor } from './editor.ts'
 import type { EditorScheduler } from './editor-scheduler.ts'
 import type { ReproRunner } from './repro-runner.ts'
 import { VISIBLE_RUNS } from './repro-runner.ts'
+import type { BuildRunner } from './build-runner.ts'
+import { VISIBLE_BUILD_RUNS } from './build-runner.ts'
+import { buildPage } from './views/build.ts'
 import { inside, readReproCases } from './repro.ts'
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
@@ -70,6 +73,8 @@ export interface HttpHost {
   readonly editorScheduler?: Pick<EditorScheduler, 'tick' | 'engine' | 'act' | 'cancelJob' | 'read'>
   /** The local reproduction cases' runs (docs/024); absent on a host built before them. */
   readonly repro?: Pick<ReproRunner, 'tick' | 'run' | 'stop' | 'log' | 'root'>
+  /** The person's compile-and-launch targets and runs (docs/021); absent on a host built before them. */
+  readonly build?: Pick<BuildRunner, 'read' | 'start' | 'stop' | 'targets' | 'blocked' | 'logTail'>
   /** Rolling model spend the overview's billing strip reads; absent on a host built before it. */
   readonly billing?: Pick<Billing, 'view'>
   /** The one-click update the sidebar badge offers; absent on a host built before it. */
@@ -239,6 +244,8 @@ const RequestRequest = z.object({ text: z.string().trim().min(1).max(LIMITS.requ
 const ReproRunRequest = z.object({ case: z.string().trim().min(1).max(120) }).strict()
 const ReproStopRequest = z.object({ run: z.string().trim().min(1).max(64) }).strict()
 const ReproLogQuery = z.object({ run: z.string().trim().min(1).max(64) })
+const BuildRunRequest = z.object({ target: z.string().trim().min(1).max(80) }).strict()
+const BuildStopRequest = z.object({ run: z.string().trim().min(1).max(64) }).strict()
 
 /** Why a local case may not start now: an agent or a host job holds the shared editor, never a person's own claim. */
 function reproBlocked(runtime: HttpHost): 'agent' | 'job' | null {
@@ -313,6 +320,31 @@ function routes(runtime: HttpHost): Routes {
       const repro = runtime.repro
       if (!repro) throw new RouteError(404, 'This host has no local reproduction runner')
       return { text: repro.log(ReproLogQuery.parse(query).run) }
+    },
+    // The person's compile-and-launch targets (docs/021): configured commands the host runs under the shared editor's
+    // slot, one at a time, with their output. The panel never guesses an engine or a project layout.
+    'GET build': () => {
+      const build = runtime.build
+      if (!build) throw new RouteError(404, 'This host has no build runner')
+      const runs = build.read().slice(0, VISIBLE_BUILD_RUNS)
+      const active = runs.find(run => run.state === 'running')
+      return buildPage({ targets: build.targets(),
+        runs: runs.map(run => ({ id: run.id, target: run.target, state: run.state, startedAt: run.startedAt,
+          ...run.endedAt ? { endedAt: run.endedAt } : {}, ...run.exitCode !== undefined ? { exitCode: run.exitCode } : {}, summary: run.summary })),
+        ...active ? { active: { runId: active.id, target: active.target, tail: build.logTail(active.id, ACTIVE_TAIL) } } : {},
+        blocked: build.blocked() })
+    },
+    'POST build/run': async ({ body }) => {
+      const build = runtime.build
+      if (!build) throw new RouteError(404, 'This host has no build runner')
+      build.start(BuildRunRequest.parse(await body(2_048)).target)
+      return { started: true as const }
+    },
+    'POST build/stop': async ({ body }) => {
+      const build = runtime.build
+      if (!build) throw new RouteError(404, 'This host has no build runner')
+      build.stop(BuildStopRequest.parse(await body(2_048)).run)
+      return { stopped: true as const }
     },
     'GET search': ({ query }) => search(views(runtime), query.q ?? '', runtime.sourceLinks),
     'GET sources': () => sourcesStatus(views(runtime), runtime.health, setupState(runtime)),

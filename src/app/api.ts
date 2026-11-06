@@ -14,6 +14,7 @@ import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
 import type { TicketGraphView } from './views/graph.ts'
 import type { ReproPageView } from './views/repro.ts'
+import type { BuildPageView } from './views/build.ts'
 import type { TicketListView, TicketSearchView } from './views/tickets.ts'
 import type { UpgradeRun, UpgradeView } from './upgrade.ts'
 
@@ -35,6 +36,12 @@ export interface Api {
     | { action: 'front' | 'cancel' | 'cancel-job'; id: string }; response: { done: true } }
   /** The local reproduction cases: what the directory holds, how the recent runs ended, and what holds the editor. */
   'GET repro': { response: ReproPageView }
+  /** The person's compile-and-launch targets and their recent runs, for the editor page. */
+  'GET build': { response: BuildPageView }
+  /** A person runs one configured target (compile + launch) under the shared editor's slot. */
+  'POST build/run': { body: { target: string }; response: { started: true } }
+  /** A person stops the build-and-launch in flight. */
+  'POST build/stop': { body: { run: string }; response: { stopped: true } }
   /** A person runs one local case; it starts as a host process against the editor that is already open. */
   'POST repro/run': { body: { case: string }; response: { started: true } }
   /** A person stops the local case that is running. */

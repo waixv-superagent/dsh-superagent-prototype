@@ -1,0 +1,37 @@
+{
+  "mode": "after",
+  "viewport": "1920x1080",
+  "theme": "dark",
+  "card": {
+    "present": true,
+    "title": "编译并启动",
+    "targets": [
+      "Development Editor SunGame",
+      "Development Game SunGame"
+    ],
+    "command": "py demo-build.py",
+    "buttons": [
+      "编译并启动"
+    ],
+    "runs": [],
+    "log": null,
+    "blocked": false
+  },
+  "ran": {
+    "present": true,
+    "title": "编译并启动",
+    "targets": [
+      "Development Editor SunGame",
+      "Development Game SunGame"
+    ],
+    "command": "py demo-build.py",
+    "buttons": [
+      "编译并启动"
+    ],
+    "runs": [
+      "成功Development Editor SunGame现在Result: Succeeded退出码 0"
+    ],
+    "log": null,
+    "blocked": false
+  }
+}

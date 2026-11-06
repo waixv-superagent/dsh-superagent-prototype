@@ -4,6 +4,7 @@
  */
 import type { PromptVersion } from './app/prompts.ts'
 import type { BillingSnapshot } from './app/billing.ts'
+import type { BuildState } from './app/build-runner.ts'
 import type { EditorSchedule } from './app/editor-schedule.ts'
 import type { GatekeeperState } from './app/editor-gatekeeper.ts'
 import type { ReproState } from './app/repro-runner.ts'
@@ -45,6 +46,8 @@ export const KV = {
     gatekeeper: record<GatekeeperState>('editor-owned') },
   /** ReproRunner: the local reproduction cases' runs, newest first, so a restart loses no verdict (docs/024). */
   repro: { runs: record<ReproState>('repro-runs') },
+  /** BuildRunner: the person's compile-and-launch runs, newest first, so a restart loses no verdict (docs/021). */
+  build: { runs: record<BuildState>('build-runs') },
   /** Sessions: prompt revisions each Session has worked under, ordered oldest first; the last entry (`.at(-1)`) is its active revision. */
   sessions: { prompts: family<number[], [session: string]>('session-prompts:') },
   /** Schema 11 migration: legacy main-Session queues imported into the effect table. */
