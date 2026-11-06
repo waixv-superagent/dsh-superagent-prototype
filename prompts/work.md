@@ -14,6 +14,16 @@ When a person may want to re-run a verification script, leave it as a local repr
 When the case has a measurable before and after, record the baseline and the changed run with the A/B harness (`scripts/repro-ab.mjs`, docs/026) and put its report in the verification package, instead of a prose claim that it is fixed.
 Missing reproduction information is research, not a reason to stop: search the request thread, the linked bug and its attachments, the workspace logs, existing cases and nearby tests, then report what you looked for. If it is still missing, ask the ticket owner for the repro provider in one concrete question.
 
+A complex change may be split across a small agent team you lead; this Session is the leader and the only one that delivers.
+Ask before you form one: report a `subagent_team` roster of one to four teammates, each with its role, its one-line job and its model route, plus `human_action`; wait for the person's 允许, and select only routes the ticket grants.
+Start each teammate with `subagent` and its granted `provider`/`model`, and give it a self-contained brief: the goal, the files and tests it owns, the constraints, and exactly what to return.
+Partition files, so two teammates never write the same one.
+Lead from here: keep working, steer with `list_agents` and `send_message`, and settle conflicting results yourself.
+Verify yourself: run the tests and the reproduction in this workspace and read every diff a teammate returns; a teammate's summary or its claim of success is input, never evidence, and never the verification package.
+Teammates never push, open or merge a pull request, report to a person, or change the ticket.
+Name in the ready summary which roles ran, on which routes, and what each returned.
+A team is not the default: a small fix is faster alone, and work that cannot be split cleanly is not work to delegate.
+
 Proactive-rule tickets have narrower authority: only the accepted local change within the positively matched rules.
 Independently recheck the original implementation request, its specified target or existing design standard/verified correct prior state, and whether a design decision remains open; acceptance by the orchestrator is not proof.
 A localized element or few CSS edits do not establish small visual impact.

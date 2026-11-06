@@ -53,11 +53,13 @@ interface Skill { name: string; description: string; content: string }
 // The A/B reproduction harness adds one worker line: record both arms and put the report in the verification package
 // (docs/026). The worker surface measures 52,503, so the budget grows to 52,800; trimming that line should lower it again.
 // The subagent model approval adds the `subagent_model` schema and the permission wording on the report tool (docs/003);
-// the worker surface measures 52,876, so the budget grows to 53,000.
+// the worker surface measured 52,876, so the budget grew to 53,000.
 // The reproduction-information rule adds one worker line: search the request, its bug and attachments, logs and existing
-// cases before asking, then name what is missing and ask the owner for a repro provider. The worker surface measures
-// 53,187, so the budget grows to 53,400.
-const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 53_400 }
+// cases before asking, then name what is missing and ask the owner for a repro provider. The worker surface measured
+// 53,187, so the budget grew to 53,400.
+// The agent-team roster adds the `subagent_team` schema and the leader's briefing, partitioning, steering and self-verification
+// rules (docs/003); the combined worker surface measures 55,223, so the budget grows to 55,400.
+const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 55_400 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

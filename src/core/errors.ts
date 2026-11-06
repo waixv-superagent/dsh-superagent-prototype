@@ -61,6 +61,7 @@ export const USER_ERRORS = {
   planDiff: ['refused', 'The plan diff must be one unified diff this panel can render: {problem}'],
   optionsWithoutQuestion: ['refused', 'Options need the question they answer; ask it with human_action'],
   modelRequest: ['refused', 'A subagent model request needs the question for a person, and its choices are fixed to 允许 and 不允许'],
+  teamRequest: ['refused', 'A subagent team request needs the question for a person, one to four teammates with a unique role and a model route each, and its choices are fixed to 允许 and 不允许'],
   attentionOptions: ['refused', 'A question offers 2 to 4 unique option labels of at most 24 characters'],
   attentionSections: ['refused', 'A question card\'s context sections are 1 to 6 blocks, each with a short unique label and its own text'],
   notAttentionOption: ['refused', 'That option is not one this question offers'],

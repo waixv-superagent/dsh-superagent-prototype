@@ -2,7 +2,7 @@
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, latestReport, liveTicket, MODEL_APPROVAL_OPTIONS, modelRoute, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
-import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, LinkedRelationKind, Mandate, ModelGrant, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketEndBy,
+import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, LinkedRelationKind, Mandate, ModelGrant, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, TeamRoute, ThreadRef, Ticket, TicketEndBy,
   TicketInput, TicketOutcome, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
@@ -18,6 +18,9 @@ import { pipelineNotice, rerunNotice } from './pipeline-notice.ts'
 import { canRetry } from './stage.ts'
 
 const sameChannel = (a: ChannelRef, b: ChannelRef): boolean => JSON.stringify(a) === JSON.stringify(b)
+/** A team's roles and routes, as an answer names them: `实现 ai-gateway/claude-opus-5.5、复核 ai-gateway/claude-sonnet-5`. */
+const teamText = (team: readonly (ModelRoute & { role?: string })[]): string =>
+  team.map(item => `${item.role ? `${item.role} ` : ''}${modelRoute(item)}`).join('、')
 /** Whether an Input is a message no person wrote, such as CI's, a bot's, or the main Session's note. */
 export const automatic = (input: TicketInput | undefined): boolean => input?.kind === 'note' || (input?.kind === 'trigger' && !input.human)
 /**
@@ -629,10 +632,14 @@ export class Tickets extends EnginePart {
     const at = this.now()
     this.replies.withdrawAttention(attention.id)
     delete ticket.attention
-    // A model request records its authorization on the ticket before the answer reaches the worker: the tool guard reads it,
-    // and the input says whether the worker may now select that route.
-    const granted = attention.model && option === MODEL_APPROVAL_OPTIONS[0] ? this.grantModel(ticket, attention, at) : undefined
-    const text = granted ? `人允许了模型 ${modelRoute(granted)}（本工单的子 agent 可用，授权已记录）。可以用 subagent 的 provider/model 指定它。`
+    // A model or team request records its authorization on the ticket before the answer reaches the worker: the tool guard
+    // reads it, and the input says whether the worker may now select those routes.
+    const approved = option === MODEL_APPROVAL_OPTIONS[0]
+    const granted = approved ? this.grantModel(ticket, attention, at, attention.model) : undefined
+    const team = approved ? this.grantTeam(ticket, attention, at) : []
+    const text = team.length ? `人允许了 agent 团队：${teamText(team)}（本工单的 teammate 可用，授权已记录）。你是 leader：用 subagent 的 provider/model 启动他们，并自己跑验证。`
+      : attention.team ? `人不允许本工单的 agent 团队（${teamText(attention.team)}）；本工单不要用这些模型。`
+      : granted ? `人允许了模型 ${modelRoute(granted)}（本工单的子 agent 可用，授权已记录）。可以用 subagent 的 provider/model 指定它。`
       : attention.model ? `人不允许模型 ${modelRoute(attention.model)}；本工单不要用它。`
       : `人对「${attention.question}」选了：${option}`
     this.addInput(ticket, { id: key('input', ticketId, 'answer', attentionId, at), kind: 'text', at, text })
@@ -654,10 +661,15 @@ export class Tickets extends EnginePart {
     const at = this.now()
     this.replies.withdrawAttention(attention.id)
     delete ticket.attention
-    // A written answer authorizes a model only when it is exactly one of the card's labels; anything else is a message, and
-    // the input tells the worker that no route was authorized, so it does not try one the guard will refuse.
-    const granted = attention.model && answer === MODEL_APPROVAL_OPTIONS[0] ? this.grantModel(ticket, attention, at) : undefined
-    const message = granted ? `人答复了「${attention.question}」：${answer}（模型 ${modelRoute(granted)} 已授权，本工单的子 agent 可用）。`
+    // A written answer authorizes a model or team only when it is exactly one of the card's labels; anything else is a
+    // message, and the input tells the worker that no route was authorized, so it does not try one the guard will refuse.
+    const approved = answer === MODEL_APPROVAL_OPTIONS[0]
+    const granted = approved ? this.grantModel(ticket, attention, at, attention.model) : undefined
+    const team = approved ? this.grantTeam(ticket, attention, at) : []
+    const message = team.length ? `人答复了「${attention.question}」：${answer}（agent 团队 ${teamText(team)} 已授权，本工单的 teammate 可用）。`
+      : attention.team && answer === MODEL_APPROVAL_OPTIONS[1] ? `人答复了「${attention.question}」：${answer}（agent 团队未授权）。`
+      : attention.team ? `人对「${attention.question}」的答复：${answer.slice(0, 4000)}（agent 团队未授权：授权要点卡片上的 允许）`
+      : granted ? `人答复了「${attention.question}」：${answer}（模型 ${modelRoute(granted)} 已授权，本工单的子 agent 可用）。`
       : attention.model && answer === MODEL_APPROVAL_OPTIONS[1] ? `人答复了「${attention.question}」：${answer}（模型 ${modelRoute(attention.model)} 未授权）。`
       : attention.model ? `人对「${attention.question}」的答复：${answer.slice(0, 4000)}（模型 ${modelRoute(attention.model)} 未授权：授权要点卡片上的 允许）`
       : `人对「${attention.question}」的答复：${answer.slice(0, 4000)}`
@@ -665,20 +677,30 @@ export class Tickets extends EnginePart {
     return this.require(ticketId)
   }
   /**
-   * Record a person's approval of one subagent model route on the ticket, idempotently. The grant is what the worker's tool
-   * guard reads, so the route can be selected after the next delivery without any further host state.
+   * Record a person's approval of one subagent model route on the ticket, idempotently; `model.role` names the team role a
+   * roster approval gave it. The grant is what the worker's tool guard reads, so the route can be selected after the next
+   * delivery without any further host state.
    */
-  private grantModel(ticket: Ticket, attention: Attention, at: string): ModelGrant {
-    const model = attention.model!
+  private grantModel(ticket: Ticket, attention: Attention, at: string, model?: ModelRoute & { role?: string }): ModelGrant | undefined {
+    if (!model) return undefined
     const execution = ticket.execution ?? { name: '', directory: '', assignment: '' }
-    const existing = execution.modelGrants?.find(item => item.provider === model.provider && item.model === model.model)
+    const existing = execution.modelGrants?.find(item => item.provider === model.provider && item.model === model.model && item.role === model.role)
     if (existing) return existing
-    const grant: ModelGrant = { provider: model.provider, model: model.model, at, attentionId: attention.id }
+    const grant: ModelGrant = { provider: model.provider, model: model.model, at, attentionId: attention.id,
+      ...(model.role ? { role: model.role } : {}) }
     ticket.execution = { ...execution, modelGrants: [...execution.modelGrants ?? [], grant] }
     // Persist the grant before the answer Input: an Input id is idempotent, so a repeat answered in the same millisecond must
     // not be the only thing that would have recorded the authorization.
     this.repo.tickets.save(ticket)
     return grant
+  }
+  /** Record the person's approval of every route in an agent-team request, each with the role it was approved for. */
+  private grantTeam(ticket: Ticket, attention: Attention, at: string): ModelGrant[] {
+    if (!attention.team?.length) return []
+    return attention.team.flatMap((item: TeamRoute) => {
+      const grant = this.grantModel(ticket, attention, at, { provider: item.provider, model: item.model, role: item.role })
+      return grant ? [grant] : []
+    })
   }
   /**
    * A worker moves its ticket one phase forward: implement (only through a person's plan approval) → verify → deliver, the

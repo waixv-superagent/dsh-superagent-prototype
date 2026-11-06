@@ -62,6 +62,14 @@ it('tells a worker to take the shared editor lease before using UnrealEditor', (
   expect(worker).toContain('orchestrator_editor op=acquire')
   expect(worker).toContain('Never start a second editor')
 })
+it('tells a worker leading an agent team to ask for the roster and verify its teammates itself', () => {
+  // docs/003 promises the leader runs verification; a teammate's summary is not evidence.
+  const worker = composePrompt(defaultPrompts(), 'worker')
+  expect(worker).toContain('subagent_team')
+  expect(worker).toContain('Verify yourself')
+  expect(worker).toContain('never evidence')
+  expect(worker).toContain('Teammates never push')
+})
 
 it('reads a prompt file whatever its line ends and blank lines, and names a missing or empty one', () => {
   const dir = mkdtempSync(join(tmpdir(), 'prompt-file-'))

@@ -1967,3 +1967,67 @@ it('releases the deployment\'s subagent models on a worker Session and lets a pe
   expect(refused.execution?.modelGrants).toHaveLength(1)
   expect(select('ai-gateway', 'claude-sonnet-5')).toMatch('not approved')
 })
+
+it('offers one card for an agent team and lets a person authorize every role\'s route', async () => {
+  const catalog = {
+    default: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' },
+    groups: [{ id: 'ai-gateway', name: 'kurogames', models: [
+      { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
+      { id: 'claude-opus-5.5', name: 'Opus 5.5' },
+      { id: 'claude-sonnet-5', name: 'Sonnet 5' }] }],
+    failures: [],
+  }
+  Object.assign(controller, { modelCatalog: vi.fn(async () => catalog) })
+  const seeded = runtime.store.settings()
+  runtime.store.saveSettings({ ...seeded, executor: { ...seeded.executor, model: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' } } })
+  const { ticket, sessionId } = await acceptedTicket()
+  const guard = guards.get(sessionId)!
+  const select = (provider: string, model: string) => guard({ name: 'subagent', arguments: { provider, model, prompt: 'look' } })
+  const team = [
+    { role: '实现', task: '按方案改代码', provider: 'ai-gateway', model: 'claude-opus-5.5' },
+    { role: '复核', task: '独立复现并读 diff', provider: 'ai-gateway', model: 'claude-sonnet-5' },
+  ]
+  // A team request needs a question and fixed choices, and never shares a card with a single model request.
+  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'no question', subagent_team: team }))
+    .rejects.toThrow('needs human_action')
+  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'own choices', human_action: '可以吗？',
+    options: ['可以', '不行'], subagent_team: team })).rejects.toThrow('fixed choices')
+  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'both', human_action: '可以吗？',
+    subagent_model: { provider: team[0]!.provider, model: team[0]!.model }, subagent_team: [team[1]!] })).rejects.toThrow('not both')
+  // The person decides on the whole roster, so a card that would cut a role off is refused before it is sent.
+  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'long', human_action: 'x'.repeat(900),
+    subagent_team: [{ role: '实现', task: 't'.repeat(200), provider: 'ai-gateway', model: 'claude-opus-5.5' }] }))
+    .rejects.toThrow('1000 characters')
+  // The routes stay refused until the person allows the roster.
+  expect(select('ai-gateway', 'claude-opus-5.5')).toMatch('not approved')
+  const asked = await runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'This needs a team',
+    human_action: '复杂改动想拆成实现与复核两个 teammate', subagent_team: team }) as
+    { attention: { id: string; question: string; options: string[] } }
+  // The host lists every role, its job, the model's display name and the exact route on one question.
+  expect(asked.attention.options).toEqual(['允许', '不允许'])
+  expect(asked.attention.question).toContain('允许在本工单用以下 agent 团队吗？')
+  expect(asked.attention.question).toContain('- 实现：Opus 5.5（ai-gateway/claude-opus-5.5）— 按方案改代码')
+  expect(asked.attention.question).toContain('- 复核：Sonnet 5（ai-gateway/claude-sonnet-5）— 独立复现并读 diff')
+  // Only 允许 records the routes; both roles' routes pass the guard afterwards, an unapproved one does not.
+  const approved = runtime.engine.answerAttention(ticket.id, asked.attention.id, '允许')
+  expect(approved.execution?.modelGrants).toEqual([
+    expect.objectContaining({ role: '实现', provider: 'ai-gateway', model: 'claude-opus-5.5' }),
+    expect.objectContaining({ role: '复核', provider: 'ai-gateway', model: 'claude-sonnet-5' }),
+  ])
+  expect(select('ai-gateway', 'claude-opus-5.5')).toBeUndefined()
+  expect(select('ai-gateway', 'claude-sonnet-5')).toBeUndefined()
+  expect(select('ai-gateway', 'deepseek-v4.1-flash')).toBeUndefined()
+  // Asking again for an approved role and route, naming a role twice, or a route the deployment does not serve never reaches a person.
+  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'again', human_action: '再来一次？',
+    subagent_team: [team[0]] })).rejects.toThrow('already approved')
+  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'dupe', human_action: '重复？',
+    subagent_team: [{ role: '分析', task: '查根因', provider: 'ai-gateway', model: 'claude-sonnet-5' },
+      { role: '分析', task: '再查一次', provider: 'ai-gateway', model: 'claude-opus-5.5' }] })).rejects.toThrow('unique role')
+  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'unknown', human_action: '可以用吗？',
+    subagent_team: [{ ...team[0], model: 'claude-opus-9' }] })).rejects.toThrow('Unknown model route')
+  // A denial records no route for the team it refused, and the earlier grants stand.
+  const denied = await runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'third?', human_action: '加一个分析？',
+    subagent_team: [{ role: '分析', task: '查根因', provider: 'ai-gateway', model: 'claude-sonnet-5' }] }) as { attention: { id: string } }
+  const refused = runtime.engine.answerAttention(ticket.id, denied.attention.id, '不允许')
+  expect(refused.execution?.modelGrants).toHaveLength(2)
+})
