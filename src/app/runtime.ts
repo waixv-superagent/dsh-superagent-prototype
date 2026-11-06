@@ -49,6 +49,7 @@ import { reproRoot } from './repro.ts'
 import { notifyPlan as sendPlanCard } from './plan.ts'
 import { notifyPriority as sendPriorityCard } from './priority.ts'
 import { IdleScheduler } from './idle.ts'
+import { NightRepro } from './night-repro.ts'
 import { Billing, gatewayAccount, publishedPrices } from './billing.ts'
 import { feishuSettings } from '../sources/feishu.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
@@ -95,6 +96,8 @@ export class Runtime extends Service implements SourceHost {
   readonly editorGuard: EditorGuard
   /** Runs the local reproduction cases a person clicks on the editor page (docs/024). */
   readonly repro: ReproRunner
+  /** Replays a delivered Ticket's local case in the night window, silently (docs/029). */
+  readonly nightRepro: NightRepro
   /** Runs the person's compile-and-launch targets under the shared editor's slot (docs/021). */
   readonly build: BuildRunner
   readonly billing: Billing
@@ -239,6 +242,15 @@ export class Runtime extends Service implements SourceHost {
         account: (provider, from, to) => gatewayAccount(ctx, provider, from, to), warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       this.pipeline = new PipelineChecks({ settings: () => store.settings() })
       this.idlePool = new IdleScheduler({ store })
+      // The night queue replays a delivered Ticket's local case by itself inside the quiet window (docs/029). It uses the same
+      // idle judgement as every pooled launch and respects the editor lease, but it never messages anyone: its result lands in
+      // the Ticket's `idle.repro` and the 复现用例 card a person already reads.
+      this.nightRepro = new NightRepro({ store, repro: this.repro, idle: this.idlePool,
+        blocked: () => {
+          const holder = this.editorScheduler.read().lease?.holder.kind
+          return holder === 'agent' ? 'agent' : holder === 'job' ? 'job' : null
+        },
+        warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       this.assessor = new MasterAssessor({ get engine() { return runtime.engine }, commands, get deployment() { return setup.deployment }, effects,
         settings: () => store.settings(), paused: () => this.paused(), threadContext: trigger => sources.threadContext(trigger),
         deliver: (id, text) => sessions.prompt(masterId, id, text, 'steer'), candidateCard: candidate => candidateCard(links, candidate) })
@@ -407,6 +419,7 @@ export class Runtime extends Service implements SourceHost {
     this.editorScheduler.start()
     this.editorGatekeeper.start()
     this.repro.start()
+    this.nightRepro.start()
     this.build.tick()
     this.runtimeHealth.set({ state: 'ready', detail: 'Orchestrator is ready', at: now() })
   }
@@ -428,6 +441,7 @@ export class Runtime extends Service implements SourceHost {
     this.closingFlag = true; const passes = this.passes.stop(); const watch = this.pipelineWatch.stop(); const watchdog = this.watchdog.stop()
     const gatekeeper = this.editorGatekeeper.stop()
     this.stallWatch.stop()
+    this.nightRepro.stop()
     this.billing.stop()
     this.upgrade.stop()
     this.stopped.abort()

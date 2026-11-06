@@ -27,6 +27,20 @@ export interface IdleAnalysisConfig {
   /** How many likely related tickets an analysis brief names, from the relation graph's own guess. */
   related: number
 }
+/**
+ * The night reproduction queue (docs/029): in the configured local window the host replays one delivered Ticket's local
+ * reproduction case by itself, without messaging anyone, so the case is already run when a person comes back to decide.
+ * The window is separate from the idle depths: it opens at 20:00 even while the evening depth still depends on the person
+ * being quiet, and it keeps the day free for the person and the editor.
+ */
+export interface IdleReproConfig {
+  /** Whether the night queue runs at all. */
+  enabled: boolean
+  /** The local window in which a case may start; it crosses midnight when `to` is before `from`. */
+  window: IdleRange
+  /** How many cases one night admits, so the shared editor is not busy with reproductions all night. */
+  perNight: number
+}
 /** The configurable part of the judgement; the `executor.idle` settings block carries these values. */
 export interface IdleConfig {
   enabled: boolean
@@ -44,6 +58,8 @@ export interface IdleConfig {
   priorityAskMin: number
   /** What an idle-window launch does: a read-only analysis (the default) or the ticket's ordinary implementation. */
   analysis: IdleAnalysisConfig
+  /** The night queue that replays delivered Tickets' local reproduction cases without messaging anyone (docs/029). */
+  repro: IdleReproConfig
 }
 /** The addendum's defaults: lunch for `L1`, the evening for `L2`, the night for `L3`, and the working day protected. */
 export const IDLE_DEFAULTS: IdleConfig = {
@@ -56,6 +72,7 @@ export const IDLE_DEFAULTS: IdleConfig = {
   analysisWorkers: 1,
   priorityAskMin: 30,
   analysis: { enabled: true, related: ANALYSIS_RELATED },
+  repro: { enabled: true, window: { from: '20:00', to: '08:00' }, perNight: 1 },
 }
 /** The five signals of the judgement: queue, capacity, window, human quiet, and the guard. */
 export interface IdleSignals { queue: boolean; capacity: boolean; window: boolean; human: boolean; guard: boolean }
@@ -134,4 +151,16 @@ export const localDay = (at: string): string => {
   const date = new Date(at)
   const month = String(date.getMonth() + 1).padStart(2, '0'), day = String(date.getDate()).padStart(2, '0')
   return `${date.getFullYear()}-${month}-${day}`
+}
+/**
+ * The local date that names the night a moment belongs to: the date the window opened, so 02:00 on the 7th is the night of
+ * the 6th when the window runs 20:00–08:00. The night queue counts its budget and its tickets by this key, not by the
+ * calendar date, so one evening's allowance is not spent again after midnight.
+ */
+export function nightKey(now: Date, window: IdleRange): string {
+  const start = clockMinutes(window.from), end = clockMinutes(window.to)
+  const date = new Date(now)
+  // A window that crosses midnight has its after-midnight half on the previous evening's date.
+  if (Number.isFinite(start) && Number.isFinite(end) && start > end && minuteOfDay(now) < end) date.setDate(date.getDate() - 1)
+  return localDay(date.toISOString())
 }

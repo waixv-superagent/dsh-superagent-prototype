@@ -1,6 +1,6 @@
 /** What one Ticket's page shows of the local reproduction cases (docs/024): the case its verification package names. */
 import type { Ticket } from '../../core/model.ts'
-import type { ReproCase } from '../repro.ts'
+import { matchedReproCaseIds, type ReproCase } from '../repro.ts'
 import type { ReproRun } from '../repro-runner.ts'
 import { reproCaseView, reproRunView, type ReproCaseView, type ReproRunView } from './repro.ts'
 
@@ -16,24 +16,12 @@ export interface TicketReproView {
   blocked: 'agent' | 'job' | null
 }
 
-/**
- * The case folders a verification package names: a package usually writes the folder it left in the workspace, such as
- * `Saved/ReproTests/20261105-183235-c75bbc4c_ZZAttack05`, and docs/024 makes the folder name the case id. A package that
- * names no folder falls back to a case id carrying the Ticket's first eight characters.
- */
-export function ticketReproCaseIds(text: string | undefined, cases: readonly Pick<ReproCaseView, 'id'>[], ticketId: string): string[] {
-  const source = (text ?? '').replaceAll('\\', '/').toLowerCase()
-  const short = ticketId.toLowerCase().slice(0, 8)
-  return cases.filter(item => source.includes(item.id.toLowerCase())
-    || short.length === 8 && item.id.toLowerCase().includes(short)).map(item => item.id)
-}
-
 /** Matches a Ticket's verification package to the local cases; an unmatched package keeps an empty list. */
 export function ticketRepro(input: { root: string; cases: readonly ReproCase[]; runs: readonly ReproRun[]
   active?: { runId: string; caseId: string; tail: string } | null; blocked: 'agent' | 'job' | null },
   ticket: Pick<Ticket, 'id' | 'execution'>): TicketReproView {
   const cases = input.cases.map(reproCaseView)
-  const matched = ticketReproCaseIds(ticket.execution?.verification, cases, ticket.id)
+  const matched = matchedReproCaseIds(ticket.execution?.verification, cases, ticket.id)
   return {
     root: input.root,
     cases: cases.filter(item => matched.includes(item.id)),

@@ -134,6 +134,19 @@ export function spawnCase(command: string, cwd: string): ChildProcess {
     : spawn('/bin/sh', ['-c', command], { cwd, detached: true })
 }
 
+/**
+ * The case folders a verification package names: a package usually writes the folder it left in the workspace, such as
+ * `Saved/ReproTests/20261105-183235-c75bbc4c_ZZAttack05`, and a folder name is the case id (docs/024). A package that
+ * names no folder falls back to a case id carrying the Ticket's first eight characters. Both the acceptance page and the
+ * night queue use this rule, so a case a person can click is exactly the case the host may replay.
+ */
+export function matchedReproCaseIds(text: string | undefined, cases: readonly Pick<ReproCase, 'id'>[], ticketId: string): string[] {
+  const source = (text ?? '').replaceAll('\\', '/').toLowerCase()
+  const short = ticketId.toLowerCase().slice(0, 8)
+  return cases.filter(item => source.includes(item.id.toLowerCase())
+    || short.length === 8 && item.id.toLowerCase().includes(short)).map(item => item.id)
+}
+
 /** One line a person reads on a run's row: the last output line the command wrote. */
 export function runSummary(output: string): string {
   const lines = output.split(/\r?\n/).map(line => line.trim()).filter(Boolean)

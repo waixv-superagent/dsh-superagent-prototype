@@ -348,6 +348,27 @@ export interface TicketIdleAnalysis {
   /** The verdict the worker recorded, absent when it reported no advice. */
   advice?: AnalysisAdvice
 }
+/**
+ * The last night reproduction run a ticket got (docs/029): the local case the host replayed on its own inside the night
+ * window, the night it belongs to, and how the run ended. A ticket with one is not picked again by the night queue; a
+ * person can still run the case by hand from the ticket page.
+ */
+export interface TicketIdleRepro {
+  /** The case folder's id, which the existing 复现用例 card uses as its route parameter. */
+  caseId: string
+  /** The `KV.repro.runs` record the queue started or last reconciled for this ticket. */
+  runId: string
+  state: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+  /** The local date the night window opened, so one ticket runs at most once that night. */
+  night: string
+  startedAt: string
+  endedAt?: string
+  exitCode?: number | null
+  /** The last output line the case wrote, or why it could not start. */
+  summary?: string
+  /** The report the case wrote, relative to its folder, when its manifest declares one. */
+  report?: string
+}
 /** One state the host found provably inconsistent on an open ticket and repaired on its own, kept as the system's trace. */
 export interface TicketRepair {
   at: string
@@ -376,11 +397,11 @@ export interface Ticket {
   /** The priority question a TAPD ticket asks before it may start; absent when the ticket never asked. */
   priorityAsk?: PriorityAsk
   /**
-   * A `P2`/`P3` ticket waiting in the idle pool: when it entered, when and at which idle depth its work started, and the
-   * read-only analysis it got in an idle window. The daily budget counts the tickets whose `launchedIn` falls on the
-   * current day.
+   * A `P2`/`P3` ticket waiting in the idle pool: when it entered, when and at which idle depth its work started, the
+   * read-only analysis it got in an idle window, and the local reproduction case the night queue ran for it (docs/029).
+   * The daily budget counts the tickets whose `launchedIn` falls on the current day.
    */
-  idle?: { enteredAt: string; launchedIn?: IdleLevel; launchedAt?: string; analysis?: TicketIdleAnalysis }
+  idle?: { enteredAt: string; launchedIn?: IdleLevel; launchedAt?: string; analysis?: TicketIdleAnalysis; repro?: TicketIdleRepro }
   /**
    * What kind of work it is, decided at acceptance (`core/kind.ts`): every ticket created since kinds exist has one; read
    * it through `ticketKind`, which derives it for older tickets. A label for counting and filtering, never an authority.

@@ -39,7 +39,11 @@ export function ticketCard(ticket: Ticket) {
     ...(ticket.priority ? { priority: { level: ticket.priority.level, source: ticket.priority.source, ...ticket.priority.by ? { by: ticket.priority.by } : {}, ...ticket.priority.via ? { via: ticket.priority.via } : {},
       ...ticket.priority.note ? { note: ticket.priority.note } : {} } } : {}),
     ...(ticket.priorityAsk?.state === 'pending' ? { priority_ask: { deadline: ticket.priorityAsk.deadline } } : {}),
-    ...(ticket.idle ? { idle: { since: ticket.idle.enteredAt, ...ticket.idle.launchedIn ? { launched_in: ticket.idle.launchedIn } : {} } } : {}),
+    ...(ticket.idle ? { idle: { since: ticket.idle.enteredAt, ...ticket.idle.launchedIn ? { launched_in: ticket.idle.launchedIn } : {},
+      // The case the night queue replayed by itself, so a reader knows the evidence was refreshed overnight (docs/029).
+      ...ticket.idle.repro ? { repro: { case: ticket.idle.repro.caseId, state: ticket.idle.repro.state, night: ticket.idle.repro.night,
+        at: ticket.idle.repro.startedAt, ...ticket.idle.repro.exitCode !== undefined ? { exit_code: ticket.idle.repro.exitCode } : {},
+        ...ticket.idle.repro.summary ? { summary: preview(ticket.idle.repro.summary).slice(0, 100) } : {} } } : {} } } : {}),
     // The idle analysis and its verdict, so a reader knows what the machine found before a person spent attention on it.
     ...(analysis ? { analysis } : {}),
     ...(pullOf(ticket) ? { pr_number: pullOf(ticket) } : {}), ...(ended ? { ended } : {}), ...(gate ? { plan: gate } : {}),
