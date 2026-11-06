@@ -15,6 +15,7 @@ import { reportRelay, threadFollowedNotice } from '../notices.ts'
 import type { Sessions } from '../sessions.ts'
 import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
 import { EDITOR_JOB_KINDS, EDITOR_PURPOSES, MAX_LEASE_MS, ordered } from '../editor-schedule.ts'
+import type { EditorCapture } from '../editor-capture.ts'
 import type { EditorScheduler } from '../editor-scheduler.ts'
 import type { EditorGatekeeper } from '../editor-gatekeeper.ts'
 
@@ -37,6 +38,8 @@ export interface ExecutorToolsHost {
   readonly editor?: EditorScheduler
   /** The shared editor's gatekeeper, which owns the editor processes a lease started; absent on a host built without it. */
   readonly gatekeeper?: Pick<EditorGatekeeper, 'close'>
+  /** Captures one window from the editor's own rendering for the ticket's evidence (docs/027); absent without the capture module. */
+  readonly capture?: (request: { ticketId: string; window?: string; signal: AbortSignal }) => Promise<EditorCapture>
   /** The directory a ticket's worker runs in, which a host-run job builds or tests. */
   workspaceOf(ticket: Ticket): string
 }
@@ -386,16 +389,19 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
     }),
     tool({
       name: 'orchestrator_editor',
-      description: 'Hold to build, restart, test or open the shared UE editor; release after; yield to people. '
+      description: 'Hold to build, restart, test, open or capture the shared UE editor; release after; yield to people. '
         + 'Acquire it before a shell opens, builds, restarts or tests the editor: the host stops an editor started without it, '
-        + 'and a stop aimed at an editor you did not start is reported. close stops what your lease started and gives it back.',
+        + 'and a stop aimed at an editor you did not start is reported. close stops what your lease started and gives it back. '
+        + 'capture stores a PNG of one editor window from the editor\'s own rendering in the ticket\'s evidence directory; it works while the desktop is locked, so cite the path in 预期与证据.',
       schema: z.object({
-        op: z.enum(['acquire', 'heartbeat', 'release', 'close', 'run', 'status']),
+        op: z.enum(['acquire', 'heartbeat', 'release', 'close', 'run', 'status', 'capture']),
         purpose: z.enum(EDITOR_PURPOSES).optional(),
         note: z.string().optional(),
         min: z.number().optional(),
         wait: z.number().optional(),
         filter: z.string().optional(),
+        window: z.string().trim().min(1).max(200).optional()
+          .describe('capture: title substring of the window; omit for the active window.'),
       }).strict(),
       execute: async (args, signal) => {
         const scheduler = host.editor
@@ -438,6 +444,15 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
             const value = ended ?? scheduler.resolved(job.id) ?? job
             return { job: value, merged: merged || value.id !== job.id, ...ended ? { log_tail: scheduler.logTail(value.id, 3000) } : {},
               ...ended ? {} : { note: 'The job is not done yet; its end reaches you as a message.' } }
+          }
+          case 'capture': {
+            // The capture is evidence of the editor this Ticket holds; another Ticket's or a person's editor is off limits.
+            const mine = scheduler.standing(ticketId)
+            if (mine.state !== 'holding') {
+              throw new Error('capture needs this ticket to hold the editor lease: call orchestrator_editor op=acquire with purpose=use first')
+            }
+            if (!host.capture) throw new Error('this host cannot capture the editor')
+            return host.capture({ ticketId, ...(args.window === undefined ? {} : { window: args.window }), signal })
           }
           case 'status': return shown()
         }
