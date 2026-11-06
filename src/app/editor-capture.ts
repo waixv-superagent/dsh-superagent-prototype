@@ -67,8 +67,9 @@ export async function captureEditor(options: CaptureEditorOptions): Promise<Edit
     const windows = await listWindows(session, timeoutMs, options.signal)
     window = pickWindow(windows, options.window)
     const selected = textOf(await callSlate(session, 'Windows', { action: 'select', index: window.index }, timeoutMs, options.signal), 'Windows select')
-    if (selected.trim() !== 'OK') {
-      throw new EditorCaptureError(`the editor refused to select window ${window.index} (${JSON.stringify(window.title)}): ${selected.trim() || 'no detail'}`)
+    const acknowledgement = String(jsonValue(selected) ?? '').trim()
+    if (acknowledgement !== 'OK') {
+      throw new EditorCaptureError(`the editor refused to select window ${window.index} (${JSON.stringify(window.title)}): ${acknowledgement || 'no detail'}`)
     }
   }
   const png = imageOf(await callSlate(session, 'Screenshot', { ref: '' }, timeoutMs, options.signal), 'Screenshot')
@@ -94,8 +95,8 @@ async function openSession(url: string, timeoutMs: number, signal?: AbortSignal)
 
 async function listWindows(session: Session, timeoutMs: number, signal?: AbortSignal): Promise<EditorWindow[]> {
   const text = textOf(await callSlate(session, 'Windows', { action: 'list' }, timeoutMs, signal), 'Windows list')
-  const parsed = parseJson(text)
-  if (!Array.isArray(parsed)) throw new EditorCaptureError(`the editor's window list is not a JSON array: ${text.slice(0, 200)}`)
+  const parsed = jsonValue(text)
+  if (!Array.isArray(parsed)) throw new EditorCaptureError(`the editor's window list is not a JSON array: ${String(JSON.stringify(parsed)).slice(0, 200)}`)
   const windows: EditorWindow[] = []
   for (const item of parsed) {
     if (isRecord(item) && typeof item.index === 'number' && typeof item.title === 'string') {
@@ -125,7 +126,7 @@ function imageOf(result: unknown, tool: string): Buffer {
       return Buffer.from(item.data, 'base64')
     }
     if (item.type === 'text' && typeof item.text === 'string') {
-      const parsed = parseJson(item.text)
+      const parsed = jsonValue(item.text)
       const nested = isRecord(parsed) && isRecord(parsed.image) ? parsed.image : parsed
       if (isRecord(nested) && typeof nested.data === 'string'
         && (nested.mimeType === undefined || nested.mimeType === 'image/png')) {
@@ -289,6 +290,23 @@ function parseJson(text: string): unknown {
   } catch {
     return undefined
   }
+}
+
+/**
+ * The value a toolset tool returned: the engine wraps a plain tool result as `{"returnValue": …}`, and a text value
+ * such as the window list is JSON encoded inside that string, so unwrap both layers. Plain text (the select
+ * acknowledgement) comes back unchanged.
+ */
+function jsonValue(text: string): unknown {
+  const parsed = parseJson(text)
+  if (parsed === undefined) return text.trim()
+  let value: unknown = parsed
+  if (isRecord(value) && 'returnValue' in value) value = value.returnValue
+  if (typeof value === 'string') {
+    const nested = parseJson(value)
+    if (nested !== undefined) return nested
+  }
+  return value
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

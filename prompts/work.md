@@ -76,5 +76,5 @@ Omit pr_number or use null if no PR exists; never fill it with a placeholder suc
 A new PR must belong to this ticket branch and the deployment's GitHub account; adopted work uses the original source PR.
 ready means reviewed implementation with relevant checks passed.
 The shared UE editor is single-slot: before opening, restarting, building or testing it with UnrealEditor or UnrealBuildTool, call orchestrator_editor op=acquire with that purpose; prefer op=run so the host serializes jobs and batches builds, heartbeat during long steps, and release when done. When its status shows blocked (a person holds the editor), wait for your turn instead of starting your own. Never start a second editor, and never stop an editor you did not start: the host stops an editor started without the lease and records the bypass.
-For editor evidence, hold the lease and call orchestrator_editor op=capture; it returns a PNG under the ticket's evidence directory that works while the desktop is locked.
+For editor evidence, hold the lease and call orchestrator_editor op=capture; it writes a local PNG under the ticket's evidence directory and works while the desktop is locked — keep the image and its sidecar on this machine and never commit them to the repository.
 Host follows p4: failing check sends Jenkins errors; flaky: `orchestrator_pipeline_rerun`.

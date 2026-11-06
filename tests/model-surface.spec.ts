@@ -62,8 +62,8 @@ interface Skill { name: string; description: string; content: string }
 // A person's own message that names a route authorizes it without a card; the worker prompt line says so (docs/003).
 // The worker surface measured 55,704, so the budget grows to 55,800.
 // The editor capture (docs/027) adds one worker op with its `window` option, the capture sentence in the editor tool's
-// description, and one prompt line that keeps the image host-local; the combined surface is measured below.
-const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 56_100 }
+// description, and one prompt line that keeps the image host-local; the combined worker surface measures 56,304, so the budget grows to 56,400.
+const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 56_400 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

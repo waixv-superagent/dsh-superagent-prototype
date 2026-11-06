@@ -8,7 +8,8 @@
 
 worker 在持有共享编辑器租约时调用 `orchestrator_editor op=capture`，宿主通过引擎自带的
 `ModelContextProtocol` 服务让编辑器把自己的 Slate 窗口渲染成 PNG，写到工单的证据目录并返回路径与
-尺寸/sha256；验证包引用这个路径，PR 的 before/after 用这些图。整条路不经过桌面，所以锁屏时也能截。
+尺寸/sha256；验证包引用这个本机路径（由人打开），截图不复制进仓库、不贴到 PR/CL。整条路不经过桌面，
+所以锁屏时也能截。
 
 ## 1. 为什么不是桌面截图
 
@@ -44,11 +45,14 @@ worker ──orchestrator_editor op=capture window="SunGame"──▶ 宿主
 - 默认目录 `<stateDir>/evidence/<ticketId>/`；同名冲突加数字后缀，不覆盖上一张。PNG 落盘前校验文件头
   （magic + IHDR）并拒绝零尺寸；不是合法 PNG 就只报错、不写文件。
 - 同名 JSON sidecar 记录 ticket、采集时间、目标窗口、尺寸、字节数、sha256、引擎端点与 toolset；sha256 让
-  同一张图在验证包、PR 与工单记录之间可对得上。
+  同一张图在验证包、PR 说明与工单记录之间可对得上。
+- **证据只留本机**：PNG 与 sidecar 都在 `<stateDir>/evidence/<ticketId>/`，绝不提交进仓库；编辑器画面是内部
+  项目内容，复制进仓库就是泄漏。`tests/evidence.spec.ts` 会拒绝仓库里出现的编辑器截图或 sidecar，让这种
+  提交在测试阶段失败。
 - worker 报告里的用法：
-  - 「预期与证据」写 `截图：<path>（<width>x<height>，sha256 前 12 位，窗口 <title>）`；
-  - UI 改动按交付要求把 before/after 图放进 PR（可以把文件复制到仓库 `evidence/<ticket>/` 后引用，或附在
-    Swarm review 评论/飞书里，取决于交付通道）；
+  - 「预期与证据」写 `截图：<path>（<width>x<height>，sha256 前 12 位，窗口 <title>）`，路径是本机路径；
+  - UI 改动的 before/after 也留在本机证据目录，验证包写路径与 sha256；**不要**把运行中项目的编辑器画面
+    复制进仓库 `evidence/`、贴到 PR 或 CL（交付要求的图片证据对这些内部画面以本机文件 + 人打开为准）；
   - 证据是宿主本机文件，工单页只显示文本路径，不内嵌图片；要变成面板内嵌图是后续 UI 工作。
 
 ## 4. 配置与前置
@@ -68,7 +72,8 @@ worker ──orchestrator_editor op=capture window="SunGame"──▶ 宿主
 - 只读：不点按钮、不改资产/关卡/CVar、不启停 PIE。`Windows(action=select)` 只会前置窗口。
 - 不做像素 diff、不做视觉判定；截图是采证，是否「看起来对」仍由人判断（docs/022/025）。
 - 编辑器最小化时 Slate 的可见窗口列表为空；先把编辑器窗口恢复再截，本工具不会替你恢复窗口。
-- 图片落宿主本机 `stateDir`，不自动进仓库、不自动发飞书；要进 PR/Swarm/飞书由 worker 在交付时复制/附加。
+- 图片落宿主本机 `stateDir`，绝不进仓库、PR 或 CL；验证包引用本机路径，由人打开；仓库测试会拒绝编辑器
+  截图与 sidecar。
 
 ## 6. 失败处置
 
@@ -84,14 +89,16 @@ worker ──orchestrator_editor op=capture window="SunGame"──▶ 宿主
 
 ```powershell
 pnpm typecheck
-pnpm test tests/editor-capture.spec.ts
+pnpm test tests/editor-capture.spec.ts tests/evidence.spec.ts
 pnpm build
 ```
 
 单测用 fake 引擎 MCP 覆盖：initialize 的 session header、窗口列表/选择、图片解码、PNG 校验、同名文件、
-不可达端点、缺少 `call_tool`、缺失/歧义窗口。真实编辑器的一次采集（开编辑器 → 持有租约 → `op=capture` →
-`read_image` 核对）记录在 PR 的验证包里；锁屏本身无法在共享机器上复现，验证以「截图来自编辑器渲染路径」
-这一机制为依据，并如实写明未在锁屏下实测。
+不可达端点、缺少 `call_tool`、缺失/歧义窗口。`tests/evidence.spec.ts` 扫描仓库，出现编辑器截图或 sidecar
+即失败（证据只留本机）。真实编辑器的一次采集（开编辑器 → 持有租约 → `op=capture` → `read_image` 核对）
+只留在本机：本单 2026-11-06 18:00 的采集为 2560×1380、sha256 `d30ec9e7f2ccd55130ef6886423b0e4b03d99a65981e70c45ad7fc5bca03733b`，
+文件在 `<stateDir>/evidence/editor-screenshot-evidence-852e8e1edd0e/`，验证包引用这个本机路径；锁屏本身
+无法在共享机器上复现，验证以「截图来自编辑器渲染路径」这一机制为依据，并如实写明未在锁屏下实测。
 
 ## 8. 文件
 
@@ -100,5 +107,6 @@ pnpm build
 | `src/app/editor-capture.ts` | 引擎 MCP 客户端、窗口选择、PNG 校验与落盘、sidecar |
 | `src/app/tools/executor.ts` | `orchestrator_editor` 新增 `op=capture` 与 `window`，要求持有租约 |
 | `src/app/runtime.ts` | 把证据目录（`<stateDir>/evidence/<ticketId>`）接进 capture |
-| `prompts/work.md` | worker 的验证流程：编辑器证据用 capture，不用桌面截图 |
+| `prompts/work.md` | worker 的验证流程：编辑器证据用 capture，图像只留本机、不进仓库 |
 | `tests/editor-capture.spec.ts` | fake 引擎 MCP 的端到端单测 |
+| `tests/evidence.spec.ts` | 仓库屏障：出现编辑器截图或 sidecar 即失败（证据只留本机） |

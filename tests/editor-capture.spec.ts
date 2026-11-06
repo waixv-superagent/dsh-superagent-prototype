@@ -17,8 +17,10 @@ interface FakeEditor { url: string; calls: Call[]; close(): Promise<void> }
 type Behavior = (call: Call) => unknown | undefined
 
 const tools = (call: Call) => call.message.params.arguments as { tool_name: string; arguments: Record<string, unknown> }
-const text = (value: string) => ({ content: [{ type: 'text', text: value }] })
+/** The engine wraps a plain tool result in `{"returnValue": …}`; a text result keeps its JSON inside that string. */
+const text = (value: string) => ({ content: [{ type: 'text', text: JSON.stringify({ returnValue: value }) }] })
 const image = (data: Buffer = PNG, mimeType = 'image/png') => ({ content: [{ type: 'image', mimeType, data: data.toString('base64') }] })
+const textImage = (data: Buffer = PNG) => ({ content: [{ type: 'text', text: JSON.stringify({ returnValue: { mimeType: 'image/png', data: data.toString('base64') } }) }] })
 const windows = (...titles: string[]) => text(JSON.stringify(titles.map((title, index) => ({ index, title }))))
 
 async function fakeEditor(behavior: Behavior): Promise<FakeEditor> {
@@ -170,6 +172,15 @@ describe('captureEditor', () => {
     editors.push(editor)
     await expect(captureEditor({ ticketId: 'ticket-1', outDir: outDir(), url: editor.url }))
       .rejects.toThrow(/the editor reported Screenshot failed: Screenshot failed: no active window/)
+  })
+
+  it('decodes a screenshot the editor returned as wrapped JSON text', async () => {
+    const editor = await fakeEditor(call => tools(call).tool_name === 'Screenshot' ? textImage() : undefined)
+    editors.push(editor)
+    const capture = await captureEditor({ ticketId: 'ticket-1', outDir: outDir(), url: editor.url })
+    expect(capture.width).toBe(1)
+    expect(readFileSync(capture.path).equals(PNG)).toBe(true)
+    expect(capture.window).toBeUndefined()
   })
 
   it('never overwrites an earlier capture with the same timestamp', async () => {

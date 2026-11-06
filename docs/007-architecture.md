@@ -531,6 +531,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/editor-readiness.spec.ts` | The acceptance inference: no delivery time, no build after the delivery, a build of another workspace, a failed build, the newest successful build, path case and separators, the editor started after or before the build ended, no editor, several editors, and an older probe row |
 | `tests/editor.spec.ts` | Editor occupancy: `deriveEditor` and `parseEditorProcesses` over a process table, and the `Editor` cache's interval, holder and unreadable-probe states |
 | `tests/editor-capture.spec.ts` | The engine capture: the MCP session header, window selection by title, the PNG and its sidecar, and the failures (unreachable endpoint, no `call_tool`, invalid PNG, missing or ambiguous window) |
+| `tests/evidence.spec.ts` | The repository guard for editor captures (docs/027): a timestamped capture PNG or a JSON sidecar naming the Slate inspector fails the suite, so an internal project frame stays host-local |
 | `tests/p4.spec.ts` | The p4 delivery backend: its settings defaults, the workspace it prepares, and the execution variables it adds |
 | `tests/delivery-targets.spec.ts` | Delivery targets: the configured repository and depot, their spellings, the Source's default, and the target a Ticket records |
 | `tests/workspace.spec.ts` | Task-center placement: lease overlap in both directions, slots, empty leases excluding peers, and the conflicts a queued Ticket names |
