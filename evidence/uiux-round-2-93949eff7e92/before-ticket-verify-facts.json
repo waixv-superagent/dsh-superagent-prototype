@@ -1,0 +1,27 @@
+{
+  "mode": "before",
+  "facts": {
+    "headings": [
+      "待你本地验证等了 10 分钟",
+      "改动文件",
+      "worker 自验记录",
+      "验什么、怎么验"
+    ],
+    "judge": null,
+    "structured": false,
+    "checks": 1,
+    "repro": null,
+    "reproCase": [],
+    "reproState": null,
+    "links": [
+      "review 590002",
+      "打开 review"
+    ],
+    "buttons": [
+      "本地验证通过",
+      "有问题，退回",
+      "打开 Session"
+    ],
+    "height": 546
+  }
+}

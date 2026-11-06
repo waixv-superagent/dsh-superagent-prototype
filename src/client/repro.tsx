@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The local reproduction cases card on the editor page (docs/024): what a local directory lists, the run a person clicks,
  * its live output and the report it wrote. A case runs against the editor that is already open, so clicking it again
  * re-runs the same case without restarting anything.
@@ -17,7 +17,7 @@ type RunRow = Page['runs'][number]
 type CaseProblem = NonNullable<CaseRow['problem']>
 type RootProblem = NonNullable<Page['problem']>
 
-const STATE_TONE: Record<RunRow['state'], TagTone> = {
+export const STATE_TONE: Record<RunRow['state'], TagTone> = {
   running: 'info', succeeded: 'success', failed: 'danger', cancelled: 'outline', interrupted: 'warning',
 }
 const stateLabel = (t: T, state: RunRow['state']) => t(`reproState.${state}`)
@@ -33,7 +33,7 @@ function rootProblemText(t: T, problem: RootProblem): string {
   return problem.detail ? `${text} · ${problem.detail}` : text
 }
 /** Where one report opens: inside the run's case folder, so its own relative images and styles load beside it. */
-function reportHref(run: RunRow): string {
+export function reportHref(run: RunRow): string {
   return `/orchestrator/repro/file/${encodeURIComponent(run.id)}/${(run.report ?? '')
     .split('/').map(encodeURIComponent).join('/')}`
 }
@@ -148,3 +148,4 @@ export function ReproCard() {
         onRun={id => { void run.run(id) }} onStop={id => { void stop.run(id) }} />)}</ul>}
   </section>
 }
+

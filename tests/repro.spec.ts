@@ -1,4 +1,4 @@
-/** Local reproduction cases (docs/024): reading a case folder, running one, and the report it leaves. */
+﻿/** Local reproduction cases (docs/024): reading a case folder, running one, and the report it leaves. */
 import { EventEmitter } from 'node:events'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { inside, readReproCases, reproRoot, runSummary } from '../src/app/repro.ts'
 import { ReproRunner, type ReproRunnerHost } from '../src/app/repro-runner.ts'
 import { reproPage } from '../src/app/views/repro.ts'
+import { ticketRepro } from '../src/app/views/ticket-repro.ts'
 import { KV } from '../src/kv.ts'
 
 const T0 = Date.parse('2026-11-05T01:00:00.000Z')
@@ -216,3 +217,23 @@ describe('the page view', () => {
     expect(view.runs[0]).not.toHaveProperty('log')
   })
 })
+
+it('links a Ticket to the local case its verification package names, by folder or by the Ticket id', () => {
+  const make = (id: string) => ({ id, name: id, description: '', directory: 'C:/state/repro-tests/' + id, command: 'py run.py', timeoutMs: 600_000 })
+  const cases = [make('20261105-183235-c75bbc4c_ZZAttack05'), make('unrelated-case')]
+  const ticket = (id: string, verification: string) => ({ id, execution: { name: 'demo', directory: 'C:/ticket', assignment: '', verification } })
+  // The package writes the workspace folder it left the case in; docs/024 makes the folder name the case id.
+  const byFolder = ticketRepro({ root: 'E:/sun_mainline/Saved/ReproTests', cases, runs: [], active: null, blocked: null },
+    ticket('c75bbc4c0000000000000000000000aa',
+      '版本与前置：复现用例存于 E:\\\\sun_mainline\\\\Saved\\\\ReproTests\\\\20261105-183235-c75bbc4c_ZZAttack05，未入库。'))
+  expect(byFolder.cases.map(item => item.id)).toEqual(['20261105-183235-c75bbc4c_ZZAttack05'])
+  // A package that names no folder still links by the Ticket id carried in the case folder name.
+  const byId = ticketRepro({ root: 'C:/state/repro-tests', cases: [...cases, make('followup-c75bbc4c')], runs: [], active: null, blocked: null },
+    ticket('c75bbc4c0000000000000000000000aa', '复现步骤：按 worker 的说明跑一遍就行了。'))
+  expect(byId.cases.map(item => item.id)).toEqual(['20261105-183235-c75bbc4c_ZZAttack05', 'followup-c75bbc4c'])
+  // A Ticket that names nothing gets an empty list, so the page can say there is no runnable case.
+  const none = ticketRepro({ root: 'C:/state/repro-tests', cases, runs: [], active: null, blocked: null },
+    ticket('00000000000000000000000000000000', '复现步骤：这是一段没有用例目录的说明。'))
+  expect(none.cases).toEqual([])
+})
+

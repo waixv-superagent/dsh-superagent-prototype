@@ -7,9 +7,11 @@ import { decisionMark, reportDot, ticketMark } from './marks.ts'
 import { PlanDiffView } from './diff.tsx'
 import { pipelineTrack, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackLabel, pipelineTrackState, type PipelineView } from './pipeline.ts'
 import { usePanel } from './provider.tsx'
+import { STATE_TONE, reportHref } from './repro.tsx'
 import { settingsRoute } from './route.ts'
 import { Earlier, ThreadLine, automatedRuns } from './rows.tsx'
-import { actorName, localized, readableMarkers, reasonLabel, valueLabel, when, type T } from './text.ts'
+import { actorName, errorText, localized, readableMarkers, reasonLabel, valueLabel, when, type T } from './text.ts'
+import { verifyLines } from '../core/verification.ts'
 import { ActionLink, ConfirmButton, ExternalLink, Hint, KeyValues, LabelValue, LoadState, MarkdownLite, PageHead, Section, SessionButton,
   StageMark, VerificationChecks, When } from './widgets.tsx'
 
@@ -315,6 +317,85 @@ function firstLine(text: string): string {
 }
 
 /**
+ * The reproduction entry of the acceptance page (docs/024): the worker's steps, the local case its verification package
+ * names, and the person's own run button. A case runs against the editor that is already open, so the page never starts
+ * one; the host's repro runner owns the run, the output and the report.
+ */
+function ReproInline({ ticket, steps, onChanged }: { ticket: TicketPageView; steps?: string; onChanged: () => Promise<void> }) {
+  const { t, call, notify, navigate } = usePanel()
+  const [busy, setBusy] = useState<string>()
+  const [failure, setFailure] = useState('')
+  const repro = ticket.repro
+  const run = async (caseId: string) => {
+    setBusy(caseId); setFailure('')
+    try {
+      await call('POST repro/run', { body: { case: caseId } })
+      notify(t('verifyReproStarted'))
+      await onChanged()
+    } catch (reason) { setFailure(errorText(reason)) } finally { setBusy(undefined) }
+  }
+  const stop = async (runId: string) => {
+    setBusy(runId); setFailure('')
+    try { await call('POST repro/stop', { body: { run: runId } }); await onChanged() }
+    catch (reason) { setFailure(errorText(reason)) } finally { setBusy(undefined) }
+  }
+  const openEditor = () => navigate({ page: 'editor', query: { view: 'editor' } })
+  return <div className="dt-verify-repro">
+    <div className="dt-verify-repro-head">
+      <h3>{t('verifyStepsTitle')}</h3>
+      <span className="dt-verify-gate-tag">{t('verifyWorkerBadge')}</span>
+    </div>
+    {steps ? <p className="dt-verify-gate-prose">{steps}</p> : <Hint>{t('verifyNoSteps')}</Hint>}
+    {repro && <>
+      <div className="dt-verify-repro-head">
+        <h3>{t('verifyReproTitle')}</h3>
+        <span className="dt-verify-repro-note">{t('verifyReproMatched')}</span>
+      </div>
+      {repro.cases.length === 0
+        ? <div className="dt-verify-repro-empty">
+          <p>{t('verifyReproNone')}</p>
+          <p className="dt-verify-repro-root"><code>{repro.root}</code></p>
+          <div className="dt-verify-repro-actions">
+            <button type="button" className="dt-board-more" onClick={openEditor}>{t('verifyReproOpen')} →</button>
+          </div>
+        </div>
+        : repro.cases.map(item => {
+          const rows = repro.runs.filter(row => row.caseId === item.id)
+          const latest = rows[0]
+          const live = repro.active?.caseId === item.id
+          const disabled = busy !== undefined || repro.blocked !== null || Boolean(item.problem)
+          return <div key={item.id} className="dt-verify-repro-case" data-state={latest?.state ?? 'idle'}>
+            <div className="dt-verify-repro-case-head">
+              <span className="dt-verify-repro-name" title={item.command}>{item.name}</span>
+              {latest ? <Tag tone={STATE_TONE[latest.state]}>{t(`reproState.${latest.state}`)}</Tag>
+                : <Tag tone="outline">{t('reproNeverRun')}</Tag>}
+            </div>
+            {item.description && <p className="dt-verify-repro-desc">{item.description}</p>}
+            {item.command && <p className="dt-verify-repro-command"><code>{item.command}</code></p>}
+            {latest && <p className="dt-verify-repro-meta">
+              <When at={latest.endedAt ?? latest.startedAt} />
+              {latest.exitCode !== undefined && latest.exitCode !== null && <span> · {t('verifyReproExit', { code: String(latest.exitCode) })}</span>}
+              {latest.summary && <span className="dt-verify-repro-summary" title={latest.summary}> · {latest.summary}</span>}
+            </p>}
+            {live && <pre className="dt-verify-repro-log">{(repro.active?.tail ?? '').split(/\r?\n/).slice(-12).join('\n')
+              || t('reproNoOutput')}</pre>}
+            {item.problem && <p className="dt-verify-gate-warning">{t(`reproProblem.${item.problem.code}`)}</p>}
+            <div className="dt-verify-repro-actions">
+              {live
+                ? <Button variant="outline" size="sm" disabled={busy !== undefined} onClick={() => { void stop(repro.active!.runId) }}>{t('verifyReproStop')}</Button>
+                : <Button variant="primary" size="sm" disabled={disabled} onClick={() => { void run(item.id) }}>{t('verifyReproRun')}</Button>}
+              {latest?.report && <ActionLink href={reportHref(latest)} icon="review">{t('verifyReproReport')}</ActionLink>}
+              <button type="button" className="dt-board-more" onClick={openEditor}>{t('verifyReproOpen')} →</button>
+            </div>
+          </div>
+        })}
+      {repro.blocked && <p className="dt-verify-gate-warning">{t('verifyReproBlocked')}</p>}
+      {failure && <p className="dt-error" role="alert">{failure}</p>}
+    </>}
+  </div>
+}
+
+/**
  * The local verification gate: delivered work waits here until a person runs it on their machine. Passing records the
  * check and, while the Ticket is open, ends it as completed by a person; returning it sends the note back as a new Input.
  * The worker's own verification text stays visible as evidence, never as acceptance. A historical delivery is shown as a
@@ -341,6 +422,14 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
   // the lease; then the card must say so instead of pretending that a CL number is something to verify.
   const hasBasis = scope.length > 0 || Boolean(review) || Boolean(proof)
   const brief = firstLine(ticket.summary)
+  const blocks = proof ? verifyLines(proof) : []
+  const block = (label: string) => blocks.find(item => item.label === label)?.text ?? ''
+  // A four-block package is the shape the worker instructions ask for; anything shorter keeps the old line list.
+  const structured = blocks.length >= 2
+  const judge = block('待你判断')
+  const prereq = block('版本与前置')
+  const steps = block('复现步骤')
+  const evidence = block('预期与证据')
   const rework = async () => {
     setBusy(true); setError('')
     try {
@@ -351,7 +440,8 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally { setBusy(false) }
   }
-  return <section className="dt-verify-gate" data-state={pending ? 'pending' : 'backlog'} aria-labelledby="dt-verify-gate-title">
+  return <section className="dt-verify-gate" data-state={pending ? 'pending' : 'backlog'} data-package={structured || undefined}
+    aria-labelledby="dt-verify-gate-title">
     <header className="dt-verify-gate-head">
       <span className="dt-verify-gate-icon" aria-hidden="true"><Icon name="review" size={16} /></span>
       <div className="dt-verify-gate-titles">
@@ -361,6 +451,10 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
       </div>
       <span className="dt-verify-gate-state">{backlog ? t('verifyHistorical') : t('verifyWorkerBadge')}</span>
     </header>
+    {structured && judge && <div className="dt-verify-gate-judge">
+      <span className="dt-verify-gate-tag">{t('verifyJudgeTitle')}</span>
+      <p className="dt-verify-gate-judge-text">{judge}</p>
+    </div>}
     <div className="dt-verify-gate-grid">
       <div className="dt-verify-gate-main">
         <dl className="dt-verify-gate-facts">
@@ -376,6 +470,7 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
           <span>{t('verifyLastReport')}</span>
           <p>{brief}</p>
         </div>}
+        {structured && <ReproInline ticket={ticket} steps={steps || undefined} onChanged={onChanged} />}
         <div className="dt-verify-gate-scope">
           <h3>{t('verifyFilesTitle')}</h3>
           {scope.length ? <ul className="dt-verify-file-list">
@@ -383,18 +478,32 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
             {scope.length > 6 && <li className="dt-hint">+{scope.length - 6}</li>}
           </ul> : <p className="dt-verify-gate-warning">{t('verifyNoFilesRecorded')}</p>}
         </div>
-        <div className="dt-verify-gate-evidence">
-          <div className="dt-verify-gate-evidence-head"><h3>{t('verifyEvidenceTitle')}</h3>
-            {proof && <span className="dt-verify-gate-tag">{t('verifyWorkerBadge')}</span>}</div>
-          {proof ? <>
-            <p className="dt-verify-gate-disclaimer">{t('verifyEvidenceNote')}</p>
-            <VerificationChecks text={proof} />
-            <details className="dt-verify-original"><summary>{t('verifyOriginal')}</summary>
+        {structured
+          ? <>
+            {evidence && <div className="dt-verify-gate-evidence">
+              <div className="dt-verify-gate-evidence-head"><h3>{t('verifyEvidenceSection')}</h3>
+                <span className="dt-verify-gate-tag">{t('verifyWorkerBadge')}</span></div>
+              <p className="dt-verify-gate-prose">{evidence}</p>
+            </div>}
+            <details className="dt-verify-original"><summary>{t('verifyOriginalPackage')}</summary>
               <p className="dt-mono">{proof}</p></details>
-          </> : <Hint>{t('verifyNoEvidence')}</Hint>}
-        </div>
+          </>
+          : <div className="dt-verify-gate-evidence">
+            <div className="dt-verify-gate-evidence-head"><h3>{t('verifyEvidenceTitle')}</h3>
+              {proof && <span className="dt-verify-gate-tag">{t('verifyWorkerBadge')}</span>}</div>
+            {proof ? <>
+              <p className="dt-verify-gate-disclaimer">{t('verifyEvidenceNote')}</p>
+              <VerificationChecks text={proof} />
+              <details className="dt-verify-original"><summary>{t('verifyOriginal')}</summary>
+                <p className="dt-mono">{proof}</p></details>
+            </> : <Hint>{t('verifyNoEvidence')}</Hint>}
+          </div>}
       </div>
       <aside className="dt-verify-gate-side">
+        {structured && prereq && <div className="dt-verify-gate-prereq">
+          <h3>{t('verifyPrereqTitle')}</h3>
+          <p>{prereq}</p>
+        </div>}
         <h3>{t('verifyWhatToDoTitle')}</h3>
         <ol className="dt-verify-steps">
           <li>{scope.length ? t('verifyStepDiff') : t('verifyStepNoScope')}</li>

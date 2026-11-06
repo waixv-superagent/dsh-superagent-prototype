@@ -1,13 +1,15 @@
 /** Overview: the duty desk. One verdict, decision cards for Tickets waiting on a person, a running lane, and recently ended work. */
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { usePoll, type BillingView, type EditorRow, type Problem, type TicketRow, type TicketSearchView } from './api.ts'
+import type { PriorityLevel } from '../core/priority.ts'
+import { verifyLines } from '../core/verification.ts'
 import { Button, Icon, Input, Tag } from './controls.tsx'
 import { ticketMark } from './marks.ts'
 import { pipelineTrack, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackState } from './pipeline.ts'
 import { useAction, usePanel, usePanelData } from './provider.tsx'
 import { KindTag, ThreadChip } from './rows.tsx'
 import { setupPage, settingsRoute, type BoardFocus, type Route } from './route.ts'
-import { healthText, localized, reasonLabel, valueLabel, readableMarkers, type T } from './text.ts'
+import { errorText, healthText, localized, reasonLabel, valueLabel, readableMarkers, type T } from './text.ts'
 import { CheckSetupButton, ConfirmButton, LoadState, SetupMessage, VerificationChecks, When, clientHref, linkTarget } from './widgets.tsx'
 
 /** "22:30" in the viewer's own clock; the row says since when, not a relative age that needs mental arithmetic. */
@@ -288,41 +290,188 @@ function RunRow({ ticket, focus }: { ticket: TicketRow; focus?: BoardFocus }) {
 }
 
 /**
- * One ticket in the idle pool: P2 work waits for an idle window, P3 is parked, and a person may lift either into the
- * attention pool, which makes it mainline and starts its worker now. The row leads with the level and the request, so
- * the pool reads as work worth choosing rather than as a dump of everything that did not run yet.
+ * The levels a pooled Ticket may be dropped on, and what the drop means: `P0`/`P1` lift it into the attention pool and
+ * start its work now; `P2`/`P3` only change its level, because a drag must never be a hidden "run now" (docs/019).
  */
-function PoolRow({ ticket, onChanged }: { ticket: TicketRow; onChanged: () => Promise<void> }) {
+const startsNow = (level: PriorityLevel): level is 'P0' | 'P1' => level === 'P0' || level === 'P1'
+
+/** A waiting duration for a pool row, in the largest unit that still reads precisely. */
+function poolAge(t: T, at: string): string {
+  const minutes = minutesSince(at)
+  if (minutes < 60) return t('verifyMinutes', { minutes })
+  const hours = Math.round(minutes / 60)
+  return hours < 48 ? t('verifyWaitingHours', { hours }) : t('verifyWaitingDays', { days: Math.round(hours / 24) })
+}
+
+/**
+ * The idle pool as one quiet dock and a drawer it summons (docs/019): the board keeps its five lanes for what a person
+ * owes, while the discretionary P2/P3 work waits behind a count. Inside the drawer a row is one line — drag it onto the
+ * P0/P1 band to lift it into the attention pool and start it, or onto the P2/P3 sections to only change its level. The
+ * same four levels are reachable from a row's menu and the keyboard, so dragging is an enhancement, never the only path.
+ */
+function IdleDock({ pool, parked, onChanged }: { pool: TicketRow[]; parked: TicketRow[]; onChanged: () => Promise<void> }) {
   const { t, call, notify, navigate } = usePanel()
-  const [busy, setBusy] = useState(false)
-  const parked = ticket.priority.level === 'P3'
-  const promote = async () => {
-    setBusy(true)
+  const [open, setOpen] = useState(false)
+  const [showAll, setShowAll] = useState(false)
+  const [parkedOpen, setParkedOpen] = useState(false)
+  const [menu, setMenu] = useState<string>()
+  const [busy, setBusy] = useState<string>()
+  const [failure, setFailure] = useState('')
+  const [pressed, setPressed] = useState<string>()
+  const [drag, setDrag] = useState<TicketRow>()
+  const [ghost, setGhost] = useState<{ title: string; x: number; y: number }>()
+  const [over, setOver] = useState<PriorityLevel>()
+  const start = useRef<{ ticket: TicketRow; x: number; y: number }>()
+  const moved = useRef(false)
+  const apply = async (ticket: TicketRow, level: PriorityLevel) => {
+    setBusy(ticket.id); setFailure('')
     try {
-      await call('POST tickets/:id/promote', { id: ticket.id, body: { level: 'P1' } })
-      notify(t('poolPromoted'))
+      if (startsNow(level)) await call('POST tickets/:id/promote', { id: ticket.id, body: { level } })
+      else await call('POST tickets/:id/priority', { id: ticket.id, body: { level } })
+      notify(startsNow(level) ? t('poolPromoted') : t('poolParkedLevel', { level: t(`priorityWord.${level}`) }))
+      setMenu(undefined)
       await onChanged()
-    } finally { setBusy(false) }
+    } catch (reason) {
+      setFailure(t('poolLevelFailed', { reason: errorText(reason) }))
+    } finally { setBusy(undefined) }
   }
-  return <li className="dt-run dt-pool" data-state="pool" data-parked={parked || undefined}>
-    <span className="dt-run-dot" aria-hidden="true" />
-    <div className="dt-run-main">
-      <button type="button" className="dt-run-title" onClick={() => navigate(ticketRoute(ticket.id))}>{ticket.title}</button>
-      <p className="dt-run-meta">
-        <PriorityTag ticket={ticket} />
-        <KindTag kind={ticket.kind} source={ticket.kindSource} />
-        <span className="dt-run-stage">{parked ? t('poolParked') : t('poolWaits')}</span>
-        <span className="dt-run-time"><When at={ticket.createdAt} /></span>
-      </p>
-      {(ticket.summary || ticket.request) && <p className="dt-run-summary" title={ticket.summary || ticket.request}>
-        {ticket.summary || ticket.request}
-      </p>}
-      <div className="dt-pool-actions">
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => { void promote() }}>{t('poolPromote')}</Button>
-        <button type="button" className="dt-board-more" onClick={() => navigate(ticketRoute(ticket.id))}>{t('boardOpen')} →</button>
-      </div>
-    </div>
+  const applyRef = useRef(apply)
+  applyRef.current = apply
+  // Escape closes the drawer, the same way it cancels a drag; focus stays where the person was.
+  useEffect(() => {
+    if (!open) return
+    const close = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape' && !start.current) setOpen(false)
+    }
+    window.addEventListener('keydown', close)
+    return () => window.removeEventListener('keydown', close)
+  }, [open])
+  // The listeners live on the window, not the row: a pointer that leaves the drawer must still end the drag, and a
+  // cancelled drag (Escape) leaves the level untouched. `elementFromPoint` names the drop zone under the pointer.
+  useEffect(() => {
+    if (!pressed) return
+    // jsdom has no layout, so `elementFromPoint` is absent in the panel's tests; a drag there simply finds no zone.
+    const zone = (x: number, y: number): PriorityLevel | undefined => {
+      const hit = typeof document.elementFromPoint === 'function' ? document.elementFromPoint(x, y) as HTMLElement | null : null
+      return hit?.closest<HTMLElement>('[data-drop-level]')?.dataset.dropLevel as PriorityLevel | undefined
+    }
+    const move = (event: PointerEvent) => {
+      const started = start.current
+      if (!started) return
+      if (!moved.current && Math.hypot(event.clientX - started.x, event.clientY - started.y) < 4) return
+      moved.current = true
+      event.preventDefault()
+      setDrag(started.ticket)
+      setGhost({ title: started.ticket.title, x: event.clientX, y: event.clientY })
+      setOver(zone(event.clientX, event.clientY))
+    }
+    const up = (event: PointerEvent) => {
+      const started = start.current
+      const level = moved.current ? zone(event.clientX, event.clientY) : undefined
+      start.current = undefined; moved.current = false
+      setPressed(undefined); setDrag(undefined); setGhost(undefined); setOver(undefined)
+      if (started && level) void applyRef.current(started.ticket, level)
+    }
+    const cancel = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      start.current = undefined; moved.current = false
+      setPressed(undefined); setDrag(undefined); setGhost(undefined); setOver(undefined)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('keydown', cancel)
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('keydown', cancel) }
+  }, [pressed])
+  const count = pool.length + parked.length
+  if (!count) return null
+  const begin = (ticket: TicketRow) => (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    start.current = { ticket, x: event.clientX, y: event.clientY }
+    moved.current = false
+    setPressed(ticket.id)
+  }
+  const row = (ticket: TicketRow) => <li key={ticket.id} className="dt-idle-row" data-level={ticket.priority.level}
+    data-dragging={drag?.id === ticket.id || undefined} data-busy={busy === ticket.id || undefined}>
+    <button type="button" className="dt-idle-handle" title={t('poolDragHandle', { title: ticket.title })}
+      aria-label={t('poolDragHandle', { title: ticket.title })} onPointerDown={begin(ticket)}>
+      <Icon name="grip" size={12} />
+    </button>
+    <button type="button" className="dt-idle-title" onClick={() => navigate(ticketRoute(ticket.id))}>{ticket.title}</button>
+    <span className="dt-idle-facts">
+      <PriorityTag ticket={ticket} />
+      <KindTag kind={ticket.kind} source={ticket.kindSource} />
+      <span className="dt-idle-age">{poolAge(t, ticket.createdAt)}</span>
+    </span>
+    <button type="button" className="dt-idle-menu" aria-expanded={menu === ticket.id} aria-haspopup="menu"
+      aria-label={t('poolMenu')} title={t('poolMenu')} onClick={() => setMenu(menu === ticket.id ? undefined : ticket.id)}>
+      <Icon name="settings" size={13} />
+    </button>
+    {menu === ticket.id && <div className="dt-idle-pop" role="menu" aria-label={t('poolMenu')}>
+      {(['P0', 'P1', 'P2', 'P3'] as const).map(level => <button key={level} type="button" role="menuitem"
+        data-level={level} disabled={busy === ticket.id} onClick={() => { void apply(ticket, level) }}>
+        <span className="dt-idle-pop-level">{t(`priorityWord.${level}`)}</span>
+        <small>{startsNow(level) ? t('poolDropStart') : t('poolDropPark')}</small>
+        {ticket.priority.level === level && <span className="dt-idle-pop-current" aria-hidden="true"><Icon name="check" size={12} /></span>}
+      </button>)}
+    </div>}
   </li>
+  return <>
+    <div className="dt-idle-dock">
+      <button type="button" className="dt-idle-dock-button" aria-expanded={open} aria-controls="dt-idle-drawer"
+        onClick={() => setOpen(value => !value)}>
+        <Icon name="queue" size={14} />
+        <span className="dt-idle-dock-title">{t('boardPoolDock', { count })}</span>
+        <span className="dt-idle-dock-levels">{t('boardPoolDockLevels', { p2: pool.length, p3: parked.length })}</span>
+        <span className="dt-idle-dock-hint">{t('boardPoolDockHint')}</span>
+        <span className="dt-idle-dock-chevron" aria-hidden="true"><Icon name={open ? 'chevron-up' : 'chevron-down'} size={12} /></span>
+      </button>
+    </div>
+    {open && <aside id="dt-idle-drawer" className="dt-idle-drawer" role="complementary" aria-label={t('boardPoolTitle')}>
+      <header className="dt-idle-drawer-head">
+        <div>
+          <h3 className="dt-idle-drawer-title">{t('boardPoolTitle')}<span className="dt-board-col-count">{count}</span></h3>
+          <p className="dt-idle-drawer-sub">{t('boardPoolDrawerSub')}</p>
+        </div>
+        <button type="button" className="dt-idle-drawer-close" aria-label={t('poolDrawerClose')} title={t('poolDrawerClose')}
+          onClick={() => setOpen(false)}><Icon name="close" size={14} /></button>
+      </header>
+      {failure && <p className="dt-idle-failure" role="alert">{failure}</p>}
+      <div className="dt-idle-drawer-body">
+        {pool.length > 0 && <section className="dt-idle-group" data-drop-level="P2" data-over={over === 'P2' || undefined}>
+          <h4 className="dt-idle-group-title">{t('poolSection', { level: t('priorityWord.P2'), count: pool.length })}</h4>
+          <ul className="dt-idle-list">{pool.slice(0, showAll ? pool.length : 8).map(row)}</ul>
+          {pool.length > 8 && <button type="button" className="dt-idle-more" onClick={() => setShowAll(value => !value)}>
+            {showAll ? t('poolShowLess') : t('poolShowMore', { count: pool.length - 8 })}
+          </button>}
+        </section>}
+        {parked.length > 0 && <section className="dt-idle-group dt-idle-parked" data-drop-level="P3" data-over={over === 'P3' || undefined}
+          data-open={parkedOpen || undefined}>
+          <h4 className="dt-idle-group-title">
+            <button type="button" className="dt-idle-group-toggle" aria-expanded={parkedOpen}
+              onClick={() => setParkedOpen(value => !value)}>
+              <span aria-hidden="true"><Icon name={parkedOpen ? 'chevron-up' : 'chevron-down'} size={11} /></span>
+              {t('poolSection', { level: t('priorityWord.P3'), count: parked.length })}
+            </button>
+          </h4>
+          {parkedOpen && <ul className="dt-idle-list">{parked.map(row)}</ul>}
+        </section>}
+      </div>
+      <footer className="dt-idle-drawer-foot">{t('poolMenuHint')}</footer>
+    </aside>}
+    {drag && <>
+      <div className="dt-idle-ghost" aria-hidden="true" style={{ left: ghost?.x ?? 0, top: ghost?.y ?? 0 }}>{ghost?.title ?? drag.title}</div>
+      <div className="dt-dropband" role="group" aria-label={t('poolDropHint')}>
+        <span className="dt-dropband-label">{t('poolDropHint')}</span>
+        {(['P0', 'P1'] as const).map(level => <div key={level} className="dt-dropzone" data-drop-level={level}
+          data-over={over === level || undefined} data-level={level}>
+          <span className="dt-dropzone-code">{level}</span>
+          <span className="dt-dropzone-text">{t(level === 'P0' ? 'poolDropP0' : 'poolDropP1')}<small>{t('poolDropStart')}</small></span>
+        </div>)}
+        <span className="dt-dropband-park">{t('poolDropPark')}</span>
+      </div>
+    </>}
+  </>
 }
 
 /** How long delivered work has waited for a person, in the largest unit that still reads precisely. */
@@ -346,6 +495,9 @@ function VerifyCard({ ticket, onChanged, focused }: { ticket: TicketRow; onChang
   const open = () => navigate(ticketRoute(ticket.id))
   const delivery = ticket.delivery
   const proof = delivery?.verification
+  // A structured package leads with the one point the person must judge; the worker's check lines are its evidence, not
+  // a confirmation, so the card never paints a prerequisite as "confirmed" (docs/012 §3.1).
+  const judge = proof ? verifyLines(proof).find(item => item.label === '待你判断')?.text : undefined
   const backlog = ticket.state === 'ended'
   const rework = async () => {
     setBusy(true); setError('')
@@ -371,7 +523,9 @@ function VerifyCard({ ticket, onChanged, focused }: { ticket: TicketRow; onChang
       {delivery?.review && <span className="dt-verify-review">{delivery.review}</span>}
       {delivery?.lease.length ? <span className="dt-verify-scope">{t('verifyFiles', { count: delivery.lease.length })}</span> : null}
     </div>}
-    {proof && <div className="dt-verify-proof"><VerificationChecks text={proof} collapsible /></div>}
+    {proof && <div className="dt-verify-proof">{judge
+      ? <p className="dt-verify-judge-line"><span>{t('verifyJudgeTitle')}</span>{judge}</p>
+      : <VerificationChecks text={proof} collapsible />}</div>}
     <footer className="dt-verify-foot">
       {(proof || delivery?.lease.length || delivery?.review) && <ConfirmButton variant="primary" icon="review"
         label={backlog ? t('verifyBackfillMark') : t('verifyPass')}
@@ -466,7 +620,7 @@ function EndedCard({ ticket }: { ticket: TicketRow }) {
 
 /** One vertical lane of the board: a fixed header, a scrollable list, and an optional "see all" link. */
 function Lane({ tone, title, count, sub, action, empty, children }: {
-  tone: 'decision' | 'verify' | 'run' | 'pool' | 'pipeline' | 'ended'; title: string; count: number; sub: string; action?: ReactNode; empty: string
+  tone: 'decision' | 'verify' | 'run' | 'pipeline' | 'ended'; title: string; count: number; sub: string; action?: ReactNode; empty: string
   children?: ReactNode
 }) {
   return <section className="dt-board-col" data-tone={tone} aria-label={title}>
@@ -515,7 +669,7 @@ function TicketFinder() {
   }, [query, call])
   const hits = result?.tickets ?? []
   const choose = (id: string) => { setQuery(''); setResult(undefined); navigate({ page: 'execution', id }) }
-  const key = (event: KeyboardEvent<HTMLInputElement>) => {
+  const key = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Escape') { setQuery(''); setResult(undefined); return }
     if (!hits.length) return
     if (event.key === 'ArrowDown') { event.preventDefault(); setActive(index => (index + 1) % hits.length) }
@@ -672,6 +826,8 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
 
     {data.billing && <BillingStrip billing={data.billing} />}
 
+    <IdleDock pool={pool} parked={parked} onChanged={reload} />
+
     <div className="dt-board-scroll" ref={boardScroll} data-more={boardMore} onScroll={measureBoard}>
       <section className="dt-board" aria-label={t('boardNeedsTitle')}>
         <Lane tone="decision" title={t('boardDecisionTitle')} count={person.length} sub={t('boardDecisionSub')}
@@ -680,24 +836,6 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
             {t('boardAllNeeds', { count: person.length })} →</button> : undefined}>
           <div className="dt-board-stack">{person.map(ticket => <DecisionCard key={ticket.id} ticket={ticket} onChanged={reload}
             focused={mark === 'person'} />)}</div>
-        </Lane>
-
-        <Lane tone="run" title={t('boardRunning')} count={running} sub={t('boardRunningSub')} empty={t('boardRunningEmpty')}
-          action={running ? <button type="button" className="dt-board-more" onClick={openTickets}>{t('boardOpen')} →</button> : undefined}>
-          <ul className="dt-runlist">{working.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}
-            {idle.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}</ul>
-        </Lane>
-
-        <Lane tone="pool" title={t('boardPoolTitle')} count={pool.length + parked.length} sub={t('boardPoolSub')}
-          empty={t('boardPoolEmpty')}
-          action={pool.length + parked.length ? <button type="button" className="dt-board-more"
-            onClick={() => navigate({ page: 'execution', query: { filter: 'idle' } })}>{t('boardPoolAll', { count: pool.length + parked.length })} →</button>
-            : undefined}>
-          <ul className="dt-runlist">{pool.map(ticket => <PoolRow key={ticket.id} ticket={ticket} onChanged={reload} />)}</ul>
-          {parked.length > 0 && <details className="dt-pool-parked">
-            <summary>{t('boardPoolParked', { count: parked.length })}</summary>
-            <ul className="dt-runlist">{parked.map(ticket => <PoolRow key={ticket.id} ticket={ticket} onChanged={reload} />)}</ul>
-          </details>}
         </Lane>
 
         <Lane tone="verify" title={t('boardVerifyTitle')} count={verification.length} sub={t('boardVerifySub')}
@@ -711,6 +849,12 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
           </div>}
           <div className="dt-board-stack">{verification.map(ticket => <VerifyCard key={ticket.id} ticket={ticket} onChanged={reload}
             focused={mark === 'verification'} />)}</div>
+        </Lane>
+
+        <Lane tone="run" title={t('boardRunning')} count={running} sub={t('boardRunningSub')} empty={t('boardRunningEmpty')}
+          action={running ? <button type="button" className="dt-board-more" onClick={openTickets}>{t('boardOpen')} →</button> : undefined}>
+          <ul className="dt-runlist">{working.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}
+            {idle.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}</ul>
         </Lane>
 
         <Lane tone="pipeline" title={t('boardPipelineTitle')} count={pipeline.length} sub={t('boardPipelineSub')}
@@ -733,3 +877,4 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
     </div>
   </>
 }
+
