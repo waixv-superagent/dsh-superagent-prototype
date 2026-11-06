@@ -1,4 +1,4 @@
-﻿/**
+/**
  * A person's Rider-style compile-and-launch runs (docs/021): the editor page picks a configuration (Development,
  * DebugGame, Shipping), a target (SunGameEditor, SunGame) and a platform (Win64), and the host composes the configured
  * build and launch commands into one command — `build && launch` — run under the shared editor's slot. A run refuses
@@ -11,6 +11,8 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { EDITOR_CONFIGURATIONS, editorRunName, type EditorConfiguration, type EditorPlatform }
   from '../core/editor-composition.ts'
+import { derivedBuildCommand, derivedLaunchCommand, editorBinary, editorPathProblem, buildScript, type EditorPaths }
+  from '../core/editor-paths.ts'
 import { UserError } from '../core/errors.ts'
 import { KV } from '../kv.ts'
 import { fillCommand, killTree } from './editor-scheduler.ts'
@@ -55,6 +57,10 @@ export interface BuildRunnerHost {
   readonly store: { get<V>(key: string & { readonly __value?: V }): V | undefined; set<V>(key: string & { readonly __value?: V }, value: V): void }
   /** Where the run logs go. */
   readonly logDir: string
+  /** The configured project / engine / editor locations, read on each call so a settings save takes effect at once. */
+  paths(): EditorPaths
+  /** Whether a path the derived command names exists on this host. */
+  exists(path: string): boolean
   /** The configured target names, read on each call so a settings save takes effect at once. */
   targets(): readonly string[]
   /** The build command template; `<target>`, `<configuration>`, `<platform>` and `<project>` are replaced. */
@@ -112,10 +118,14 @@ export class BuildRunner {
 
   /** The command a run would compose for a selection, as the page shows it before the click. */
   preview(selection: BuildSelection): string {
-    const build = fillCommand(this.host.buildCommand(), { project: this.host.project(), dir: this.host.cwd(),
-      target: selection.target, configuration: selection.configuration, platform: selection.platform })
-    const launch = fillCommand(this.host.launchCommand(), { project: this.host.project(), dir: this.host.cwd(),
-      target: selection.target, configuration: selection.configuration, platform: selection.platform })
+    const paths = this.host.paths()
+    const values = { project: paths.project, dir: this.host.cwd(), target: selection.target,
+      configuration: selection.configuration, platform: selection.platform }
+    const problem = editorPathProblem(paths)
+    const build = this.host.buildCommand().trim() ? fillCommand(this.host.buildCommand(), values)
+      : problem ? '' : derivedBuildCommand(paths, selection)
+    const launch = this.host.launchCommand().trim() ? fillCommand(this.host.launchCommand(), values)
+      : problem ? '' : derivedLaunchCommand(paths, selection.platform)
     return [build, launch].filter(Boolean).join(' && ')
   }
 
@@ -153,7 +163,24 @@ export class BuildRunner {
     if (!this.host.targets().includes(selection.target)) throw new UserError('unknownBuildTarget', { target: selection.target })
     if (!EDITOR_CONFIGURATIONS.includes(selection.configuration)) throw new UserError('buildConfiguration', { configuration: String(selection.configuration) })
     if (!this.host.platforms().includes(selection.platform)) throw new UserError('buildPlatform', { platform: String(selection.platform) })
-    if (!this.host.buildCommand().trim() || !this.host.launchCommand().trim()) throw new UserError('buildMissingCommand')
+    // A derived command needs the project and the engine; explicit templates do not. A derived path must exist, so a
+    // typo in the settings reads as a path problem instead of an UBT invocation that dies with "file not found".
+    const paths = this.host.paths()
+    const needsBuild = !this.host.buildCommand().trim()
+    const needsLaunch = !this.host.launchCommand().trim()
+    const problem = editorPathProblem(paths)
+    if ((needsBuild || needsLaunch) && problem === 'project') throw new UserError('buildMissingProject')
+    if ((needsBuild || needsLaunch) && problem === 'engine') throw new UserError('buildMissingEngine')
+    if (needsBuild) {
+      for (const path of [buildScript(paths.engine, selection.platform), paths.project]) {
+        if (!this.host.exists(path)) throw new UserError('buildPathMissing', { path })
+      }
+    }
+    if (needsLaunch) {
+      for (const path of [editorBinary(paths, selection.platform), paths.project]) {
+        if (!this.host.exists(path)) throw new UserError('buildPathMissing', { path })
+      }
+    }
     const blocked = this.host.blocked()
     if (blocked) throw new UserError(blocked === 'agent' ? 'buildBlockedAgent' : 'buildBlockedJob')
     const slot = this.host.takeSlot()
@@ -258,5 +285,6 @@ function defaultSpawn(command: string, cwd: string): ChildProcess {
     ? spawn(process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe', ['/d', '/s', '/c', `"${command}"`], { cwd, windowsHide: true, windowsVerbatimArguments: true })
     : spawn('/bin/sh', ['-c', command], { cwd, detached: true })
 }
+
 
 

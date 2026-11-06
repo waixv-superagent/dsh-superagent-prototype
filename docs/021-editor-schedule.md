@@ -112,9 +112,13 @@ Working rows show "占用中 · 跑测试" or "排第 2 · 编译". The timeline
 The editor page carries the person's own one-click path, composed the way Rider lists its run configurations, so a
 compile-and-launch does not require Rider (docs/005):
 
-- **Target names** are configured under Execution settings → editor → **目标名**: one Unreal target per line, such as
-  `SunGame` and `SunGameEditor`. The **build** and **restart** commands stay templates: `<target>`, `<configuration>`,
-  `<platform>`, `<project>` and `<dir>` are filled per run, so the panel never guesses an engine or a project layout.
+- **Paths first.** Execution settings → editor holds the **工程路径** (`.uproject`), the **引擎目录** (the directory holding
+  `Engine/`) and an optional **编辑器可执行文件** for a non-standard install. With the project and the engine, the panel
+  derives `Engine/Build/BatchFiles/Build.bat <target> <platform> <configuration> -Project=<project> -WaitMutex` and the
+  editor binary (Win64/Mac/Linux) plus the project; a path that is configured but missing is refused before anything runs.
+- **Target names** are configured under the same settings → **目标名**: one Unreal target per line, such as `SunGame` and
+  `SunGameEditor`. The **build** and **restart** commands are optional overrides: when set, `<target>`, `<configuration>`,
+  `<platform>`, `<project>` and `<dir>` are filled into them per run; when empty the derived commands above are used.
 - **Rider's combination.** A run configuration is configuration (`Development`, `DebugGame`, `Shipping`) × type (Editor
   or Game, from the target's `Editor` suffix) × target (`SunGameEditor`) × platform (`Win64` on Windows, `Mac` on macOS,
   `Linux` otherwise). Its name follows Rider: `Development Editor SunGame`, `Shipping Game SunGame`.
@@ -137,3 +141,4 @@ compile-and-launch does not require Rider (docs/005):
 - **One editor slot.** The schedule has a single lease. Several workspaces would each need their own slot, which `editor_slot` in 014 anticipated.
 - **No time windows.** A person can claim the editor now but cannot reserve a window ahead of time.
 - **Command quality.** Batching assumes the configured build compiles the whole workspace. A per-Ticket build that only compiles one module should not be configured as `build`.
+

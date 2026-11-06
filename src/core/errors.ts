@@ -1,4 +1,4 @@
-﻿/** User-facing error codes mapped to their category ('missing' or 'refused') and English message template. */
+/** User-facing error codes mapped to their category ('missing' or 'refused') and English message template. */
 export const USER_ERRORS = {
   unknownTicket: ['missing', 'Unknown ticket'],
   unknownProblem: ['missing', 'Unavailable Eval not found'],
@@ -83,7 +83,9 @@ export const USER_ERRORS = {
   unknownBuildTarget: ['missing', 'Unknown build target {target}'],
   buildConfiguration: ['refused', 'Unknown editor configuration {configuration}'],
   buildPlatform: ['refused', 'An editor platform {platform} is not available on this host'],
-  buildMissingCommand: ['refused', 'The editor build and launch commands are not both configured; set them under Settings › Execution › editor'],
+  buildMissingProject: ['refused', 'Set the project (.uproject) path under Settings › Execution › editor'],
+  buildMissingEngine: ['refused', 'Set the engine directory under Settings › Execution › editor, or write build and restart commands'],
+  buildPathMissing: ['refused', 'Path does not exist: {path}'],
   unknownBuildRun: ['missing', 'Unknown build run {run}'],
   buildNotRunning: ['refused', 'That build run has already ended']
 } as const satisfies Record<string, readonly ['missing' | 'refused', string]>
@@ -101,4 +103,5 @@ export class UserError extends Error {
     this.missing = kind === 'missing'
   }
 }
+
 
