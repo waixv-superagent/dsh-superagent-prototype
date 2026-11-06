@@ -50,7 +50,9 @@ interface Skill { name: string; description: string; content: string }
 // measures 51,310, so the worker budget grows to 51,400.
 // The P1 plan's code diff adds the `diff`/`diff_base` schema, what a real unified diff is, and the rule that it is never
 // hand-written (docs/012); that worker surface measures 52,112, so the budget grows to 52,300.
-const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 52_300 }
+// The A/B reproduction harness adds one worker line: record both arms and put the report in the verification package
+// (docs/026). The worker surface measures 52,503, so the budget grows to 52,800; trimming that line should lower it again.
+const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 52_800 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

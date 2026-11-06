@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "probe": "node probe.mjs",
+  "observation": "observation.json",
+  "timeoutSeconds": 60,
+  "repeat": 2,
+  "tolerance": 0.05,
+  "relativeTolerance": 0.02,
+  "expect": [
+    {
+      "path": "metrics.slideMax",
+      "op": "decrease",
+      "min": 2,
+      "note": "急转后的最大滑动应明显下降"
+    },
+    {
+      "path": "metrics.fps",
+      "op": "unchanged",
+      "tolerance": 1.5,
+      "note": "帧率不应退化"
+    },
+    {
+      "path": "state",
+      "op": "equals",
+      "value": "idle",
+      "note": "急转结束后应回到 idle"
+    }
+  ],
+  "notes": "合成演示：A 臂模拟未修复，B 臂模拟修复后；用来展示 A/B 报告，不接编辑器。真实 case 见 docs/025。"
+}

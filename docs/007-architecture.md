@@ -482,6 +482,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
 | `tests/feishu-status.spec.ts` | The Feishu status card script: the counts it reads, the card's state colors and phrases, the watchdog outage/recovery state, the last hour's usage line in the board's billing terms, the expandable Ticket detail and the card's dashboard link, and sending, updating, retiring and locking through a fake CLI |
 | `tests/daily-retro.spec.ts` | The daily retro scripts (`scripts/daily-metrics.mjs`, `scripts/daily-retro.mjs`): the local-day window, aggregation over a fixture store, multi-frame session archives, p4 links through `oldChange`, the day-over-day diff, the commitment ledger and its reconciliation, and the report's first screen and joined hourly bars |
+| `tests/repro-ab.spec.ts` | The A/B reproduction harness (`scripts/repro-ab.mjs`): manifest validation, the differential expectations and their tolerances, missing data never passing, repeated runs that disagree, the CLI end to end, the report's escaping, and `init` |
 | `tests/feishu-read.spec.ts`, `tests/github-read.spec.ts` | Feishu and GitHub reads |
 | `tests/admission-context.spec.ts`, `tests/feishu-image.spec.ts` | The Thread window of assessments, and Feishu image reads |
 | `tests/assessment.spec.ts` | What the MasterAssessor keeps per Eval, and when it lets go |
