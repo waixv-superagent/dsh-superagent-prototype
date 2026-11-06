@@ -51,6 +51,12 @@ Stopping or restarting the plugin inside the DeepSeek Harness process uses the s
 
 Worker subagents, including nested ones, use DeepSeek Harness's `standard` preset with the worker's permissions. They retain only the worker's allowed work tools, and lose those tools when the Ticket ends. Under `standard`, a shell command moves to the background after 60 seconds. A subagent's jobs are killed when it ends.
 
+### Subagent models and a person's approval
+
+A worker may run subagents on another model only when the person allows that exact route on the Ticket. Each worker Session is seeded once with DeepSeek Harness's durable child model-selection policy for the deployment's routable models, so the harness accepts an explicit selection at all; the same catalog is what the panel's model pages read. A route may then be passed to `subagent` only after the worker asked with `orchestrator_report`: `human_action` carries the question and `subagent_model` the route. The host words the question with the route and its display name, offers 允许 and 不允许, and records only a click on 允许 as `execution.modelGrants` on the Ticket. The tool guard refuses every route that is not granted; the worker's own model is inherited without asking. The policy therefore releases the routes and the person's approval decides which of them a Ticket may use. A written answer authorizes a route only when it is exactly one of the card's labels; any other answer is an ordinary message and says that no route was authorized. A subagent inherits the policy, so the same grant also covers a child that delegates again. The policy is sampled when the Session is created, so a route added to the deployment later needs a new Ticket. If an operator enables DeepSeek Harness's own `subagent-model-selection-settings`, that policy wins over the seed and approvals are limited to the routes it lists.
+
+The answer is one more Ticket Input, so the authorization record — the route and whether it was allowed — stays next to the work it allowed. The agent-team tools are not installed in this deployment (see 013); the policy and the grant would cover any child Session such a roster creates.
+
 ### Preparing a Ticket directory
 
 Before the first Assignment, if the Ticket directory does not exist, the prepare command runs once with `sh` in the execution root. It has ten minutes to finish. Without a prepare command, the worker starts in an empty directory.

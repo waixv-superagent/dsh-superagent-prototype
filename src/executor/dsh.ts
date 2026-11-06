@@ -111,7 +111,7 @@ export interface ExecutorHost {
   readonly machine: Pick<Machine, 'stateDir'>
   readonly lifetime: AbortSignal
   /** Session manager for worker sessions and for relaying worker reports to the main Session. */
-  readonly sessions: Pick<Sessions, 'ensure' | 'prompt' | 'promptedId' | 'relay' | 'holds' | 'workerToolGap'>
+  readonly sessions: Pick<Sessions, 'ensure' | 'prompt' | 'promptedId' | 'relay' | 'holds' | 'workerToolGap' | 'ensureModelSelectionPolicy'>
   closing(): boolean
   /** Whether processing is paused, which holds launches and input deliveries. */
   paused(): boolean
@@ -502,10 +502,11 @@ export class DshExecutor implements Executor {
         }
         const input = ticket.inputs.find(item => item.id === inputId)
         try {
-          // Recreate the worker session if it was externally deleted.
-          if (!this.host.context.agents.get(sessionId as SessionId)) {
-            await this.host.sessions.ensure(sessionId, ticket.execution?.directory ?? '', ticket.title, 'worker')
-          }
+          // Recreate the worker session if it was externally deleted, and seed the subagent model release on a Session that
+          // predates this feature or lost it, before the Input (such as an approval) reaches the worker.
+          let agent = this.host.context.agents.get(sessionId as SessionId)
+          if (!agent) agent = await this.host.sessions.ensure(sessionId, ticket.execution?.directory ?? '', ticket.title, 'worker')
+          await this.host.sessions.ensureModelSelectionPolicy(agent)
           if (input) await this.deliverInput(ticket, assignment, input)
         } catch (error) {
           if (this.host.closing() || error instanceof Later) throw error

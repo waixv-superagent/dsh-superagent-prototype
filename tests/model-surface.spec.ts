@@ -52,7 +52,9 @@ interface Skill { name: string; description: string; content: string }
 // hand-written (docs/012); that worker surface measures 52,112, so the budget grows to 52,300.
 // The A/B reproduction harness adds one worker line: record both arms and put the report in the verification package
 // (docs/026). The worker surface measures 52,503, so the budget grows to 52,800; trimming that line should lower it again.
-const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 52_800 }
+// The subagent model approval adds the `subagent_model` schema and the permission wording on the report tool (docs/003);
+// the worker surface measures 52,876, so the budget grows to 53,000.
+const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 53_000 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

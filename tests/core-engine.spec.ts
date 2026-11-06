@@ -1183,6 +1183,37 @@ describe('worker reports', () => {
     h.settle()
     expect(h.delivered.map(([, id]) => id)).toContain(answered.inputs.at(-1)!.id)
   })
+  it('asks a person to allow a subagent model route, fixes its choices, and records only an approval', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.tick(1)
+    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', model: { provider: 'p', model: 'm' } }))
+      .toThrowError(expect.objectContaining({ code: 'modelRequest' }))
+    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', question: 'Q?', options: ['A', 'B'], model: { provider: 'p', model: 'm' } }))
+      .toThrowError(expect.objectContaining({ code: 'modelRequest' }))
+    const asked = h.engine.report(ticketId, { state: 'progress', summary: 'need a stronger model',
+      question: '模型授权：允许用 p/m 跑子 agent 吗？', model: { provider: 'p', model: 'm' } })
+    expect(asked.attention).toMatchObject({ question: '模型授权：允许用 p/m 跑子 agent 吗？', options: ['允许', '不允许'],
+      model: { provider: 'p', model: 'm' } })
+    // A written answer that is not the card's label authorizes nothing, and says so to the worker.
+    const written = h.engine.answerAttentionText(ticketId, asked.attention!.id, '先不用')
+    expect(written.execution?.modelGrants).toBeUndefined()
+    expect(written.inputs.at(-1)).toMatchObject({ kind: 'text', text: expect.stringContaining('未授权') })
+    // Ask again and approve: the grant lives on the ticket, and the answer tells the worker it may select the route.
+    h.tick(1)
+    const again = h.engine.report(ticketId, { state: 'progress', summary: 'ask again',
+      question: '模型授权：允许用 p/m 跑子 agent 吗？', model: { provider: 'p', model: 'm' } })
+    const approved = h.engine.answerAttention(ticketId, again.attention!.id, '允许')
+    expect(approved.execution?.modelGrants).toEqual([expect.objectContaining({ provider: 'p', model: 'm', attentionId: again.attention!.id })])
+    expect(approved.inputs.at(-1)).toMatchObject({ text: '人允许了模型 p/m（本工单的子 agent 可用，授权已记录）。可以用 subagent 的 provider/model 指定它。' })
+    // A denial records no grant for that route, and the existing grant is untouched.
+    h.tick(1)
+    const third = h.engine.report(ticketId, { state: 'progress', summary: 'ask third',
+      question: '模型授权：允许用 p/n 跑子 agent 吗？', model: { provider: 'p', model: 'n' } })
+    const denied = h.engine.answerAttention(ticketId, third.attention!.id, '不允许')
+    expect(denied.execution?.modelGrants).toHaveLength(1)
+    expect(denied.inputs.at(-1)).toMatchObject({ text: '人不允许模型 p/n；本工单不要用它。' })
+  })
   it('turns a written answer into the worker\'s input and clears the question, as a choice does', () => {
     const h = harness()
     const ticketId = accepted(h).ticketId!
