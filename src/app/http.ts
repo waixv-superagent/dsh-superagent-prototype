@@ -45,6 +45,7 @@ import { decisionList, search, threadDetail, threadList } from './views/threads.
 import { executorLoad, ticketDetail, ticketList, ticketSearch } from './views/tickets.ts'
 import { ticketGraph } from './views/graph.ts'
 import { reproPage } from './views/repro.ts'
+import { ticketRepro } from './views/ticket-repro.ts'
 
 export interface HttpHost {
   readonly store: Store
@@ -156,11 +157,27 @@ const views = (runtime: HttpHost): ViewHost => ({ store: runtime.store, sources:
 const setupState = (runtime: HttpHost): SetupState => ({ deployment: runtime.configured() ? runtime.deployment : undefined,
   problem: runtime.setupProblem, feishuProblem: runtime.feishuProblem })
 export type StateView = ReturnType<typeof stateView>
-/** Builds a ticket's detail view; `environment` is empty while waiting for setup because it requires the resolved deployment. */
+/**
+ * One Ticket's page view; `environment` is empty while waiting for setup because it requires the resolved deployment.
+ * A delivered Ticket also carries the local reproduction cases its verification package names (docs/024), so the
+ * acceptance page can show the worker's case and re-run it without leaving the Ticket.
+ */
 function ticketPage(runtime: HttpHost, id: string) {
   const detail = ticketDetail(views(runtime), id), ticket = runtime.store.tickets.get(id)
   if (!detail || !ticket) throw new RouteError(404, 'Ticket not found')
-  return { ...detail, environment: runtime.configured() ? runtime.ticketEnvironment(ticket) : [] }
+  const repro = runtime.repro && ticket.execution?.verification ? ticketReproView(runtime, ticket) : undefined
+  return { ...detail, environment: runtime.configured() ? runtime.ticketEnvironment(ticket) : [], ...repro ? { repro } : {} }
+}
+/** The cases the Ticket names and their runs, read from the same root the editor page's card lists. */
+function ticketReproView(runtime: HttpHost, ticket: Ticket) {
+  const repro = runtime.repro!
+  const root = repro.root()
+  const found = readReproCases(root)
+  const runs = repro.tick().slice(0, VISIBLE_RUNS)
+  const active = runs.find(run => run.state === 'running')
+  return ticketRepro({ root, cases: found.cases, runs,
+    active: active ? { runId: active.id, caseId: active.caseId, tail: repro.log(active.id, ACTIVE_TAIL) } : null,
+    blocked: reproBlocked(runtime) }, ticket)
 }
 export type TicketPageView = ReturnType<typeof ticketPage>
 function promptsView(runtime: HttpHost, revision: number | undefined, offset: number) {
@@ -195,7 +212,9 @@ const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), Sou
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
 const PlanRequest = z.object({ decision: z.enum(['approve', 'revise', 'stop']), note: z.string().trim().max(2000).optional() })
 /** A person lifts a ticket out of the idle pool; the level defaults to the mainline and is what the ticket becomes. */
-const PromoteRequest = z.object({ level: z.enum(PRIORITY_LEVELS).optional() }).strict()
+const PromoteRequest = z.object({ level: z.enum(['P0', 'P1']).optional() }).strict()
+/** A level-only change from the board's idle drawer: it never starts a worker turn, unlike promote. */
+const PriorityRequest = z.object({ level: z.enum(PRIORITY_LEVELS) }).strict()
 /** A person's answer to a ticket's open question: one of the question's choices, or a written answer, never both. */
 const AnswerRequest = z.object({ attentionId: z.string().trim().min(1).max(64), option: z.string().trim().min(1).max(120).optional(),
   text: z.string().trim().min(1).max(4000).optional() }).strict()
@@ -377,12 +396,21 @@ function routes(runtime: HttpHost): Routes {
       runtime.engine.decidePlan(id, request.decision, request.note ?? '', 'panel')
       return { decided: true }
     },
-    // A person picks a pooled ticket into the attention pool: it becomes their P1 and starts now when its worker is between
-    // turns, so the board's pool is a scheduling surface rather than only a list.
+    // A person picks a pooled ticket into the attention pool: it becomes their P0/P1 and starts now when its worker is
+    // between turns, so the board's pool is a scheduling surface rather than only a list.
     'POST tickets/:id/promote': async ({ params, body }) => {
       const id = ticket(params.id)
       const request = PromoteRequest.parse(await body(1_024))
       const updated = runtime.engine.promoteTicket(id, request.level ?? 'P1', 'panel', 'panel')
+      runtime.requestPass()
+      return { level: ticketPriority(updated) }
+    },
+    // A person changes a ticket's level without starting it: the idle drawer's P2/P3 drop zones park a Ticket again
+    // instead of launching it, so a drag is never a hidden "run now".
+    'POST tickets/:id/priority': async ({ params, body }) => {
+      const id = ticket(params.id)
+      const request = PriorityRequest.parse(await body(1_024))
+      const updated = runtime.engine.decidePriority(id, request.level, 'panel', 'panel')
       runtime.requestPass()
       return { level: ticketPriority(updated) }
     },

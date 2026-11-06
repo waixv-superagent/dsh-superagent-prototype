@@ -70,8 +70,10 @@ export interface Api {
   'POST tickets/:id/redispatch': { body: { backend: 'git' | 'p4'; target?: string }; response: { redispatched: true } }
   /** A person answers the waiting P1 plan from the ticket page, with no chat round-trip. */
   'POST tickets/:id/plan': { body: { decision: PlanDecision; note?: string }; response: { decided: true } }
-  /** A person lifts a ticket out of the idle pool into the attention pool; the level defaults to `P1`. */
-  'POST tickets/:id/promote': { body: { level?: PriorityLevel }; response: { level: PriorityLevel } }
+  /** A person lifts a ticket out of the idle pool into the attention pool and starts its work; only a mainline level. */
+  'POST tickets/:id/promote': { body: { level?: 'P0' | 'P1' }; response: { level: PriorityLevel } }
+  /** A person sets a ticket's level without starting work: dropping a pooled Ticket on P2/P3 only parks it. */
+  'POST tickets/:id/priority': { body: { level: PriorityLevel }; response: { level: PriorityLevel } }
   /** A person answers the ticket's open question from its page: one of its choices, or a written answer, and the worker continues. */
   'POST tickets/:id/answer': { body: { attentionId: string; option?: string; text?: string }; response: { answered: true } }
   'POST tickets/:id/stop': { response: { stopped: true } }

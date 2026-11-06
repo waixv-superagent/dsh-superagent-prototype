@@ -1,4 +1,4 @@
-# 007 Architecture
+﻿# 007 Architecture
 
 This is the developer guide to the implementation. It maps the concepts in [001 Domain model](001-domain.md) through [006 Deployment](006-deployment.md) to classes, interfaces and files. Start with the runtime and Engine, then use the module and test tables as a code index.
 
@@ -366,6 +366,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/repro.ts` | The local reproduction cases (docs/024): where they live (`Saved/ReproTests` beside the configured editor project, else `<stateDir>/repro-tests`), the `case.json` schema and the problems a folder can carry, reading the case folders, the report path that must stay inside its folder, the platform-shell spawn and the one-line output summary |
 | `src/app/repro-runner.ts` | `ReproRunner` (docs/024): starts one local case at a time, writes its output under `<stateDir>/repro-logs`, records the run, its exit code and the report it wrote in `KV.repro.runs`, stops it on a person's click or after its timeout, and reclaims the run a restarted host left behind |
 | `src/app/views/repro.ts` | The reproduction cases' page view: the folder, the cases and their problems, the newest runs, the run in flight with its output tail, and what holds the editor |
+| `src/app/views/ticket-repro.ts` | The acceptance page's repro entry (docs/024): the case folders a Ticket's verification package names, by folder name or by the Ticket's first eight characters, with their runs and the run in flight; an unmatched package keeps an empty list |
 | `src/app/delivery.ts` | `AgentDelivery`: delivers a message to a DeepSeek Harness agent once per request id, also across a restored Session |
 | `src/app/retry-health.ts` | `RetryHealth`: which Sessions wait on a model budget retry, for the `models` health entry |
 | `src/app/billing.ts` | The board's billing strip: replays each billed `assistant/message` into a minute-granular rolling hour, prices it from the route's published `/v1/models` list, persists the aggregate, proves the route that is charging now, and reads the gateway account's settled hour and period quota |
@@ -385,7 +386,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/tools/tool.ts` | The `Tool` type, `readTool`, the `orchestrator_read` of both roles, and `AcknowledgementSchema` |
 | `src/app/tools/main.ts` | The main Session's tools |
 | `src/app/tools/executor.ts` | An Executor Session's tools, including the read-only pipeline check that keeps the Jenkins token on the host |
-| `src/app/http.ts` | The `/orchestrator/api` routes: the same-origin check, request limits and one status per kind of failure |
+| `src/app/http.ts` | The `/orchestrator/api` routes: the same-origin check, request limits and one status per kind of failure; a Ticket page carries the local cases its verification package names |
 | `src/app/api.ts` | `Api`, every route with its parameters, query, body and response, and the filters of the lists; it imports only types, so the panel bundles it |
 | `src/app/views/text.ts` | The two forms of a view's text: `preview`, plain text on one line, and `markdown` without HTML; `plain` and `readable` |
 | `src/app/views/records.ts` | The rows the views share: Triggers, Tickets, Threads, Decisions and Channel links, and `ownersOf`, the owners of follow-ups as one request reads them |
@@ -438,7 +439,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/provider.tsx` | What every page reads from its host: copy, calls, navigation, notices, the state poll, and `restart`, which reads the state quickly while dsh-superagent restarts |
 | `src/client/api.ts` | Calls and polls of the management API, typed by `src/app/api.ts`, and the Decision filters of the Eval status |
 | `src/client/route.ts` | The tabs, the two views of 概览, the board focus a hero count carries, the settings groups, the typed routes that `parseRoute` reads (including the removed Agent-status tab, which opens the board), the `?view=board` deep link the status card taps, the parent menu a record falls back to, and the route memory with the settings group opened last |
-| `src/client/overview.tsx` | The board view of 概览: the duty desk, and the one-shot ring that marks the cards a hero count opened |
+| `src/client/overview.tsx` | The board view of 概览: the five-lane duty desk, the quiet idle dock and the drawer it summons, the pointer drag that sets a pooled Ticket's level (P0/P1 starts it, P2/P3 only changes the level), and the one-shot ring that marks the cards a hero count opened |
 | `src/client/graph.tsx` | The relation view of 概览: a time DAG with one lane per conversation, or a silver force-directed cloud, of recent Tickets and their relations, in plain SVG; the cloud drifts on a requestAnimationFrame loop that writes positions straight to the DOM, with a canvas behind it for soft rims and the specks running along edges, and stops while hidden or under reduced motion; guessed `similar` edges are faint dotted weak springs in the cloud only, with their reasons placed clear of names and nodes |
 | `src/client/pipeline.ts` | Reading a delivered change as stages: the fine stage of the Swarm submitter flow, the four-step track, the running checks' counts and the failed-smoke wait, shared by the board card, the Ticket page and the stage mark |
 | `src/client/source.tsx`, `trigger.tsx`, `eval.tsx`, `execution.tsx` | One file per stage: its status, and its settings where it has some |
@@ -734,3 +735,4 @@ Point `DSH_HOME` at a temporary directory and create a new profile there. Copy t
 
 - Trust: which Trigger fields are trusted, such as the Source's actor and Thread membership, and which are not, such as the body and quotes.
 - Deployment isolation: the agent's profile on its own pinned DeepSeek Harness installation, so upgrading DeepSeek Harness elsewhere does not break it.
+

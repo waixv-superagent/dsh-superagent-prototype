@@ -488,7 +488,8 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET tickets/:id/activity': { answer: ({ params }) => server.activity(params.id) ?? {
     live: false, updatedAt: 0, tool: null, recent: [] } },
   'POST tickets/:id/plan': { body: true, answer: ({ params }) => ticketOf(params.id) ? { decided: true } : refuse(404, 'Ticket not found') },
-'POST tickets/:id/promote': { body: true, answer: ({ params }) => ticketOf(params.id) ? { level: 'P1' as const } : refuse(404, 'Ticket not found') },
+  'POST tickets/:id/promote': { body: true, answer: ({ params }) => ticketOf(params.id) ? { level: 'P1' as const } : refuse(404, 'Ticket not found') },
+  'POST tickets/:id/priority': { body: true, answer: ({ params }) => ticketOf(params.id) ? { level: 'P2' as const } : refuse(404, 'Ticket not found') },
   'POST tickets/:id/answer': { body: true, answer: ({ params }) => ticketOf(params.id) ? { answered: true } : refuse(404, 'Ticket not found') },
   'POST tickets/:id/retry': { answer: ({ params }) => {
     const ticket = ticketOf(params.id)

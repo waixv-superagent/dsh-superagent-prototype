@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+﻿// @vitest-environment jsdom
 // The Execution status, a Ticket, and the Execution settings.
 import { act } from 'react'
 import { expect, it } from 'vitest'
@@ -339,6 +339,39 @@ it('shows delivered work waiting for a person\'s local verification, with the wo
     && JSON.stringify(request.body).includes('PIE 里 Q 技能仍然会卡住'))).toBe(true)
 })
 
+it('leads a four-block verification package with the judgement and its repro case, and re-runs the case in place', async () => {
+  const detail = { ...server.ticketDetails.t1!, id: 't9', title: '技能旋转后朝向回滚', stage: 'person' as const,
+    action: 'verify' as const, summary: 'CL 590001 已 shelve，等你在本地验证。',
+    verification: { at: '2026-10-01T00:00:00Z', state: 'pending' as const },
+    actions: { retry: false, stop: true, confirm: false, verify: true, rework: true },
+    delivery: { lease: ['Source/Game/Player/'], changelist: 590001, review: 'https://review.example.com/reviews/590002/',
+      verification: '版本与前置：SunEditor Win64 Development 编译通过。\n复现步骤：站定后释放技能并立刻接起步。\n'
+        + '预期与证据：baseline 31.2° → change 4.8°。\n待你判断：4.8° 的残余偏差是否可接受。' },
+    repro: { root: 'C:/state/repro-tests',
+      cases: [{ id: 'lab-aim-exit', name: '技能旋转 A/B', description: '同一用例两臂各跑一次', command: 'py -3 run.py',
+        report: 'reports/latest.html' }],
+      runs: [{ id: 'r1', caseId: 'lab-aim-exit', caseName: '技能旋转 A/B', state: 'succeeded' as const,
+        startedAt: '2026-10-01T00:00:00Z', endedAt: '2026-10-01T00:05:00Z', exitCode: 0, summary: 'A/B 判定通过',
+        report: 'reports/latest.html' }],
+      active: null, blocked: null } }
+  server.ticketDetails.t9 = detail
+  at({ page: 'execution', id: 't9' })
+  await mount()
+  // The one decision leads; the evidence the worker captured sits below it instead of being flattened into check rows.
+  expect(document.querySelector('.dt-verify-gate-judge')?.textContent).toContain(zh.verifyJudgeTitle)
+  expect(document.querySelector('.dt-verify-gate-judge')?.textContent).toContain('4.8° 的残余偏差')
+  expect(document.querySelector('.dt-verify-gate-prereq')?.textContent).toContain('SunEditor Win64 Development')
+  expect(document.querySelector('.dt-verify-gate .dt-checks')).toBeNull()
+  expect(document.querySelector('.dt-verify-gate-evidence')?.textContent).toContain('baseline 31.2°')
+  expect(document.querySelector('.dt-verify-repro')?.textContent).toContain('站定后释放技能并立刻接起步')
+  expect(document.querySelector('.dt-verify-repro-case')?.textContent).toContain('技能旋转 A/B')
+  expect(document.querySelector('.dt-verify-repro-case a')?.getAttribute('href'))
+    .toBe('/orchestrator/repro/file/r1/reports/latest.html')
+  await click(find(zh.verifyReproRun, '.dt-verify-repro-actions button'))
+  expect(server.requests.some(request => request.path === 'repro/run' && request.method === 'POST'
+    && JSON.stringify(request.body).includes('lab-aim-exit'))).toBe(true)
+})
+
 it('renders a blocked report as paragraphs and a list instead of one collapsed line', async () => {
   const base = server.ticketDetails.t1!
   const summary = 'P1 阶段报 blocked：目标不是这个工作区映射的 //sun/mainline，需要改派到 git 通道。\n\n'
@@ -444,4 +477,5 @@ it('sends one stop for a double click on Confirm', async () => {
   await act(async () => { confirm.click(); confirm.click() })
   expect(server.requests.filter(request => request.path === 'tickets/t1/stop')).toHaveLength(1)
 })
+
 

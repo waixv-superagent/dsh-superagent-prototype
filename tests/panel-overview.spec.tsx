@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+﻿// @vitest-environment jsdom
 // The overview: the duty desk.
 import { expect, it } from 'vitest'
 import { en, zh } from '../src/client/locales.ts'
@@ -13,7 +13,7 @@ const openOverview = async (dictionary = zh) => {
   const item = tab(dictionary.homeViewBoard)
   if (item.getAttribute('aria-selected') !== 'true') await click(item)
 }
-it('leads with a verdict and a six-lane board: decisions, running work, the idle pool, verification, pipeline and recently ended Tickets', async () => {
+it('leads with a verdict and a five-lane board, keeping the idle pool behind one quiet dock', async () => {
   await mount()
   await openOverview()
   expect(tab(zh.homeViewBoard).getAttribute('aria-selected')).toBe('true')
@@ -25,8 +25,13 @@ it('leads with a verdict and a six-lane board: decisions, running work, the idle
   expect(document.querySelector('.dt-editor-line')?.getAttribute('data-holder')).toBe('person')
   expect(document.querySelector('.dt-editor-line')?.textContent).toContain('编辑器：你正在用')
   expect(all('.dt-figure').map(figure => figure.textContent)).toEqual(['今日到达12', '已评估5', '接单1', '执行中2'])
-  expect(all('.dt-board-col-title').map(title => title.textContent)).toEqual(['待你决定', '正在跑', '闲时池', '待你验证', '流水线', '最近结束'])
-  expect(all('.dt-board-col-count').map(count => count.textContent)).toEqual(['2', '2', '2', '2', '0', '1'])
+  // Five lanes for what a person owes; the idle pool is a dock, not a column competing with them.
+  expect(all('.dt-board-col-title').map(title => title.textContent)).toEqual(['待你决定', '待你验证', '正在跑', '流水线', '最近结束'])
+  expect(all('.dt-board-col-count').map(count => count.textContent)).toEqual(['2', '2', '2', '0', '1'])
+  expect(document.querySelector('.dt-board-col[data-tone="pool"]')).toBeNull()
+  expect(document.querySelector('.dt-idle-dock-button')?.textContent).toContain('闲时池 2')
+  expect(document.querySelector('.dt-idle-dock-button')?.textContent).toContain('P2 1 · P3 1')
+  expect(document.querySelector('.dt-idle-drawer')).toBeNull()
   expect(all('.dt-deck-card-title').map(title => title.textContent)).toEqual(['修复回归', '截图工具'])
   expect(all('.dt-deck-card-kind').map(kind => kind.textContent)).toEqual(['待回答', '待处理失败'])
   expect(all('.dt-deck-card-body').map(body => body.textContent)).toEqual(['需要确认按钮颜色',
@@ -34,11 +39,8 @@ it('leads with a verdict and a six-lane board: decisions, running work, the idle
   expect(all('.dt-verify-title').map(title => title.textContent)).toEqual(['修复移动普攻后接 Q 技能无法起飞', 'README 更新'])
   expect(all('.dt-verify-cl').map(item => item.textContent)).toEqual(['CL 123456', 'CL 123456'])
   expect(document.querySelector('.dt-backlog-line')?.textContent).toBe('1 张历史交付待补验')
-  // The running lane is the executor's work; a pooled ticket waits one lane over until a person picks it.
+  // The running lane is the executor's work; the pooled ticket waits behind the dock until a person picks it.
   expect(all('.dt-board-col[data-tone="run"] .dt-run-title').map(title => title.textContent)).toEqual(['补 i18n 文案', '升级依赖'])
-  expect(all('.dt-board-col[data-tone="pool"] .dt-run:not([data-parked]) .dt-run-title').map(title => title.textContent))
-    .toEqual(['【战斗】巡逻时偶现步态滑步'])
-  expect(all('.dt-board-col[data-tone="pool"] .dt-run:not([data-parked]) .dt-tag').map(tag => tag.textContent)).toEqual(['P2 闲时', '缺陷'])
   expect(all('.dt-ended2-title').map(title => title.textContent)).toEqual(['旧工单'])
   expect(all('.dt-ended2-outcome').map(outcome => outcome.textContent)).toEqual(['人工停止'])
   expect(all('.dt-ended2-meta .dt-tag')).toEqual([])
@@ -63,8 +65,9 @@ it('shows the charging provider, the consumed tokens and the public-price estima
   expect(strip?.querySelectorAll('.dt-billing-bar')).toHaveLength(60)
   expect(strip?.querySelector('.dt-billing-more')?.textContent).toBe('另 1 个模型')
   expect(all('.dt-billing-now .dt-tag').map(tag => tag.textContent)).toEqual(['执行走 DeepSeek Account'])
-  // The strip is the board's last element before its lanes, not a detached banner somewhere in the page.
-  expect(strip?.nextElementSibling?.classList.contains('dt-board-scroll')).toBe(true)
+  // The strip sits directly above the idle dock and the board, not as a detached banner somewhere in the page.
+  expect(strip?.nextElementSibling?.classList.contains('dt-idle-dock')).toBe(true)
+  expect(strip?.nextElementSibling?.nextElementSibling?.classList.contains('dt-board-scroll')).toBe(true)
 })
 
 it('keeps an unpriced route visible by its tokens instead of inventing a money figure', async () => {
@@ -375,24 +378,40 @@ it('goes quiet when nothing needs a person and nothing is running', async () => 
   expect(text()).toContain(zh.boardVerifyEmpty)
   expect(text()).toContain(zh.boardPipelineEmpty)
   expect(text()).toContain(zh.boardRunningEmpty)
-  expect(text()).toContain(zh.boardPoolEmpty)
+  expect(document.querySelector('.dt-idle-dock')).toBeNull()
   expect(text()).toContain(zh.boardEndedEmpty)
 })
 
-it('keeps P3 parked behind a count and lifts a picked pool ticket into the attention pool', async () => {
+it('summons the idle drawer from its dock, keeps P3 behind its own count, and sets a level from the row menu', async () => {
   await mount()
   await openOverview()
-  // P2 is the pool a person may pick from; P3 is parked behind its own disclosure, so the lane never dumps everything.
-  expect(all('.dt-board-col[data-tone="pool"] .dt-run:not([data-parked]) .dt-run-title').map(title => title.textContent))
-    .toEqual(['【战斗】巡逻时偶现步态滑步'])
-  expect(all('.dt-board-col[data-tone="pool"] .dt-pool-parked summary').map(summary => summary.textContent)).toEqual(['P3 暂存 1 张（默认不打扰）'])
-  expect(all('.dt-board-col[data-tone="pool"] .dt-pool-parked .dt-run-title').map(title => title.textContent)).toEqual(['整理旧版设计文档'])
-  // The row leads with the request as it arrived, so the pool reads as work worth choosing before any worker analysed it.
-  expect(all('.dt-board-col[data-tone="pool"] .dt-run-summary').map(summary => summary.textContent))
-    .toEqual(['【战斗】【怪物】巡逻时偶现步态滑步，复现条件不明。', '整理旧版设计文档，有空再看。'])
-  await click(zh.poolPromote)
+  expect(document.querySelector('.dt-idle-drawer')).toBeNull()
+  await click(document.querySelector('.dt-idle-dock-button')!)
+  await settle()
+  expect(document.querySelector('.dt-idle-drawer')?.getAttribute('aria-label')).toBe(zh.boardPoolTitle)
+  // P2 is the pool a person may pick from; P3 is parked behind its own disclosure, so the drawer never dumps everything.
+  expect(all('.dt-idle-row .dt-idle-title').map(title => title.textContent)).toEqual(['【战斗】巡逻时偶现步态滑步'])
+  expect(document.querySelector('.dt-idle-parked .dt-idle-group-toggle')?.textContent).toContain('P3 暂存 · 1 张')
+  expect(document.querySelectorAll('.dt-idle-parked .dt-idle-row').length).toBe(0)
+  // The row menu offers the same four levels as a drag, keyboard-first; P0/P1 start the work, P2/P3 only change the level.
+  await click(document.querySelector('.dt-idle-menu')!)
+  await settle()
+  expect(all('.dt-idle-pop-level').map(level => level.textContent)).toEqual(['P0 紧急', 'P1 主线', 'P2 闲时', 'P3 暂存'])
+  expect(all('.dt-idle-pop button').map(button => button.querySelector('small')?.textContent))
+    .toEqual([zh.poolDropStart, zh.poolDropStart, zh.poolDropPark, zh.poolDropPark])
+  await click(all('.dt-idle-pop button')[1]!)
+  await settle()
   expect(server.requests.some(request => request.path === 'tickets/t2/promote' && request.method === 'POST'
     && (request.body as { level?: string } | undefined)?.level === 'P1')).toBe(true)
+  // Dropping on P2 is level-only: it goes through the priority route and must never start a turn.
+  await click(document.querySelector('.dt-idle-menu')!)
+  await settle()
+  await click(all('.dt-idle-pop button')[2]!)
+  await settle()
+  expect(server.requests.some(request => request.path === 'tickets/t2/priority' && request.method === 'POST'
+    && (request.body as { level?: string } | undefined)?.level === 'P2')).toBe(true)
+  expect(server.requests.some(request => request.path === 'tickets/t2/promote'
+    && (request.body as { level?: string } | undefined)?.level === 'P2')).toBe(false)
 })
 
 it('links the verdict figures to the records behind them', async () => {
@@ -433,7 +452,7 @@ it('shows the duty desk in English', async () => {
   await mount(en)
   expect(document.querySelector('.dt-verdict-title')?.textContent).toBe('2 to verify·2 waiting on you')
   expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('2 running')
-  expect(all('.dt-board-col-title').map(title => title.textContent)).toEqual(['Needs your decision', 'Running', 'Idle pool', 'To verify', 'Pipeline', 'Recently ended'])
+  expect(all('.dt-board-col-title').map(title => title.textContent)).toEqual(['Needs your decision', 'To verify', 'Running', 'Pipeline', 'Recently ended'])
   expect(all('.dt-deck-card-kind').map(kind => kind.textContent)).toEqual([en['stage.answer'], en['stage.failed']])
   expect(all('.dt-deck-card-foot button').map(button => button.textContent)).toContain(en.retry)
   expect(all('.dt-verify-badge').map(badge => badge.textContent)).toEqual([en.verifyWorkerBadge, en.verifyWorkerBadge])
@@ -498,5 +517,6 @@ it('shows paused processing as a system problem with its resume action', async (
   await click(zh.confirm)
   expect(server.requests.find(request => request.path === 'executor/pause')).toMatchObject({ method: 'POST', body: { paused: false } })
 })
+
 
 

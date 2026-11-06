@@ -1,4 +1,5 @@
 /** The local reproduction cases' page view: what the host finds on disk, how the recent runs ended, and what to open. */
+import type { TicketReproView } from './ticket-repro.ts'
 import type { ReproCase, ReproRootProblem } from '../repro.ts'
 import type { ReproRun } from '../repro-runner.ts'
 
@@ -40,17 +41,27 @@ export interface ReproPageView {
   blocked: 'agent' | 'job' | null
 }
 
+/** One case as the panel shows it: the same shape the editor page's card uses. */
+export function reproCaseView(item: ReproCase): ReproCaseView {
+  return { id: item.id, name: item.name, description: item.description,
+    ...item.command ? { command: item.command } : {}, ...item.report ? { report: item.report } : {},
+    ...item.problem ? { problem: item.problem } : {} }
+}
+
+/** One run as the panel shows it: the same shape the editor page's card uses. */
+export function reproRunView(run: ReproRun): ReproRunView {
+  return { id: run.id, caseId: run.caseId, caseName: run.caseName, state: run.state, startedAt: run.startedAt,
+    ...run.endedAt ? { endedAt: run.endedAt } : {}, ...run.exitCode !== undefined ? { exitCode: run.exitCode } : {},
+    summary: run.summary, ...run.report ? { report: run.report } : {} }
+}
+
 export function reproPage(input: { root: string; problem?: ReproRootProblem; cases: readonly ReproCase[]; runs: readonly ReproRun[]
   active?: { runId: string; caseId: string; tail: string }; blocked: 'agent' | 'job' | null }): ReproPageView {
   return {
     root: input.root,
     problem: input.problem ?? null,
-    cases: input.cases.map(item => ({ id: item.id, name: item.name, description: item.description,
-      ...item.command ? { command: item.command } : {}, ...item.report ? { report: item.report } : {},
-      ...item.problem ? { problem: item.problem } : {} })),
-    runs: input.runs.map(run => ({ id: run.id, caseId: run.caseId, caseName: run.caseName, state: run.state,
-      startedAt: run.startedAt, ...run.endedAt ? { endedAt: run.endedAt } : {}, ...run.exitCode !== undefined ? { exitCode: run.exitCode } : {},
-      summary: run.summary, ...run.report ? { report: run.report } : {} })),
+    cases: input.cases.map(reproCaseView),
+    runs: input.runs.map(reproRunView),
     active: input.active ?? null,
     blocked: input.blocked,
   }

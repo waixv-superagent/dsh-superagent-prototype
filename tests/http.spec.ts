@@ -80,8 +80,26 @@ it('answers only a same-origin request from the panel on the loopback address', 
   expect(() => serve({}, '0.0.0.0')).toThrow('Orchestrator management requires a loopback Web server')
 })
 
-it('answers a ticket\'s open question from the panel, by one of its choices or in writing', async () => {
+it('changes a level without starting work, and refuses to demote a Ticket through promote', async () => {
   const calls: unknown[] = []
+  const call = serve({
+    store: { tickets: { get: (id: string) => id === 't1' ? { id } : undefined } },
+    engine: {
+      promoteTicket: (...args: unknown[]) => { calls.push(['promote', ...args]); return { priority: { level: 'P1' } } },
+      decidePriority: (...args: unknown[]) => { calls.push(['priority', ...args]); return { priority: { level: 'P2' } } },
+    },
+    requestPass: () => {},
+  })
+  // The drawer's P2/P3 drop zones only change the level: no worker turn is started behind a drag.
+  expect(await call('POST', 'tickets/t1/priority', { level: 'P2' })).toEqual({ status: 200, body: { level: 'P2' } })
+  expect(calls).toEqual([['priority', 't1', 'P2', 'panel', 'panel']])
+  // promote lifts a Ticket into the attention pool (P0/P1) and starts it; an idle level belongs to the level-only route.
+  expect(await call('POST', 'tickets/t1/promote', { level: 'P2' })).toMatchObject({ status: 400 })
+  expect(await call('POST', 'tickets/t1/promote', { level: 'P1' })).toEqual({ status: 200, body: { level: 'P1' } })
+  expect(calls[1]).toEqual(['promote', 't1', 'P1', 'panel', 'panel'])
+})
+
+it('answers a ticket\'s open question from the panel, by one of its choices or in writing', async () => {  const calls: unknown[] = []
   const call = serve({
     store: { tickets: { get: (id: string) => id === 't1' ? { id } : undefined } },
     engine: {
