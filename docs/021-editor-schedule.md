@@ -44,6 +44,7 @@ Workers get `orchestrator_editor` (`src/app/tools/executor.ts`):
 | `release note` | Ends the lease or leaves the queue. The gatekeeper closes the editor, commandlet or build processes the lease started. |
 | `close` | Stops the editor, commandlet or build this Ticket's lease started and gives the lease back; the gatekeeper refuses it when the Ticket does not hold the editor. |
 | `run purpose filter wait` | Queues a host job. A build waiting in the same workspace absorbs this Ticket instead of starting a second compile, and the worker gets that build's result. A Ticket that holds the editor hands its lease to its own job instead of waiting behind itself. The result, including a log tail, comes back when the job ends within the wait or as a message later. |
+| `capture window` | Requires this Ticket's lease. Lists the editor's top-level Slate windows, brings the one whose title contains `window` to the front (the active window when omitted), and stores a PNG of it with a JSON sidecar under `<stateDir>/evidence/<ticket>/` (docs/027). The pixels are the editor's own Slate rendering, so the capture still works while the desktop is locked. |
 | `status` | Shows the holder, the queue, this Ticket's jobs and ue-mcp's reading. |
 
 The worker prompt asks for a lease before a worker opens, builds, restarts or tests, and prefers `run` so builds batch. A call that bypasses the lease is not silently lost: the status names the `blocked` reason and the editors the probe sees, and the guard below reports and stops an editor a worker starts without its lease.
