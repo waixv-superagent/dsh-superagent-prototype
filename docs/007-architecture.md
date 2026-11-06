@@ -327,6 +327,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/core/idle.ts` | Idle time: the five signals (`queue`, `capacity`, `window`, `human`, `guard`), the three depths `L1`/`L2`/`L3`, the configured windows and their defaults, `idleState`, `idleAdmits` and the daily budget |
 | `src/core/analysis.ts` | The idle pool's read-only analysis (docs/025): the worker's `analysisSection` (change nothing, write the dossier, record a verdict), the `analysisBrief` its first message carries with the likely duplicates, the verdict labels, and `analysisRunning`/`analysisReady`/`analysisAdvice`/`worthAttention` |
 | `src/core/verification.ts` | The four-block verification package a delivered change reports: `VERIFY_LABELS`, `verifyLines` and `missingVerifyLabels` |
+| `src/core/editor-composition.ts` | Rider's editor run configuration (docs/021): the configurations and platforms, the target-name rule, the host platform mapping and `editorRunName`, shared by the runner and the panel |
 | `src/core/errors.ts` | `UserError` and `USER_ERRORS` |
 | `src/core/reasons.ts` | `Reason`, `REASONS` and `reasonText`: why the core recorded a Decision or set a Trigger aside, by code |
 | `src/core/ids.ts` | `key`: ids derived from their inputs, equal for equal inputs |
@@ -365,7 +366,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/editor.ts` | The editor occupancy probe: derives who holds `UnrealEditor`/`UnrealEditor-Cmd` from the operating system's process table, with the holder, activity, start time, pid and executable path; the panel reads a cached row |
 | `src/app/repro.ts` | The local reproduction cases (docs/024): where they live (`Saved/ReproTests` beside the configured editor project, else `<stateDir>/repro-tests`), the `case.json` schema and the problems a folder can carry, reading the case folders, the report path that must stay inside its folder, the platform-shell spawn and the one-line output summary |
 | `src/app/repro-runner.ts` | `ReproRunner` (docs/024): starts one local case at a time, writes its output under `<stateDir>/repro-logs`, records the run, its exit code and the report it wrote in `KV.repro.runs`, stops it on a person's click or after its timeout, and reclaims the run a restarted host left behind |
-| `src/app/build-runner.ts` | `BuildRunner` (docs/021): runs one of the person's configured compile-and-launch targets at a time under the shared editor's slot, writes its output under `<stateDir>/build-logs`, records the run and its verdict in `KV.build.runs`, stops it on a person's click or after its timeout, refuses while an agent or host job holds the editor, and reclaims the run a restarted host left behind |
+| `src/app/build-runner.ts` | `BuildRunner` (docs/021): composes Rider's run configuration (configuration × target × platform) from the configured build/launch templates and runs one at a time under the shared editor's slot, writes its output under `<stateDir>/build-logs`, records the run and its verdict in `KV.build.runs`, stops it on a person's click or after its timeout, refuses while an agent or host job holds the editor, and reclaims the run a restarted host left behind |
 | `src/app/views/repro.ts` | The reproduction cases' page view: the folder, the cases and their problems, the newest runs, the run in flight with its output tail, and what holds the editor |
 | `src/app/views/build.ts` | The compile-and-launch card's view: the configured targets, the newest runs, the run in flight with its output tail, and what holds the editor |
 | `src/app/views/ticket-repro.ts` | The acceptance page's repro entry (docs/024): the case folders a Ticket's verification package names, by folder name or by the Ticket's first eight characters, with their runs and the run in flight; an unmatched package keeps an empty list |
@@ -739,6 +740,7 @@ Point `DSH_HOME` at a temporary directory and create a new profile there. Copy t
 
 - Trust: which Trigger fields are trusted, such as the Source's actor and Thread membership, and which are not, such as the body and quotes.
 - Deployment isolation: the agent's profile on its own pinned DeepSeek Harness installation, so upgrading DeepSeek Harness elsewhere does not break it.
+
 
 
 

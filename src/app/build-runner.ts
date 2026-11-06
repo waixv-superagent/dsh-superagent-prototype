@@ -1,25 +1,30 @@
-/**
- * A person's compile-and-launch targets (docs/021): the editor page runs one configured target command as a host process,
- * one at a time, and shows its output. A run borrows the shared editor's slot: it refuses while an agent or a host job
- * holds it, claims the slot for the duration, and gives the slot back when the process ends. The target command performs
- * the whole compile-and-launch, so the panel never guesses an engine or a project layout.
+﻿/**
+ * A person's Rider-style compile-and-launch runs (docs/021): the editor page picks a configuration (Development,
+ * DebugGame, Shipping), a target (SunGameEditor, SunGame) and a platform (Win64), and the host composes the configured
+ * build and launch commands into one command — `build && launch` — run under the shared editor's slot. A run refuses
+ * while an agent or a host job holds the editor, claims the person's slot for its duration, and gives the slot back when
+ * the process ends. The command does the real work, so the panel never guesses an engine or a project layout.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createWriteStream, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { EDITOR_CONFIGURATIONS, editorRunName, type EditorConfiguration, type EditorPlatform }
+  from '../core/editor-composition.ts'
 import { UserError } from '../core/errors.ts'
 import { KV } from '../kv.ts'
 import { fillCommand, killTree } from './editor-scheduler.ts'
 
 /** How one run ended: a printed verdict never overrides what the process itself did. */
 export type BuildRunState = 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
-/** One configured target the person may launch: a name and the command that compiles and starts the editor. */
-export interface BuildTarget { name: string; command: string }
-/** One run of a target; the newest runs only, while every log stays on disk. */
-export interface BuildRun {
+/** One Rider-style run configuration: configuration × target × platform. */
+export interface BuildSelection { target: string; configuration: EditorConfiguration; platform: EditorPlatform }
+/** One composed run; the newest runs only, while every log stays on disk. */
+export interface BuildRun extends BuildSelection {
   id: string
-  target: string
+  /** Rider's name for the combination, such as `Development Editor SunGame`. */
+  name: string
+  /** The composed command, build then launch. */
   command: string
   state: BuildRunState
   startedAt: string
@@ -50,11 +55,17 @@ export interface BuildRunnerHost {
   readonly store: { get<V>(key: string & { readonly __value?: V }): V | undefined; set<V>(key: string & { readonly __value?: V }, value: V): void }
   /** Where the run logs go. */
   readonly logDir: string
-  /** The configured targets, read on each call so a settings save takes effect at once. */
-  targets(): readonly BuildTarget[]
+  /** The configured target names, read on each call so a settings save takes effect at once. */
+  targets(): readonly string[]
+  /** The build command template; `<target>`, `<configuration>`, `<platform>` and `<project>` are replaced. */
+  buildCommand(): string
+  /** The launch command template, filled the same way and run only when the build succeeded. */
+  launchCommand(): string
+  /** The platforms this host can build for, so the panel does not offer a foreign platform. */
+  platforms(): readonly EditorPlatform[]
   /** The configured `.uproject`; `<project>` is replaced with it. */
   project(): string
-  /** The directory a target command runs in: the project's directory, else the state directory. */
+  /** The directory the command runs in: the project's directory, else the state directory. */
   cwd(): string
   /** Why an agent or a host job holds the editor now, or null when the person may use it. */
   blocked(): 'agent' | 'job' | null
@@ -71,7 +82,7 @@ export interface BuildRunnerHost {
   warn?: (message: string) => void
 }
 
-/** Owns the runs of the person's compile-and-launch targets: see the file comment. */
+/** Owns the runs of the person's composed targets: see the file comment. */
 export class BuildRunner {
   private readonly children = new Map<string, ChildProcess>()
   private readonly tails = new Map<string, string>()
@@ -92,10 +103,21 @@ export class BuildRunner {
 
   /** The runs newest first, as the page shows them. */
   read(): BuildRun[] { return this.tick() }
-  /** The configured targets, as the person sees them. */
-  targets(): readonly BuildTarget[] { return this.host.targets() }
+  /** The configured target names, as the person sees them. */
+  targets(): readonly string[] { return this.host.targets() }
+  /** The platforms this host can build for, as the person sees them. */
+  platforms(): readonly EditorPlatform[] { return this.host.platforms() }
   /** Why the person may not start a run now, beyond a running build. */
   blocked(): 'agent' | 'job' | null { return this.host.blocked() }
+
+  /** The command a run would compose for a selection, as the page shows it before the click. */
+  preview(selection: BuildSelection): string {
+    const build = fillCommand(this.host.buildCommand(), { project: this.host.project(), dir: this.host.cwd(),
+      target: selection.target, configuration: selection.configuration, platform: selection.platform })
+    const launch = fillCommand(this.host.launchCommand(), { project: this.host.project(), dir: this.host.cwd(),
+      target: selection.target, configuration: selection.configuration, platform: selection.platform })
+    return [build, launch].filter(Boolean).join(' && ')
+  }
 
   /**
    * Recovers after a restart: a run the host was running lost its output, so its process is stopped and the slot it held
@@ -122,24 +144,26 @@ export class BuildRunner {
   }
 
   /**
-   * Starts one target. Only one run is in flight, because the editor is single; an agent or host job holding the editor
+   * Starts one composed run. Only one is in flight, because the editor is single; an agent or host job holding the editor
    * refuses the run instead of fighting it. The command runs through the platform shell in the project's directory.
    */
-  start(targetName: string): BuildRun {
+  start(selection: BuildSelection): BuildRun {
     const runs = this.tick()
     if (runs.some(run => run.state === 'running')) throw new UserError('buildBusy')
-    const target = this.host.targets().find(item => item.name === targetName)
-    if (!target) throw new UserError('unknownBuildTarget', { target: targetName })
-    if (!target.command.trim()) throw new UserError('buildTargetEmpty', { target: target.name })
+    if (!this.host.targets().includes(selection.target)) throw new UserError('unknownBuildTarget', { target: selection.target })
+    if (!EDITOR_CONFIGURATIONS.includes(selection.configuration)) throw new UserError('buildConfiguration', { configuration: String(selection.configuration) })
+    if (!this.host.platforms().includes(selection.platform)) throw new UserError('buildPlatform', { platform: String(selection.platform) })
+    if (!this.host.buildCommand().trim() || !this.host.launchCommand().trim()) throw new UserError('buildMissingCommand')
     const blocked = this.host.blocked()
     if (blocked) throw new UserError(blocked === 'agent' ? 'buildBlockedAgent' : 'buildBlockedJob')
     const slot = this.host.takeSlot()
     if (!slot.granted) throw new UserError('buildEditorBusy')
-    const command = fillCommand(target.command, { project: this.host.project(), dir: this.host.cwd() })
+    const command = this.preview(selection)
+    const name = editorRunName(selection.target, selection.configuration)
     const id = randomUUID().slice(0, 12)
     mkdirSync(this.host.logDir, { recursive: true })
     const log = join(this.host.logDir, `${id}.log`)
-    const run: BuildRun = { id, target: target.name, command, state: 'running', startedAt: new Date(this.now()).toISOString(),
+    const run: BuildRun = { ...selection, id, name, command, state: 'running', startedAt: new Date(this.now()).toISOString(),
       summary: '', log, ...slot.owned ? { claimed: true as const } : {} }
     let child: ChildProcess
     try { child = (this.host.spawn ?? defaultSpawn)(command, this.host.cwd()) } catch (error) {
@@ -164,7 +188,7 @@ export class BuildRunner {
     child.on('error', error => { collect(`\n${reason(error)}\n`) })
     const timer = setTimeout(() => {
       if (!this.children.has(id)) return
-      this.warn(`target ${target.name} ran past ${Math.round(BUILD_TIMEOUT_MS / 60_000)} minutes; stopping it`)
+      this.warn(`${name} ran past ${Math.round(BUILD_TIMEOUT_MS / 60_000)} minutes; stopping it`)
       if (child.pid) this.kill(child.pid)
     }, BUILD_TIMEOUT_MS)
     timer.unref?.()
@@ -234,3 +258,5 @@ function defaultSpawn(command: string, cwd: string): ChildProcess {
     ? spawn(process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe', ['/d', '/s', '/c', `"${command}"`], { cwd, windowsHide: true, windowsVerbatimArguments: true })
     : spawn('/bin/sh', ['-c', command], { cwd, detached: true })
 }
+
+

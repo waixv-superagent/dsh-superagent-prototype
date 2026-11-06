@@ -1,4 +1,4 @@
-/** Loopback-only management HTTP routes with same-origin enforcement for the web panel. */
+﻿/** Loopback-only management HTTP routes with same-origin enforcement for the web panel. */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -19,6 +19,7 @@ import { VISIBLE_RUNS } from './repro-runner.ts'
 import type { BuildRunner } from './build-runner.ts'
 import { VISIBLE_BUILD_RUNS } from './build-runner.ts'
 import { buildPage } from './views/build.ts'
+import { EDITOR_CONFIGURATIONS, EDITOR_PLATFORMS, EDITOR_TARGET } from '../core/editor-composition.ts'
 import { inside, readReproCases } from './repro.ts'
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
@@ -74,7 +75,7 @@ export interface HttpHost {
   /** The local reproduction cases' runs (docs/024); absent on a host built before them. */
   readonly repro?: Pick<ReproRunner, 'tick' | 'run' | 'stop' | 'log' | 'root'>
   /** The person's compile-and-launch targets and runs (docs/021); absent on a host built before them. */
-  readonly build?: Pick<BuildRunner, 'read' | 'start' | 'stop' | 'targets' | 'blocked' | 'logTail'>
+  readonly build?: Pick<BuildRunner, 'read' | 'start' | 'stop' | 'targets' | 'platforms' | 'preview' | 'blocked' | 'logTail'>
   /** Rolling model spend the overview's billing strip reads; absent on a host built before it. */
   readonly billing?: Pick<Billing, 'view'>
   /** The one-click update the sidebar badge offers; absent on a host built before it. */
@@ -244,7 +245,8 @@ const RequestRequest = z.object({ text: z.string().trim().min(1).max(LIMITS.requ
 const ReproRunRequest = z.object({ case: z.string().trim().min(1).max(120) }).strict()
 const ReproStopRequest = z.object({ run: z.string().trim().min(1).max(64) }).strict()
 const ReproLogQuery = z.object({ run: z.string().trim().min(1).max(64) })
-const BuildRunRequest = z.object({ target: z.string().trim().min(1).max(80) }).strict()
+const BuildRunRequest = z.object({ target: z.string().trim().regex(EDITOR_TARGET), configuration: z.enum(EDITOR_CONFIGURATIONS),
+  platform: z.enum(EDITOR_PLATFORMS) }).strict()
 const BuildStopRequest = z.object({ run: z.string().trim().min(1).max(64) }).strict()
 
 /** Why a local case may not start now: an agent or a host job holds the shared editor, never a person's own claim. */
@@ -328,16 +330,19 @@ function routes(runtime: HttpHost): Routes {
       if (!build) throw new RouteError(404, 'This host has no build runner')
       const runs = build.read().slice(0, VISIBLE_BUILD_RUNS)
       const active = runs.find(run => run.state === 'running')
-      return buildPage({ targets: build.targets(),
-        runs: runs.map(run => ({ id: run.id, target: run.target, state: run.state, startedAt: run.startedAt,
+      const editor = runtime.store.settings().executor.editor
+      return buildPage({ targets: build.targets(), configurations: [...EDITOR_CONFIGURATIONS], platforms: build.platforms(),
+        build: editor.build, launch: editor.restart,
+        runs: runs.map(run => ({ id: run.id, name: run.name, target: run.target, configuration: run.configuration,
+          platform: run.platform, state: run.state, startedAt: run.startedAt,
           ...run.endedAt ? { endedAt: run.endedAt } : {}, ...run.exitCode !== undefined ? { exitCode: run.exitCode } : {}, summary: run.summary })),
-        ...active ? { active: { runId: active.id, target: active.target, tail: build.logTail(active.id, ACTIVE_TAIL) } } : {},
+        ...active ? { active: { runId: active.id, name: active.name, tail: build.logTail(active.id, ACTIVE_TAIL) } } : {},
         blocked: build.blocked() })
     },
     'POST build/run': async ({ body }) => {
       const build = runtime.build
       if (!build) throw new RouteError(404, 'This host has no build runner')
-      build.start(BuildRunRequest.parse(await body(2_048)).target)
+      build.start(BuildRunRequest.parse(await body(2_048)))
       return { started: true as const }
     },
     'POST build/stop': async ({ body }) => {
@@ -587,3 +592,4 @@ export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
     } })]
   return () => { for (const dispose of disposers) dispose() }
 }
+

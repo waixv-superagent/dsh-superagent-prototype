@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+﻿// @vitest-environment jsdom
 // The editor page: who holds the editor, which Tickets are working with their live tool, and what waits on a person.
 import { expect, it } from 'vitest'
 import { zh } from '../src/client/locales.ts'
@@ -350,18 +350,21 @@ it('keeps a batched entry per Ticket so each name opens its own page', async () 
 })
 
 it('runs a configured compile-and-launch target from the editor page and shows its output', async () => {
-  server.buildPage = { ...server.buildPage, targets: [{ name: 'Development Editor', command: 'Build.bat -Target=SunGameEditor' }],
-    runs: [], active: null, blocked: null }
+  server.buildPage = { ...server.buildPage, targets: ['SunGame', 'SunGameEditor'],
+    configurations: ['Development', 'DebugGame', 'Shipping'], platforms: ['Win64'],
+    build: 'Build.bat <target> <platform> <configuration>', launch: 'start <project>', runs: [], active: null, blocked: null }
   await mountHome()
   await openEditor()
   expect(document.querySelector('#dt-build-title')?.textContent).toBe(zh.buildTitle)
-  expect(all('#dt-build-target option').map(option => option.textContent)).toEqual(['Development Editor'])
-  expect(document.querySelector('.dt-build-command')?.textContent).toContain('Build.bat -Target=SunGameEditor')
+  expect(all('#dt-build-preset option').map(option => option.textContent)).toEqual([
+    'Development Game SunGame', 'DebugGame Game SunGame', 'Shipping Game SunGame',
+    'Development Editor SunGame', 'DebugGame Editor SunGame', 'Shipping Editor SunGame'])
+  expect(document.querySelector('.dt-build-command')?.textContent).toContain('Build.bat')
   // The host starts the run and the page polls it back; the card then shows the live output and offers Stop.
-  server.buildPage = { ...server.buildPage, active: { runId: 'r1', target: 'Development Editor', tail: 'Building...\nResult: Succeeded\n' } }
-  await click(find(zh.buildRun, '.dt-build button'))
+  server.buildPage = { ...server.buildPage, active: { runId: 'r1', name: 'Development Game SunGame', tail: 'Building...\nResult: Succeeded\n' } }
+  await click(find(zh.buildRun, '.dt-build-controls button'))
   expect(server.requests.some(request => request.path === 'build/run' && request.method === 'POST'
-    && (request.body as { target?: string } | undefined)?.target === 'Development Editor')).toBe(true)
+    && JSON.stringify(request.body) === JSON.stringify({ target: 'SunGameEditor', configuration: 'Development', platform: 'Win64' }))).toBe(true)
   await settle()
   expect(document.querySelector('.dt-build-log')?.textContent).toContain('Result: Succeeded')
   expect(all('.dt-build button').map(button => button.textContent)).toContain(zh.buildStop)
@@ -375,11 +378,15 @@ it('points at the settings when no compile target is configured, and disables th
   await click(zh.buildConfigure)
   expect(tab(zh['tab.settings']).getAttribute('aria-selected')).toBe('true')
 
-  server.buildPage = { ...server.buildPage, targets: [{ name: 'Development Editor', command: 'Build.bat' }], blocked: 'agent' }
+  server.buildPage = { ...server.buildPage, targets: ['SunGame', 'SunGameEditor'], blocked: 'agent' }
   await mountHome()
   await openEditor()
   const button = find(zh.buildRun, '.dt-build button')
   expect(button.hasAttribute('disabled')).toBe(true)
   expect(document.querySelector('.dt-build-blocked')?.textContent).toBe(zh.buildBlockedAgent)
 })
+
+
+
+
 

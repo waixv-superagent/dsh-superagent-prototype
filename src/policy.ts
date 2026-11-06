@@ -222,18 +222,21 @@ export const StallConfigSchema = z.object({
 export const EditorConfigSchema = z.object({
   /** The `.uproject` the editor opens; ue-mcp's bridge status is read beside it. Empty turns the bridge reading off. */
   project: z.string().trim().max(400).default(''),
-  /** The project's own compile entry, such as `<dir>\Development\Project\SunGame\Build\BatchFiles\Compile\CompileSunGame.bat`. */
+  /** The build command; `<target>`, `<configuration>`, `<platform>` and `<project>` are replaced for a composed run. */
   build: z.string().trim().max(1000).default(''),
-  /** Restarts the editor, such as ue-mcp's `editor.restart_editor` through its CLI. */
+  /** The launch command, filled the same way and run only after the build succeeded (`build && launch`). */
   restart: z.string().trim().max(1000).default(''),
   /** Runs one automation filter headless; `<filter>` is replaced by the worker's filter. */
   test: z.string().trim().max(1000).default(''),
   /**
-   * The person's compile-and-launch targets on the editor page (docs/021): each runs its command as a host process under
-   * the shared editor's slot. `<project>` is replaced with the `.uproject`; the command does the compile and the launch.
+   * The Unreal target names the editor page offers, such as `SunGame` and `SunGameEditor` (docs/021). A person picks one
+   * with a configuration and a platform, and the host composes the build and launch commands into one run. Entries saved
+   * as the earlier `name=command` pairs are read by their name; the composition replaces their one-off command.
    */
-  targets: z.array(z.object({ name: z.string().trim().min(1).max(80), command: z.string().trim().min(1).max(2000) }).strict())
-    .max(20).default([]),
+  targets: z.array(z.union([
+    z.string().trim().min(1).max(80),
+    z.object({ name: z.string().trim().min(1).max(80), command: z.string().max(2000) }).strict().transform(item => item.name),
+  ])).max(20).default([]),
 }).strict()
 /** Executor settings: worker model, concurrency, ticket directory root (empty defaults to `<stateDir>/work`), `prepare` command, blocked commands, and the delivery backend. */
 export const ExecutorConfigSchema = z.object({
@@ -398,3 +401,4 @@ export function settingsPolicy(settings: Settings, sources: SourceScope): Policy
     },
   }
 }
+
