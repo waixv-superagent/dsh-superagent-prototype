@@ -365,11 +365,10 @@ export function resolveCpptools(root = process.env.USERPROFILE) {
 }
 
 /**
- * The extensions directory a capture window reads. It holds a copy of the C/C++ extension inside the
- * project's Saved directory, so the capture never writes into the person's own VS Code installation.
+ * An isolated copy of the C/C++ extension; neither the UE project nor the user's VS Code is changed.
  */
-function extensionsCache(paths, cpptools) {
-  const root = join(paths.project, 'Saved', 'AgentVscode', 'extensions')
+function extensionsCache(options, cpptools) {
+  const root = join(options.vscodeData ?? join(tmpdir(), 'ue-vscode-cache'), 'extensions')
   const target = join(root, basename(cpptools))
   if (!existsSync(target)) {
     mkdirSync(root, { recursive: true })
@@ -379,18 +378,18 @@ function extensionsCache(paths, cpptools) {
 }
 
 /** Stops the capture window if the extension did not quit it itself. */
-function stopCaptureWindow(userDataDir) {
+async function stopCaptureWindow(userDataDir) {
   const script = 'Get-CimInstance Win32_Process | Where-Object { $_.Name -eq \'Code.exe\' -and '
     + `$_.CommandLine -like '*${String(userDataDir).replaceAll("'", "''")}*' } | `
     + 'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }'
-  spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: 'ignore' })
+  await runProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { timeoutMs: 15000 })
 }
 
 /**
  * Captures through VS Code's own C/C++ debugger. `vsdbg` refuses a session started by any client but
  * Microsoft VS Code, so the tool opens a short-lived VS Code window with `scripts/ue-vscode` and lets
  * the extension start `cppvsdbg` there; the extension writes the stop as JSON and closes the window.
- * The first run copies the C/C++ extension into `<project>/Saved/AgentVscode/extensions` (about 270 MB).
+ * The first run copies the C/C++ extension into a separate temporary cache (about 270 MB).
  */
 async function vscodeCapture(paths, options) {
   if (options.program && !existsSync(options.program)) {
@@ -405,8 +404,9 @@ async function vscodeCapture(paths, options) {
     process.stdout.write(`${code}\n${cpptools}\n`)
     return 0
   }
-  const extensions = extensionsCache(paths, cpptools)
-  const work = mkdtempSync(join(tmpdir(), 'ue-vscode-'))
+  const extensions = extensionsCache(options, cpptools)
+  if (options.captureDir) mkdirSync(options.captureDir, { recursive: true })
+  const work = mkdtempSync(join(options.captureDir ?? tmpdir(), 'ue-vscode-'))
   const jobPath = join(work, 'job.json')
   const outputPath = join(work, 'capture.json')
   const logPath = join(work, 'job.log')
@@ -414,8 +414,14 @@ async function vscodeCapture(paths, options) {
   try {
     writeFileSync(jobPath, `${JSON.stringify({
       pid: options.pid, program: options.program, args: options.args, cwd: options.cwd,
-      breakpoints: options.breakpoints, frames: options.frames, vars: options.vars,
+      breakpoints: options.breakpoints, functions: options.functions,
+      frames: options.frames, vars: options.vars, scopes: options.scopes,
       visualizerFile: visualizerOf(paths), timeoutMs: options.timeoutMs, output: outputPath, logPath,
+      tracePath: join(work, 'dap.jsonl'), requestTimeoutMs: options.requestTimeoutMs,
+      ...(options.symbols.length ? { configuration: { symbolOptions: {
+        searchMicrosoftSymbolServer: false,
+        moduleFilter: { mode: 'loadOnlyIncluded', includedModules: options.symbols, includeSymbolsNextToModules: false },
+      } } } : {}),
       terminate: Boolean(options.terminate && !options.pid),
     }, null, 2)}\n`)
     mkdirSync(join(work, 'workspace'), { recursive: true })
@@ -426,14 +432,14 @@ async function vscodeCapture(paths, options) {
       '--new-window', '--disable-workspace-trust', '--disable-gpu', join(work, 'workspace'),
     ]
     const line = ['call', code, ...arguments_].map(quoteArg).join(' ')
+    writeFileSync(join(work, 'invocation.json'), `${JSON.stringify({ command: 'cmd.exe', args: ['/d', '/s', '/c', line], jobPath }, null, 2)}\n`)
     const launched = await runProcess('cmd.exe', ['/d', '/s', '/c', line], {
       env: { ...process.env, UE_CAPTURE_JOB: jobPath }, verbatim: true, timeoutMs: 60_000,
     })
-    const deadline = Date.now() + options.timeoutMs
+    const deadline = Date.now() + options.timeoutMs * 2 + 15000
     while (Date.now() < deadline && !existsSync(outputPath)) await sleep(500)
     if (!existsSync(outputPath)) {
-      stopCaptureWindow(join(work, 'user'))
-      throw Object.assign(new Error(`VS Code wrote no capture within ${Math.round(options.timeoutMs / 1000)}s`
+      throw Object.assign(new Error(`VS Code wrote no capture within its startup/capture deadline`
         + `${launched.code === 0 ? '' : `; opening the window exited ${launched.code}`}`), { exitCode: 5 })
     }
     const captured = JSON.parse(readFileSync(outputPath, 'utf8'))
@@ -443,19 +449,24 @@ async function vscodeCapture(paths, options) {
     succeeded = true
     const result = {
       backend: 'vscode', mode: options.pid ? 'attach' : 'launch', adapter: code,
-      breakpoints: options.breakpoints.map(breakpoint => ({ file: breakpoint.file, line: breakpoint.line, verified: true })),
-      functionBreakpoints: [],
+      breakpoints: captured.breakpoints ?? [],
+      functionBreakpoints: captured.functionBreakpoints ?? [],
       stop: captured.stop,
-      threads: [],
+      threads: captured.threads ?? [],
       frames: captured.frames ?? [],
       variables: (captured.variables ?? []).map(variable => ({ frame: 0, ...variable })),
+      process: captured.process,
+      configuration: captured.configuration,
+      ...(captured.variableErrors?.length ? { variableErrors: captured.variableErrors } : {}),
+      ...(captured.cleanupError ? { cleanupError: captured.cleanupError } : {}),
+      ...(options.captureDir ? { evidenceDirectory: work } : {}),
     }
     if (options.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
     else process.stdout.write(formatCapture(result))
     return 0
   } finally {
-    stopCaptureWindow(join(work, 'user'))
-    if (!succeeded) {
+    await stopCaptureWindow(join(work, 'user'))
+    if (!succeeded || options.captureDir) {
       process.stderr.write(`[ue-lldb] VS Code capture job kept at ${work}\n`)
     } else {
       // VS Code may still hold a file in the window profile for a moment; a leftover temp directory
@@ -638,7 +649,7 @@ async function capture(paths, options) {
 export function parseArgs(argv) {
   const args = argv[0] === 'capture' ? argv.slice(1) : argv
   const options = {
-    args: [], breakpoints: [], functions: [], frames: 3, vars: 40, scopes: 3, backend: 'auto',
+    args: [], breakpoints: [], functions: [], symbols: [], frames: 3, vars: 40, scopes: 3, backend: 'auto',
     timeout: DEFAULT_TIMEOUT_SECONDS, json: false, print: false, terminate: false,
   }
   for (let index = 0; index < args.length; index += 1) {
@@ -662,6 +673,9 @@ export function parseArgs(argv) {
       case 'cwd': options.cwd = resolve(value()); break
       case 'break': options.breakpoints.push(parseBreakpoint(value())); break
       case 'break-func': options.functions.push(value()); break
+      case 'symbols': options.symbols.push(value()); break
+      case 'vscode-data': options.vscodeData = resolve(value()); break
+      case 'capture-dir': options.captureDir = resolve(value()); break
       case 'backend': options.backend = value(); break
       case 'formatters': options.formatters = resolve(value()); break
       case 'lldb': options.lldb = resolve(value()); break
@@ -697,6 +711,9 @@ const USAGE = `Usage: node scripts/ue-lldb.mjs capture (--pid <pid> | --launch <
 Options
   --break <file>:<line>   Source breakpoint; may be repeated
   --break-func <name>     Function breakpoint; may be repeated
+  --symbols <module>      VS Code: load only these module PDBs; may be repeated (default: all)
+  --vscode-data <dir>     VS Code extension cache directory (default: OS temporary directory)
+  --capture-dir <dir>     Keep VS Code job, configuration and DAP trace beneath this directory
   --arg <value>           Argument for --launch; may be repeated
   --cwd <dir>             Working directory for a launched program
   --timeout <seconds>     How long to wait for a breakpoint (default: ${DEFAULT_TIMEOUT_SECONDS})

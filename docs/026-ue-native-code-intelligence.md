@@ -1,8 +1,9 @@
 # 026 — UE C++ code intelligence without Rider
 
-Status: implemented 2026-11-06 as `scripts/ue-clangd.mjs` and `scripts/ue-lldb.mjs`, verified against the
-SunGame workspace. This document records what replaced Rider, the measurements that decided it, and the
-limits a worker still has to respect.
+Status: implemented and verified on 2026-11-06 as `scripts/ue-clangd.mjs` and `scripts/ue-lldb.mjs`;
+the clangd index/queries ran on the SunGame workspace and a launched Development editor was stopped at
+`UWorld::Tick` through VS Code's C/C++ debugger (`cppvsdbg`). This document records what replaced Rider,
+the measurements that decided it, and the limits a worker still has to respect.
 
 ## 1. The dependency this removes
 
@@ -59,10 +60,8 @@ Live checks on 2026-11-06, after regenerating the database for `SunEditor Win64 
 | `ue-clangd diagnostics` on `SunAssetManager.cpp` | 0 diagnostics; the stale database reported 23, including `KuroContentVariantPlatform.h` not found |
 | `ue-lldb capture --launch <clang-cl fixture>` | stopped at `fixture.cpp:4`; frames and locals (`value`, `result`) returned |
 | `ue-lldb capture --backend vscode --launch <loop fixture>` | the C/C++ debugger started inside VS Code, stopped at `loop.cpp:1`, and returned the `f`/`main` frames and the `i` variable |
-| `ue-lldb capture --backend vscode --launch <Development editor>` | the `cppvsdbg` session started and launched the editor, but the editor stopped progressing at its Turnkey SDK stage and never reached `FEngineLoop::PreInit` or `UWorld::Tick` within the timeout; attaching to an already-started editor did not start a session |
-| `ue-lldb capture --pid <DebugGame editor>` (lldb) | attached and resolved a source breakpoint, but `continue` did not proceed in the batch run; function-breakpoint resolution crashed `lldb` (`0xC0000005`) and `lldb-dap` aborted (`0xC0000409`) after PDB type errors; see §7 |
-| stock LLVM 20.1.8 `lldb` + Python 3.10 embed on `<Development editor>` | the engine starts and parses, but attaching to the editor grew past 13 GB of memory in about three minutes and had not completed when stopped; not viable |
-| Visual Studio 2022 DTE attach (manual probe) | attached to the editor and added a source breakpoint, but `Debugger.Go` failed with "Cannot execute the method at this time" |
+| `ue-lldb capture --backend vscode --launch <Development editor>` | launched the editor, bound the `UWorld::Tick` function breakpoint and stopped at `LevelTick.cpp:1657`; 3 frames, 165 threads, 83 variables with NatVis (`UEditorEngine::this` = `Name="SunEditorEngine"_0`); the launched editor was terminated |
+| `ue-lldb capture --pid <Development editor>` (lldb) | the engine LLDB aborts on the editor PDB type completion (`0xC0000409`; `lldb -b` `0xC0000005`), which is why this route is not used |
 
 ## 4. `ue-clangd.mjs`
 
@@ -115,22 +114,44 @@ default: on this installation importing it aborts lldb-dap with `0xC0000409` and
 opt-in with `--formatters <file>` once a formatter is known to work with the adapter's Python build.
 Without it, UObject pointers print as addresses and the raw frame variables are still readable.
 
-The primary route is VS Code's own C/C++ debugger, the engine a person already uses in VS Code:
+The primary route is VS Code's own C/C++ debugger, the engine a person already uses in VS Code. The
+verified command for the editor is a launch, not an attach:
 
 ```sh
-node scripts/ue-lldb.mjs capture --pid <editor-pid> --break LevelTick.cpp:1654 --json
+node scripts/ue-lldb.mjs capture --backend vscode --launch <Engine>/Binaries/Win64/UnrealEditor.exe \
+  --arg <project>/SunGame.uproject --arg -unattended --arg -log --arg -nosplash \
+  --cwd <Engine>/Binaries/Win64 \
+  --break-func "UWorld::Tick" \
+  --symbols UnrealEditor.exe --symbols UnrealEditor-Engine.dll --symbols UnrealEditor-Core.dll \
+  --symbols UnrealEditor-CoreUObject.dll --symbols UnrealEditor-UnrealEd.dll \
+  --terminate --json
 ```
 
-`capture` opens a short-lived VS Code window with the small development extension in
-`scripts/ue-vscode`; the extension starts a `cppvsdbg` attach (or launch) session, waits for the stop,
-reads the threads, frames and variables, writes them as JSON and closes the window. The tool copies the
-installed C/C++ extension into `<project>/Saved/AgentVscode/extensions` on first use (about 270 MB) and
-runs the window with its own profile, so the person's VS Code installation and open window are not used
-or changed. The engine's `Unreal.natvis` is passed as the `visualizerFile`. The route is verified with a
-launched clang-cl program; the editor case is covered in §7.
+It opened the SunGame Development editor, bound the `UWorld::Tick` function breakpoint and stopped at
+`LevelTick.cpp:1657` with three frames, the 165 threads of the process and 83 frame variables; the NatVis
+formatters resolved `UEditorEngine::this` to `Name="SunEditorEngine"_0` and `FEngineLoop::this` to its
+field values. `--terminate` ends the editor the capture started.
 
-`--backend auto` tries this route first, then `lldb-dap`, then the `lldb` CLI for an attach. The other
-routes exist because this machine may not have VS Code or the C/C++ extension:
+What makes this route work, and what the earlier attempts missed:
+
+- The extension watches the real DAP stream through `vscode.debug.registerDebugAdapterTrackerFactory`
+  and waits for the `stopped` event. Polling `stackTrace` on a running process cannot work: cppvsdbg
+  answers the request only while the target is stopped, and cppvsdbg reports stop and frame data as
+  events, not as request results.
+- Function breakpoints are registered as `vscode.FunctionBreakpoint`; a source line in an engine
+  function is fragile under optimization, a function name is what cppvsdbg resolves.
+- The capture window opens a temporary workspace folder that VS Code reports as **trusted**
+  (`workspace.isTrusted`); cppvsdbg does not start a session in an untrusted window.
+- `--symbols` maps to `symbolOptions.moduleFilter = loadOnlyIncluded` for just the modules in the
+  call path. Without it cppvsdbg loads the PDBs of every loaded module (7.5 GB and more) before the
+  editor's first tick, which looked like the editor "stalling at Turnkey".
+- The engine's `Unreal.natvis` is passed as `visualizerFile`; the C/C++ extension copy is cached in an
+  isolated directory (the OS temp directory, or `--vscode-data <dir>`), and `--capture-dir <dir>` keeps
+  the job, the DAP trace and the editor log as evidence.
+
+Attaching to an editor that someone else started is still unverified; the verified route launches the
+editor inside the capture. `--backend auto` tries this route first, then `lldb-dap`, then the `lldb` CLI
+for an attach. The other routes exist because this machine may not have VS Code or the C/C++ extension:
 
 - `vsdbg.exe` started directly is not usable: the Visual Studio debug engine refuses a client that is
   not Microsoft VS Code (`C/C++ Debugging is supported only in Microsoft versions of VS Code`), so a
@@ -153,7 +174,7 @@ The skill's existing rule still holds: a breakpoint in game module code only bin
 | Definition / references | `ue-clangd definition` / `references` | one clangd startup plus a preamble; 13.7 s measured for a large module |
 | File diagnostics | `ue-clangd diagnostics` | same; no IDE needed; 0 diagnostics on a freshly generated database |
 | Compile database refresh | `ue-clangd index` | a UBT action-graph build; 181 s and 39,917 commands measured |
-| Breakpoint capture | `ue-lldb capture` | a VS Code window start plus the debug engine's PDB load; the first run also copies the C/C++ extension (about 270 MB) |
+| Breakpoint capture | `ue-lldb capture` | a VS Code window start plus the filtered PDB load; the first run also copies the C/C++ extension (about 270 MB) |
 
 ## 7. Limits and follow-ups
 
@@ -178,20 +199,17 @@ The skill's existing rule still holds: a breakpoint in game module code only bin
   `definition`, `references`, `hover` and `diagnostics` do not depend on it.
 - **Breakpoints need VS Code and its C/C++ extension.** The capture opens a short-lived VS Code window
   with its own profile and a cached copy of `ms-vscode.cpptools`; the person's own window is not reused.
-  The working capture is demonstrated on a launched clang-cl program. For the UE editor this route is
-  still blocked: `cppvsdbg` starts a session and launches the editor, but the editor stops progressing
-  at its Turnkey SDK stage and never reaches `FEngineLoop::PreInit`/`UWorld::Tick`, while attaching to an
-  editor that someone else started does not start a `cppvsdbg` session. Installing WinDbg/`cdb` was
-  attempted through `winget` and blocked by a 403 from the Microsoft download host. Two further routes
-  were tried: the stock LLVM 20.1.8 `lldb` (run with a Python 3.10 embeddable runtime, since its
-  `liblldb` links `python310.dll`) starts but attaching to the editor grew past 13 GB without completing
-  in about three minutes; Visual Studio 2022's DTE automation attached to the editor and added a source
-  breakpoint, but `Debugger.Go` failed with "Cannot execute the method at this time". Until one of those
-  is solved, editor breakpoints remain in Rider; `lldb-dap`/`lldb` also do not debug the editor here (the
-  engine LLDB aborts on the editor PDB type completion: `0xC0000409`; `lldb -b` crashed with
-  `0xC0000005` after `Class ... does not have a complete definition` errors).
+  A launched editor is verified; attaching to an editor that someone else started is still unverified.
+  Use a function breakpoint (`--break-func`) with `--symbols` for the modules in the call path, and
+  `--terminate` for an editor the capture started. Without VS Code (or without `code` on `PATH`),
+  `auto` falls back to `lldb-dap`/`lldb`, which do not debug the editor here: the engine LLDB aborts on
+  the editor PDB type completion (`0xC0000409`; `lldb -b` crashed with `0xC0000005` after
+  `Class ... does not have a complete definition` errors), so those fallbacks remain for ordinary
+  clang-cl programs only.
 - **A CLI attach timeout can leave the target stopped.** Killing `lldb` mid-attach may leave the
   debuggee suspended; keep the timeout short and stop the process afterwards when that happens.
 - **Verification.** `tests/ue-native.spec.ts` covers framing, argument building, URI/position conversion
-  and result shaping. The live checks are the commands in sections 4 and 5 against a real workspace; see
-  [022 Verification fixtures](022-verification-fixtures.md) for how evidence is recorded.
+  and result shaping; `tests/ue-vscode.spec.ts` drives the VS Code extension against a DAP-shaped mock
+  (real `stopped` events, function breakpoints, failed captures). The live checks are the commands in
+  sections 4 and 5 against a real workspace; see [022 Verification fixtures](022-verification-fixtures.md)
+  for how evidence is recorded.
