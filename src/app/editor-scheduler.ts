@@ -11,9 +11,9 @@ import { randomUUID } from 'node:crypto'
 import { KV } from '../kv.ts'
 import type { EditorView } from './editor.ts'
 import { readEngineState, type EditorEngineState } from './editor-mcp.ts'
-import { acquire, advance, emptySchedule, heartbeat, personAct, personBlock, reclaim, recordBypass, release, standing,
-  submitJob, updateJob, type AcquireRequest, type AcquireResult, type EditorJob, type EditorJobKind, type EditorLease,
-  type EditorSchedule, type PersonAction, type ScheduleContext } from './editor-schedule.ts'
+import { acquire, advance, emptySchedule, heartbeat, keepEditor, personAct, personBlock, reclaim, recordBypass, release,
+  standing, submitJob, updateJob, type AcquireRequest, type AcquireResult, type EditorJob, type EditorJobKind,
+  type EditorLease, type EditorSchedule, type PersonAction, type ScheduleContext } from './editor-schedule.ts'
 
 /** The KV record the schedule lives in, so leases and waits survive a host restart. */
 const EDITOR_SCHEDULE = KV.editor.schedule
@@ -168,6 +168,15 @@ export class EditorScheduler {
   noteBypass(ticketId: string, detail: string): void {
     this.change((schedule, context) => ({ schedule: recordBypass(schedule, { ticketId, detail }, context) }))
   }
+  /**
+   * Keeps an interactive editor a lease ended with (docs/021), so the next holder reuses it instead of paying the load
+   * again. The gatekeeper calls this instead of stopping the process; the editor joins `agentPids` and the schedule
+   * records the decision.
+   */
+  keep(pid: number, ticketId: string, detail?: string): void {
+    this.change((schedule, context) => ({ schedule: keepEditor(schedule, { pid, ticketId, ...detail ? { detail } : {} }, context) }))
+  }
+
   /**
    * Ends a lease the gatekeeper reclaimed after its processes were stopped (docs/021), so the slot frees up and the
    * next waiter is granted. The ending kind keeps the overview's lease span closing on the event it already understands;

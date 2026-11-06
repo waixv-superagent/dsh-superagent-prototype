@@ -180,8 +180,8 @@ export class Runtime extends Service implements SourceHost {
         editor: () => this.editor.read(), commands: () => store.settings().executor.editor, logDir: join(machine.stateDir, 'editor-jobs'),
         notify: (ticketId, id, text) => sessions.prompt(workerSessionId(ticketId), id, text, 'steer'),
         warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
-      // The gatekeeper owns the editor's operating-system processes, so a heartbeat that stops or a Ticket that ends
-      // closes the editor it started instead of leaving it for the next holder to fight (docs/021).
+      // The gatekeeper owns the editor's operating-system processes: a lapsed lease stops its build tools but hands an
+      // interactive editor to the next holder, instead of making every Ticket pay the editor's load again (docs/021).
       this.editorGatekeeper = new EditorGatekeeper({ store, schedule: this.editorScheduler, rows: () => this.editor.last(),
         alive: pid => { try { process.kill(pid, 0); return true } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM' } },
         kill: pid => killTree(pid), live: id => { const value = store.tickets.get(id); return !!value && !value.ended },

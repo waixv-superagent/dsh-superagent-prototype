@@ -86,7 +86,7 @@ export interface EditorJob {
 }
 
 export type EditorEventKind = 'queued' | 'granted' | 'released' | 'expired' | 'ended' | 'preempted' | 'claimed' | 'yielded'
-  | 'cancelled' | 'front' | 'job' | 'bypass' | 'reclaimed'
+  | 'cancelled' | 'front' | 'job' | 'bypass' | 'reclaimed' | 'kept'
 export interface EditorEvent {
   at: string
   kind: EditorEventKind
@@ -179,6 +179,22 @@ export function recordBypass(input: EditorSchedule, value: { ticketId: string; d
   const schedule = clone(input)
   event(schedule, { at: iso(context.now), kind: 'bypass', by: 'agent', ticketIds: [value.ticketId],
     detail: value.detail.trim().slice(0, 300) })
+  return schedule
+}
+
+/**
+ * Keeps an interactive editor a lease opened after the lease ends (docs/021). The gatekeeper stops a lease's build and
+ * commandlet processes when the lease goes, but an editor is the expensive part of the slot: it stays open and readable
+ * to the next holder instead of making the next Ticket pay the load again. The pid stays in `agentPids`, so the probe's
+ * "an editor is open" does not read as a person holding it and the next agent may use it; nothing here holds a lease.
+ */
+export function keepEditor(input: EditorSchedule, value: { pid: number; ticketId: string; detail?: string },
+  context: ScheduleContext): EditorSchedule {
+  const schedule = clone(input)
+  const at = iso(context.now)
+  if (!schedule.agentPids.includes(value.pid)) schedule.agentPids.push(value.pid)
+  const detail = value.detail?.trim().slice(0, 300)
+  event(schedule, { at, kind: 'kept', by: 'host', ticketIds: [value.ticketId], ...detail ? { detail } : {} })
   return schedule
 }
 
