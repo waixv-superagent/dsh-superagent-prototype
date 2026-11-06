@@ -90,8 +90,9 @@ pnpm build
 
 单测用 fake 引擎 MCP 覆盖：initialize 的 session header、窗口列表/选择、图片解码、PNG 校验、同名文件、
 不可达端点、缺少 `call_tool`、缺失/歧义窗口。真实编辑器的一次采集（开编辑器 → 持有租约 → `op=capture` →
-`read_image` 核对）记录在 PR 的验证包里；锁屏本身无法在共享机器上复现，验证以「截图来自编辑器渲染路径」
-这一机制为依据，并如实写明未在锁屏下实测。
+`read_image` 核对）落在 `evidence/editor-screenshot-evidence-852e8e1edd0e/`（PNG + sidecar + `capture/capture.ts`），
+也记录在 PR 的验证包里；锁屏本身无法在共享机器上复现，验证以「截图来自编辑器渲染路径」这一机制为依据，
+并如实写明未在锁屏下实测。
 
 ## 8. 文件
 

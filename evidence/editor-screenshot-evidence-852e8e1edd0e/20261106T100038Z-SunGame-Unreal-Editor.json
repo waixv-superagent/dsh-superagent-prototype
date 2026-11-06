@@ -1,0 +1,18 @@
+{
+  "ticket_id": "editor-screenshot-evidence-852e8e1edd0e",
+  "captured_at": "2026-11-06T10:00:38.541Z",
+  "target": "window",
+  "window": {
+    "index": 0,
+    "title": "SunGame - Unreal Editor"
+  },
+  "width": 2560,
+  "height": 1380,
+  "bytes": 1996817,
+  "sha256": "d30ec9e7f2ccd55130ef6886423b0e4b03d99a65981e70c45ad7fc5bca03733b",
+  "editor": {
+    "url": "http://127.0.0.1:8000/mcp",
+    "toolset": "SlateInspectorToolset.SlateInspectorToolset"
+  },
+  "png": "20261106T100038Z-SunGame-Unreal-Editor.png"
+}
