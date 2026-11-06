@@ -1,4 +1,4 @@
-/** Execution status view (active Tickets and pause control) and Execution settings group (Executor capacity and workspace environment). */
+﻿/** Execution status view (active Tickets and pause control) and Execution settings group (Executor capacity and workspace environment). */
 import { useRef, useState } from 'react'
 import { TICKET_FILTERS, type TicketFilter } from '../app/api.ts'
 import { TICKET_KINDS, type TicketKind } from '../core/kind.ts'
@@ -95,12 +95,12 @@ export function ExecutionSettings() {
   const executor = blocks.executor.value
   // The reviewer and package-recipient lists are edited as "name=value" lines and parsed back only on save.
   const saved = { ...executor, maxWorkers: String(executor.maxWorkers), blockedCommands: executor.blockedCommands.join(' '),
-    editor: { ...executor.editor, targets: pairLines(executor.editor.targets.map(item => [item.name, item.command])) },
+    editor: { ...executor.editor, targets: executor.editor.targets.join('\n') },
     p4: { ...executor.p4, reviewers: pairLines(executor.p4.reviewers.map(item => [item.label, item.user])),
       autobuildTargets: pairLines(executor.p4.autobuildTargets.map(item => [item.label, item.id])) } }
   const draft = useBlockDraft('executor', saved, blocks.executor.revision,
     value => ({ ...value, maxWorkers: numberOf(value.maxWorkers), blockedCommands: value.blockedCommands.split(/[\s,]+/).filter(Boolean),
-      editor: { ...value.editor, targets: parsePairs(value.editor.targets).map(([name, command]) => ({ name, command })) },
+      editor: { ...value.editor, targets: value.editor.targets.split(/\r?\n/).map(line => line.trim()).filter(Boolean) },
       p4: { ...value.p4, reviewers: parsePairs(value.p4.reviewers).map(([label, user]) => ({ label, user })),
         autobuildTargets: parsePairs(value.p4.autobuildTargets).map(([label, id]) => ({ label, id })) } }))
   const value = draft.value
@@ -226,3 +226,4 @@ export function ExecutionSettings() {
     <ConfigHistory blocks={['executor', 'pause']} />
   </div>
 }
+

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Typed fake management API server for panel tests. Implements every route in `src/app/api.ts` and records any
  * undeclared query parameter or body mismatch in `server.misuse`, which `usePanelServer` asserts is empty after each test.
  */
@@ -355,7 +355,9 @@ function initial(): PanelServer {
     editor: { holder: 'person', activity: 'editing', since: '2026-09-22T08:00:00.000Z', pid: 1, build: null,
       at: '2026-09-22T08:10:00.000Z' },
     repro: { root: '/w/SunGame/Saved/ReproTests', problem: null, cases: [], runs: [], active: null, blocked: null },
-    buildPage: { targets: [{ name: 'Development Editor', command: 'Build.bat -Target=SunGameEditor' }], runs: [], active: null, blocked: null },
+    buildPage: { targets: ['SunGame', 'SunGameEditor'], configurations: ['Development', 'DebugGame', 'Shipping'],
+      platforms: ['Win64'], build: 'Build.bat <target> <platform> <configuration>', launch: 'start <project>',
+      runs: [], active: null, blocked: null },
     billing: {
       windowMinutes: 60, currency: 'CNY',
       current: { provider: 'ai-gateway', name: 'kurogames', model: 'DeepSeek V4.1 Flash', at: Date.now() - 60_000 },
@@ -678,5 +680,6 @@ export function fakeForm(writable = true, accept = true) {
   const publish = (patch: Partial<ConfigFormSnapshot<Record<string, unknown>>>) => { snapshot = { ...snapshot, ...patch }; notify() }
   return { form, mutations, publish }
 }
+
 
 

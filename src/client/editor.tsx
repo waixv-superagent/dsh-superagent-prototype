@@ -12,6 +12,7 @@ import { ticketMark } from './marks.ts'
 import { useAction, usePanel } from './provider.tsx'
 import { ReproCard } from './repro.tsx'
 import { settingsRoute, type BoardFocus, type Route } from './route.ts'
+import { editorRunName, type EditorConfiguration, type EditorPlatform } from '../core/editor-composition.ts'
 import { errorText, type T } from './text.ts'
 import { LoadState, When } from './widgets.tsx'
 
@@ -482,18 +483,27 @@ function ScheduleCard({ schedule, reload }: { schedule: Schedule; reload: () => 
 }
 
 /**
- * The person's compile-and-launch entry (docs/021): pick a configured target and the host runs its command under the
- * shared editor's slot. The panel never starts the editor itself; the command does the compile and the launch, and the
- * card shows the run's own output, exit code and the last runs.
+ * The person's compile-and-launch entry (docs/021): the card leads with one **run configuration** — Rider's
+ * configuration + type + target, such as `Development Editor SunGame` — because that is the choice a person changes day
+ * to day. The configuration, target and platform fields and the command templates sit behind 自定义组合 for the rare
+ * case. The host composes `build && launch` and runs it under the shared editor's slot.
  */
 function BuildCard() {
   const { t, call, navigate } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET build'), [])
-  const [picked, setPicked] = useState('')
-  const run = useAction((target: string) => call('POST build/run', { body: { target } }), { reload })
+  const [choice, setChoice] = useState<{ target: string; configuration: EditorConfiguration; platform: EditorPlatform }>()
+  const run = useAction((selection: { target: string; configuration: EditorConfiguration; platform: EditorPlatform }) =>
+    call('POST build/run', { body: selection }), { reload })
   const stop = useAction((id: string) => call('POST build/stop', { body: { run: id } }), { reload })
-  const chosen = data?.targets.some(item => item.name === picked) ? picked : data?.targets[0]?.name ?? ''
-  const chosenCommand = data?.targets.find(item => item.name === chosen)?.command
+  const platform = data?.platforms[0]
+  const combinations = (data?.targets ?? []).flatMap(target => (data?.configurations ?? []).map(configuration => ({
+    target, configuration, platform: platform!, label: editorRunName(target, configuration) })))
+  // Rider's everyday choice is the Development Editor combination; fall back to the first when it is not configured.
+  const preferred = combinations.find(item => item.configuration === 'Development' && /Editor$/.test(item.target))
+    ?? combinations.find(item => item.configuration === 'Development') ?? combinations[0]
+  const selected = combinations.find(item => choice && item.target === choice.target
+    && item.configuration === choice.configuration && item.platform === choice.platform) ?? preferred
+  const key = (item: NonNullable<typeof selected>) => `${item.target}|${item.configuration}|${item.platform}`
   const active = data?.active
   const blocked = data?.blocked ?? null
   const stateTone = (state: string) => state === 'succeeded' ? 'success' as const : state === 'failed' ? 'danger' as const
@@ -507,34 +517,61 @@ function BuildCard() {
       {error && <p className="dt-build-problem" role="alert">{errorText(error)}</p>}
     </header>
     {!data ? <p className="dt-build-empty">{t('loading')}</p>
-      : data.targets.length === 0
+      : combinations.length === 0
         ? <div className="dt-build-empty">
           <p>{t('buildNoTargets')}</p>
           <Button variant="outline" size="sm" onClick={() => navigate(settingsRoute('execution'))}>{t('buildConfigure')}</Button>
         </div>
         : <>
           <div className="dt-build-controls">
-            <label className="dt-build-label" htmlFor="dt-build-target">{t('buildTargetLabel')}</label>
-            <select id="dt-build-target" className="dt-select dt-build-select" value={chosen} disabled={!!active}
-              onChange={event => setPicked(event.target.value)}>
-              {data.targets.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}
+            <label className="dt-build-label" htmlFor="dt-build-preset">{t('buildPresetLabel')}</label>
+            <select id="dt-build-preset" className="dt-select dt-build-select" value={key(selected!)} disabled={!!active}
+              onChange={event => {
+                const next = combinations.find(item => key(item) === event.target.value)
+                if (next) setChoice({ target: next.target, configuration: next.configuration, platform: next.platform })
+              }}>
+              {combinations.map(item => <option key={key(item)} value={key(item)}>{item.label}</option>)}
             </select>
             {active
               ? <Button variant="outline" size="sm" disabled={stop.busy} onClick={() => { void stop.run(active.runId) }}>{t('buildStop')}</Button>
               : <Button variant="primary" size="sm" disabled={run.busy || blocked !== null}
                 title={blocked ? t(blocked === 'agent' ? 'buildBlockedAgent' : 'buildBlockedJob') : undefined}
-                onClick={() => { void run.run(chosen) }}>{t('buildRun')}</Button>}
+                onClick={() => { if (selected) void run.run({ target: selected.target, configuration: selected.configuration, platform: selected.platform }) }}>
+                {t('buildRun')}</Button>}
             {active && <Tag tone="info">{t('buildRunning')}</Tag>}
           </div>
-          {chosenCommand && <p className="dt-build-command" title={chosenCommand}><code>{chosenCommand}</code></p>}
           {blocked && !active && <p className="dt-build-blocked">{t(blocked === 'agent' ? 'buildBlockedAgent' : 'buildBlockedJob')}</p>}
           {active && <div className="dt-build-active">
-            <p className="dt-build-active-line"><Tag tone="info">{t('buildRunning')}</Tag><span>{active.target}</span></p>
+            <p className="dt-build-active-line"><Tag tone="info">{t('buildRunning')}</Tag><span>{active.name}</span></p>
             <pre className="dt-build-log">{active.tail.split(/\r?\n/).slice(-16).join('\n') || t('buildNoOutput')}</pre>
           </div>}
+          <details className="dt-build-advanced">
+            <summary>{t('buildAdvanced')}</summary>
+            <div className="dt-build-fields">
+              <label>{t('buildTargetField')}
+                <select className="dt-select" value={selected?.target ?? ''} disabled={!!active}
+                  onChange={event => { if (selected) setChoice({ ...selected, target: event.target.value }) }}>
+                  {data.targets.map(target => <option key={target} value={target}>{target}</option>)}
+                </select>
+              </label>
+              <label>{t('buildConfigurationField')}
+                <select className="dt-select" value={selected?.configuration ?? ''} disabled={!!active}
+                  onChange={event => { if (selected) setChoice({ ...selected, configuration: event.target.value as EditorConfiguration }) }}>
+                  {data.configurations.map(configuration => <option key={configuration} value={configuration}>{configuration}</option>)}
+                </select>
+              </label>
+              <label>{t('buildPlatformField')}
+                <select className="dt-select" value={selected?.platform ?? ''} disabled={!!active || data.platforms.length < 2}
+                  onChange={event => { if (selected) setChoice({ ...selected, platform: event.target.value as EditorPlatform }) }}>
+                  {data.platforms.map(item => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </label>
+            </div>
+            <p className="dt-build-command"><span>{t('buildTemplates')}</span><code>{data.build}</code><span> → </span><code>{data.launch}</code></p>
+          </details>
           {data.runs.length > 0 && <ul className="dt-build-runs">{data.runs.map(row => <li key={row.id} data-state={row.state}>
             <Tag tone={stateTone(row.state)}>{t(`buildState.${row.state}`)}</Tag>
-            <span className="dt-build-run-target" title={row.summary}>{row.target}</span>
+            <span className="dt-build-run-target" title={row.summary}>{row.name}</span>
             <When at={row.endedAt ?? row.startedAt} />
             <span className="dt-build-run-summary" title={row.summary}>{row.summary}</span>
             {row.exitCode !== undefined && row.exitCode !== null && <span className="dt-mono">{t('buildExit', { code: String(row.exitCode) })}</span>}
@@ -542,7 +579,6 @@ function BuildCard() {
         </>}
   </section>
 }
-
 export function EditorPage() {
   const { t, call } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET editor'), [])
@@ -561,4 +597,6 @@ export function EditorPage() {
     <p className="dt-editor-foot">{t(data.schedule ? 'editorScheduleNote' : 'editorReadOnlyNote')}</p>
   </>
 }
+
+
 

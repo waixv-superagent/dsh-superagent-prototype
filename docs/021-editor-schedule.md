@@ -109,12 +109,25 @@ Working rows show "占用中 · 跑测试" or "排第 2 · 编译". The timeline
 
 ## A person's compile and launch
 
-The editor page also carries the person's own one-click path, so a compile-and-launch does not require Rider (docs/005):
+The editor page carries the person's own one-click path, composed the way Rider lists its run configurations, so a
+compile-and-launch does not require Rider (docs/005):
 
-- **Targets** are configured under Execution settings → editor → **编译启动目标**, one `name=command` per line. The command does the whole job — compile and start the editor — so the panel never guesses an engine or a project layout; `<project>` is replaced with the configured `.uproject`.
-- **One at a time, under the shared slot.** `BuildRunner` (`src/app/build-runner.ts`) runs a target as a host process with its output under `<stateDir>/build-logs`, one run at a time. It refuses while an agent or a host job holds the editor, claims the person's slot for the run (so the scheduler cannot grant it away mid-build), and gives the slot back when the process ends. A run the host started survives in `KV.build.runs`; the next host marks it `interrupted`.
-- **Visible.** The editor page's **编译并启动** card shows the target picker, the command as configured, the live output tail, the exit code and the last runs, with Stop while it runs.
-- **Not a lease bypass.** The card is a person's action through the host, not a worker's shell call; the gatekeeper never owns its process, but the scheduler's slot is held, so agents stay out.
+- **Target names** are configured under Execution settings → editor → **目标名**: one Unreal target per line, such as
+  `SunGame` and `SunGameEditor`. The **build** and **restart** commands stay templates: `<target>`, `<configuration>`,
+  `<platform>`, `<project>` and `<dir>` are filled per run, so the panel never guesses an engine or a project layout.
+- **Rider's combination.** A run configuration is configuration (`Development`, `DebugGame`, `Shipping`) × type (Editor
+  or Game, from the target's `Editor` suffix) × target (`SunGameEditor`) × platform (`Win64` on Windows, `Mac` on macOS,
+  `Linux` otherwise). Its name follows Rider: `Development Editor SunGame`, `Shipping Game SunGame`.
+- **Only the choice a person changes.** The card leads with one **运行配置** picker and 编译并启动; the configuration,
+  target, platform fields and the command templates sit behind **自定义组合**, so the common path stays one select and one
+  click.
+- **One at a time, under the shared slot.** `BuildRunner` (`src/app/build-runner.ts`) composes `build && launch` and runs
+  it as one host process with its output under `<stateDir>/build-logs`. It refuses while an agent or a host job holds the
+  editor, claims the person's slot for the run (so the scheduler cannot grant it away mid-build), and gives the slot back
+  when the process ends. A run the host started survives in `KV.build.runs`; the next host marks it `interrupted`.
+- **Visible.** The card shows the run's live output tail, the exit code and the last runs, with Stop while it runs.
+- **Not a lease bypass.** The card is a person's action through the host, not a worker's shell call; the gatekeeper never
+  owns its process, but the scheduler's slot is held, so agents stay out.
 
 ## Limits
 

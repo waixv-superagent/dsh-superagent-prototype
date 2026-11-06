@@ -1,4 +1,4 @@
-/** Application composition root and lifecycle manager for dsh-superagent. */
+﻿/** Application composition root and lifecycle manager for dsh-superagent. */
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -44,6 +44,7 @@ import { EditorGuard } from './editor-guard.ts'
 import { EditorGatekeeper } from './editor-gatekeeper.ts'
 import { ReproRunner } from './repro-runner.ts'
 import { BuildRunner } from './build-runner.ts'
+import { hostPlatform } from '../core/editor-composition.ts'
 import { reproRoot } from './repro.ts'
 import { notifyPlan as sendPlanCard } from './plan.ts'
 import { notifyPriority as sendPriorityCard } from './priority.ts'
@@ -211,6 +212,9 @@ export class Runtime extends Service implements SourceHost {
       // while an agent or a host job holds it, claims the slot for its duration, and gives it back when it ends (docs/021).
       this.build = new BuildRunner({ store, logDir: join(machine.stateDir, 'build-logs'),
         targets: () => store.settings().executor.editor.targets,
+        buildCommand: () => store.settings().executor.editor.build,
+        launchCommand: () => store.settings().executor.editor.restart,
+        platforms: () => [hostPlatform(process.platform)],
         project: () => store.settings().executor.editor.project,
         cwd: () => { const project = store.settings().executor.editor.project; return project ? dirname(resolve(project)) : machine.stateDir },
         blocked: () => {
@@ -456,4 +460,5 @@ export class Runtime extends Service implements SourceHost {
     }
   }
 }
+
 

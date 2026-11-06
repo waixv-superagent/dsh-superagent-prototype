@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Bilingual UI dictionaries (`[zh, en]`) and glossary groupings, following the domain terms in `docs/001-domain.md`.
  */
 import { USER_ERRORS } from '../core/errors.ts'
@@ -655,15 +655,19 @@ const TEXT = {
   reproTitle: ['复现用例', 'Reproduction cases'],
   /** The person's compile-and-launch targets on the editor page (docs/021). */
   buildTitle: ['编译并启动', 'Compile and launch'],
-  buildSub: ['选一个构建目标，宿主替你编译并启动编辑器；运行期间它占着编辑器槽位。', 'Pick a target; the host compiles and starts the editor for you and holds the editor slot while it runs.'],
-  buildTargetLabel: ['构建目标', 'Build target'],
+  buildSub: ['选一个运行配置（如 Development Editor SunGame），宿主按模板编译并启动；平时不改的字段在「自定义组合」里。', 'Pick a run configuration such as Development Editor SunGame; the host compiles and launches from the templates, and the fields you rarely change sit under Customize combination.'],
+  buildPresetLabel: ['运行配置', 'Run configuration'],
+  buildAdvanced: ['自定义组合', 'Customize combination'],
+  buildTargetField: ['目标', 'Target'],
+  buildConfigurationField: ['配置', 'Configuration'],
+  buildPlatformField: ['平台', 'Platform'],
+  buildTemplates: ['命令模板', 'Command templates'],
   buildRun: ['编译并启动', 'Compile and launch'],
   buildStop: ['停止', 'Stop'],
   buildRunning: ['运行中', 'Running'],
   buildNoOutput: ['还没有输出。', 'No output yet.'],
-  buildNoTargets: ['还没有配置构建目标。到「设置 › 执行 › 编辑器」里加一条：名字 + 编译启动命令。', 'No build target is configured yet. Add one under Settings › Execution › editor: a name and the compile-and-launch command.'],
+  buildNoTargets: ['还没有配置目标名。到「设置 › 执行 › 编辑器」的「目标」里填 SunGame / SunGameEditor（一行一个）。', 'No target names are configured yet. Add SunGame / SunGameEditor (one per line) under Settings › Execution › editor.'],
   buildConfigure: ['去设置里添加', 'Add one in settings'],
-  buildCommandHint: ['实际执行的命令', 'The command that runs'],
   buildBlockedAgent: ['agent 正占着编辑器；先让它让出再编译启动。', 'An agent holds the editor; let it yield first.'],
   buildBlockedJob: ['宿主的编辑器作业还在跑；等它结束再编译启动。', 'A host-run editor job holds the editor; wait for it to end.'],
   buildExit: ['退出码 {code}', 'exit {code}'],
@@ -672,8 +676,8 @@ const TEXT = {
   'buildState.failed': ['失败', 'Failed'],
   'buildState.cancelled': ['已停止', 'Stopped'],
   'buildState.interrupted': ['被中断', 'Interrupted'],
-  editorTargets: ['编译启动目标', 'Compile-and-launch targets'],
-  editorTargetsHint: ['一行一个「名字=命令」；命令做完整件事（编译并启动），<project> 会替换成上面的 .uproject。', 'One “name=command” per line; the command does the whole job (compile and launch), and <project> is replaced with the .uproject above.'],
+  editorTargets: ['目标名', 'Target names'],
+  editorTargetsHint: ['一行一个 Unreal 目标名，如 SunGame、SunGameEditor；运行配置由 配置×类型×目标 组合生成，编译/启动命令用上面的模板并支持 <target>、<configuration>、<platform>、<project>。', 'One Unreal target name per line, such as SunGame and SunGameEditor; a run configuration is composed from configuration × type × target, and the build/launch templates support <target>, <configuration>, <platform> and <project>.'],
   editorTargetsEmpty: ['还没配置目标', 'No target yet'],
   reproSub: ['本地脚本，不进仓库；点“运行”在已开的编辑器上重跑，跑完看报告。', 'Local scripts outside the repository; run one against the editor that is already open, then read its report.'],
   reproRootLabel: ['目录', 'Folder'],
@@ -1451,8 +1455,10 @@ const TEXT = {
   'userError.buildBlockedAgent': ['agent 正占着编辑器；先让它让出再编译启动。', USER_ERRORS.buildBlockedAgent[1]],
   'userError.buildBlockedJob': ['宿主的编辑器作业还在跑；等它结束再编译启动。', USER_ERRORS.buildBlockedJob[1]],
   'userError.buildEditorBusy': ['编辑器没有交到你手里；等占用的 agent 让出后再试。', USER_ERRORS.buildEditorBusy[1]],
+  'userError.buildConfiguration': ['不认识的编辑器配置：{configuration}。', USER_ERRORS.buildConfiguration[1]],
+  'userError.buildPlatform': ['这个平台在本机不可用：{platform}。', USER_ERRORS.buildPlatform[1]],
+  'userError.buildMissingCommand': ['编译和启动命令都要配置（设置 › 执行 › 编辑器），才能组合出一次运行。', USER_ERRORS.buildMissingCommand[1]],
   'userError.unknownBuildTarget': ['设置里没有这个构建目标：{target}。', USER_ERRORS.unknownBuildTarget[1]],
-  'userError.buildTargetEmpty': ['构建目标 {target} 没有填命令；到「设置 › 执行 › 编辑器」补上。', USER_ERRORS.buildTargetEmpty[1]],
   'userError.unknownBuildRun': ['找不到这次编译启动的记录：{run}。', USER_ERRORS.unknownBuildRun[1]],
   'userError.buildNotRunning': ['这次编译启动已经结束了。', USER_ERRORS.buildNotRunning[1]],
   'userError.modelUnavailable': ['{block} 的模型不可用：{error}', USER_ERRORS.modelUnavailable[1]],
@@ -1506,4 +1512,5 @@ export const GLOSSARY_VALUES = {
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap { dshSuperagent: DshSuperagentKey }
 }
+
 

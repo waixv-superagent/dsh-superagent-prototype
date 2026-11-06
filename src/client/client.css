@@ -1,4 +1,4 @@
-/* Panel layout and local UI controls styled with DSH `--dsw-alias-*` design tokens; one rule per line. */
+﻿/* Panel layout and local UI controls styled with DSH `--dsw-alias-*` design tokens; one rule per line. */
 .dt-page { box-sizing: border-box; height: 100%; overflow: auto; scrollbar-gutter: stable; scroll-padding: 48px 0 72px; container-type: inline-size; padding: 28px clamp(24px, 4vw, 48px) 0; color: var(--dsw-alias-label-primary); }
 /* Deployment page rendered inside DSH Plugin Manager, which owns scrolling and padding. */
 .dt-embedded { container-type: inline-size; color: var(--dsw-alias-label-primary); }
@@ -1055,8 +1055,13 @@ button.dt-editor-timeline-name:focus-visible { outline: 2px solid var(--dsw-alia
 .dt-build-problem { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-error-primary); }
 .dt-build-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .dt-build-label { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
-.dt-build-select { width: auto; min-width: 220px; max-width: 360px; }
-.dt-build-command { margin: 6px 0 0; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-build-select { width: auto; min-width: 260px; max-width: 420px; }
+.dt-build-advanced { margin-top: 9px; }
+.dt-build-advanced > summary { cursor: pointer; font-size: 11px; line-height: 17px; color: var(--dsw-alias-label-caption); }
+.dt-build-fields { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.dt-build-fields label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); }
+.dt-build-fields .dt-select { width: 180px; min-width: 160px; }
+.dt-build-command { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; margin: 6px 0 0; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); }
 .dt-build-command code { font-family: var(--ds-font-family-code, Menlo, monospace); }
 .dt-build-blocked { margin: 6px 0 0; font-size: 11.5px; line-height: 17px; color: #b26b00; }
 .dt-build-active { margin-top: 8px; }
@@ -1275,4 +1280,6 @@ button.dt-problem-title:hover { color: var(--dsw-alias-label-primary); text-deco
 .dt-upgrade-steps li[data-state='running'] { color: var(--dsw-alias-label-primary); }
 .dt-upgrade-steps li[data-state='running'] svg { animation: dt-spin 1s linear infinite; }
 .dt-upgrade-steps li[data-state='failed'] { color: var(--dsw-alias-state-error-primary); }
+
+
 

@@ -54,12 +54,15 @@ export const SAFE_FILTER = /^[\w .+\-:/]{1,300}$/
 
 /**
  * Placeholders a configured command may use. The project is quoted so a path with spaces stays one argument; the filter
- * goes in as is, usually inside the template's own quotes, which is why `submit` only lets a `SAFE_FILTER` through.
+ * goes in as is, usually inside the template's own quotes, which is why `submit` only lets a `SAFE_FILTER` through. A
+ * build/launch template may also name `<target>`, `<configuration>` and `<platform>`, which a person's composed run fills.
  */
-export function fillCommand(template: string, values: { project: string; dir: string; filter?: string }): string {
+export function fillCommand(template: string, values: { project: string; dir: string; filter?: string; target?: string
+  configuration?: string; platform?: string }): string {
   const quote = (value: string) => `"${value.replaceAll('"', '')}"`
   return template.replaceAll('<project>', quote(values.project)).replaceAll('<dir>', values.dir.replaceAll('"', ''))
-    .replaceAll('<filter>', values.filter ?? '')
+    .replaceAll('<filter>', values.filter ?? '').replaceAll('<target>', values.target ?? '')
+    .replaceAll('<configuration>', values.configuration ?? '').replaceAll('<platform>', values.platform ?? '')
 }
 
 /** The one line a person and the worker read from a job's output: UBT's verdict, the automation counts, or the last line. */
