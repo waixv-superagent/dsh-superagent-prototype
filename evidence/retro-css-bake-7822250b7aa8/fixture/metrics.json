@@ -1,0 +1,490 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-11-06T23:40:00.000+08:00",
+  "window": {
+    "since": "2026-11-05T16:00:00.000Z",
+    "until": "2026-11-06T16:00:00.000Z",
+    "tz": "+08:00",
+    "date": "2026-11-06"
+  },
+  "sources": {
+    "db": "orchestrator.sqlite",
+    "sessions": "sessions/",
+    "github": "demo/demo-repo",
+    "p4": {
+      "user": "demo",
+      "path": "//demo/main/...@2026-11-05,2026-11-07"
+    }
+  },
+  "tickets": {
+    "created": 12,
+    "ended": 7,
+    "open": 5,
+    "outcomes": {
+      "open": 5,
+      "merged": 4,
+      "dropped": 2,
+      "stopped": 1
+    },
+    "kinds": {
+      "self": 5,
+      "feature": 4,
+      "bug": 2,
+      "inquiry": 1
+    },
+    "list": [
+      {
+        "id": "a1b2c3d4",
+        "title": "把复盘报告的视觉固定进渲染脚本",
+        "kind": "self",
+        "createdAt": "09:12",
+        "assignments": 2,
+        "outcome": "merged",
+        "phase": "done",
+        "reports": [
+          "ready",
+          "ready"
+        ],
+        "toolCalls": 642
+      },
+      {
+        "id": "b2c3d4e5",
+        "title": "给看板加一个空闲抽屉",
+        "kind": "feature",
+        "createdAt": "10:03",
+        "assignments": 3,
+        "outcome": "open",
+        "phase": "verify",
+        "reports": [
+          "progress",
+          "blocked",
+          "waiting"
+        ],
+        "toolCalls": 518
+      },
+      {
+        "id": "c3d4e5f6",
+        "title": "修复小时图在窄屏溢出",
+        "kind": "bug",
+        "createdAt": "11:20",
+        "assignments": 1,
+        "outcome": "merged",
+        "phase": "done",
+        "reports": [
+          "ready"
+        ],
+        "toolCalls": 121
+      },
+      {
+        "id": "d4e5f6a7",
+        "title": "复盘里的人的感受采访稿",
+        "kind": "inquiry",
+        "createdAt": "13:05",
+        "assignments": 1,
+        "outcome": "open",
+        "phase": "implement",
+        "reports": [],
+        "toolCalls": 34
+      },
+      {
+        "id": "e5f6a7b8",
+        "title": "给交付流水线加阶段展示",
+        "kind": "self",
+        "createdAt": "15:47",
+        "assignments": 2,
+        "outcome": "dropped",
+        "phase": "done",
+        "reports": [
+          "blocked",
+          "dropped"
+        ],
+        "toolCalls": 209
+      },
+      {
+        "id": "f6a7b8c9",
+        "title": "把失败清单改成一张一张的卡片",
+        "kind": "feature",
+        "createdAt": "18:31",
+        "assignments": 1,
+        "outcome": "stopped",
+        "phase": "done",
+        "reports": [
+          "progress"
+        ],
+        "toolCalls": 96
+      }
+    ]
+  },
+  "assignments": {
+    "started": 60,
+    "ended": 55,
+    "endedReasons": {
+      "normal": 30,
+      "stateRepaired": 10,
+      "followUp": 8,
+      "hostRestarted": 7
+    }
+  },
+  "reports": {
+    "total": 36,
+    "states": {
+      "ready": 9,
+      "waiting": 5,
+      "progress": 8,
+      "blocked": 3,
+      "dropped": 11
+    },
+    "causes": {
+      "permission": 2,
+      "quota": 1,
+      "other": 1
+    },
+    "failures": [
+      {
+        "at": "10:12",
+        "ticket": "b2c3d4e5",
+        "state": "blocked",
+        "cause": "permission",
+        "summary": "合成样例：需要一次人工授权的动作，脚本停在等待态。"
+      },
+      {
+        "at": "11:48",
+        "ticket": "e5f6a7b8",
+        "state": "blocked",
+        "cause": "other",
+        "summary": "合成样例：取数窗口里有一个字段没有口径，先按其他归类并标注。"
+      },
+      {
+        "at": "14:30",
+        "ticket": "a1b2c3d4",
+        "state": "failed",
+        "cause": "quota",
+        "summary": "合成样例：额度耗尽导致一次模型调用失败，重试后继续。"
+      },
+      {
+        "at": "16:02",
+        "ticket": "b2c3d4e5",
+        "state": "failed",
+        "cause": "permission",
+        "summary": "合成样例：远端接口返回 403，等待权限后重跑。"
+      }
+    ]
+  },
+  "restarts": {
+    "interrupted": 12,
+    "events": [
+      {
+        "at": "09:58",
+        "interrupted": 5
+      },
+      {
+        "at": "10:01",
+        "interrupted": 3
+      },
+      {
+        "at": "10:08",
+        "interrupted": 1
+      },
+      {
+        "at": "10:28",
+        "interrupted": 2
+      },
+      {
+        "at": "13:52",
+        "interrupted": 1
+      }
+    ]
+  },
+  "intake": {
+    "total": 180,
+    "human": 150,
+    "bySource": {
+      "feishu": 130,
+      "tapd": 20
+    },
+    "decisions": {
+      "ignore": 120,
+      "accept": 12,
+      "chat": 8
+    },
+    "fanoutOnly": 30,
+    "handbacks": 4,
+    "acks": 15,
+    "filtered": 10
+  },
+  "delivery": {
+    "ready": 9,
+    "prsMerged": 11,
+    "clsSubmitted": 1,
+    "total": 21,
+    "prs": {
+      "merged": [
+        {
+          "number": 101,
+          "title": "feat(retro): bake the visual layer",
+          "at": "10:20"
+        },
+        {
+          "number": 102,
+          "title": "fix(board): keep the hours chart inside the column",
+          "at": "12:40"
+        },
+        {
+          "number": 103,
+          "title": "feat(ui): an idle drawer for the pooled lane",
+          "at": "17:05"
+        }
+      ],
+      "closed": [
+        {
+          "number": 99,
+          "title": "chore: an abandoned draft",
+          "at": "11:11"
+        }
+      ],
+      "open": [
+        {
+          "number": 104,
+          "title": "feat(verify): a case runner",
+          "at": "19:20"
+        }
+      ]
+    },
+    "cls": {
+      "source": "p4",
+      "submitted": [
+        {
+          "changelist": 590001,
+          "ticket": "a1b2c3d4",
+          "at": "15:10",
+          "desc": "retro visual"
+        }
+      ],
+      "tracked": [
+        {
+          "changelist": 590001,
+          "ticket": "a1b2c3d4",
+          "at": "15:10",
+          "review": "r1"
+        }
+      ]
+    }
+  },
+  "tools": {
+    "calls": 9000,
+    "sessions": 40,
+    "files": 38,
+    "badFrames": 0,
+    "byName": {
+      "pwsh": 2200,
+      "read": 1800,
+      "edit": 900,
+      "grep": 600,
+      "job_output": 240,
+      "orchestrator_report": 120
+    },
+    "byTicket": {
+      "a1b2c3d4": 642,
+      "b2c3d4e5": 518
+    }
+  },
+  "hourly": [
+    {
+      "hour": 0,
+      "human": 0,
+      "toolCalls": 0,
+      "progress": 0,
+      "deliveries": 0,
+      "failed": 0
+    },
+    {
+      "hour": 1,
+      "human": 0,
+      "toolCalls": 12,
+      "progress": 0,
+      "deliveries": 0,
+      "failed": 0
+    },
+    {
+      "hour": 2,
+      "human": 0,
+      "toolCalls": 0,
+      "progress": 0,
+      "deliveries": 0,
+      "failed": 0
+    },
+    {
+      "hour": 3,
+      "human": 0,
+      "toolCalls": 0,
+      "progress": 0,
+      "deliveries": 0,
+      "failed": 0
+    },
+    {
+      "hour": 4,
+      "human": 0,
+      "toolCalls": 0,
+      "progress": 0,
+      "deliveries": 0,
+      "failed": 0
+    },
+    {
+      "hour": 5,
+      "human": 0,
+      "toolCalls": 0,
+      "progress": 0,
+      "deliveries": 0,
+      "failed": 0
+    },
+    {
+      "hour": 6,
+      "human": 0,
+      "toolCalls": 0,
+      "progress": 0,
+      "deliveries": 0,
+      "failed": 0
+    },
+    {
+      "hour": 7,
+      "human": 0,
+      "toolCalls": 0,
+      "progress": 0,
+      "deliveries": 0,
+      "failed": 0
+    },
+    {
+      "hour": 8,
+      "human": 0,
+      "toolCalls": 40,
+      "progress": 1,
+      "deliveries": 0,
+      "failed": 0
+    },
+    {
+      "hour": 9,
+      "human": 6,
+      "toolCalls": 120,
+      "progress": 2,
+      "deliveries": 1,
+      "failed": 0
+    },
+    {
+      "hour": 10,
+      "human": 18,
+      "toolCalls": 480,
+      "progress": 3,
+      "deliveries": 2,
+      "failed": 0
+    },
+    {
+      "hour": 11,
+      "human": 12,
+      "toolCalls": 360,
+      "progress": 2,
+      "deliveries": 0,
+      "failed": 1
+    },
+    {
+      "hour": 12,
+      "human": 4,
+      "toolCalls": 210,
+      "progress": 1,
+      "deliveries": 1,
+      "failed": 0
+    },
+    {
+      "hour": 13,
+      "human": 9,
+      "toolCalls": 640,
+      "progress": 3,
+      "deliveries": 3,
+      "failed": 0
+    },
+    {
+      "hour": 14,
+      "human": 25,
+      "toolCalls": 900,
+      "progress": 4,
+      "deliveries": 4,
+      "failed": 0
+    },
+    {
+      "hour": 15,
+      "human": 14,
+      "toolCalls": 700,
+      "progress": 2,
+      "deliveries": 1,
+      "failed": 0
+    },
+    {
+      "hour": 16,
+      "human": 3,
+      "toolCalls": 90,
+      "progress": 0,
+      "deliveries": 0,
+      "failed": 0
+    },
+    {
+      "hour": 17,
+      "human": 20,
+      "toolCalls": 520,
+      "progress": 3,
+      "deliveries": 2,
+      "failed": 0
+    },
+    {
+      "hour": 18,
+      "human": 8,
+      "toolCalls": 260,
+      "progress": 1,
+      "deliveries": 0,
+      "failed": 2
+    },
+    {
+      "hour": 19,
+      "human": 15,
+      "toolCalls": 610,
+      "progress": 2,
+      "deliveries": 1,
+      "failed": 0
+    },
+    {
+      "hour": 20,
+      "human": 7,
+      "toolCalls": 330,
+      "progress": 2,
+      "deliveries": 1,
+      "failed": 0
+    },
+    {
+      "hour": 21,
+      "human": 2,
+      "toolCalls": 80,
+      "progress": 0,
+      "deliveries": 0,
+      "failed": 0
+    },
+    {
+      "hour": 22,
+      "human": 0,
+      "toolCalls": 20,
+      "progress": 0,
+      "deliveries": 0,
+      "failed": 0
+    },
+    {
+      "hour": 23,
+      "human": 0,
+      "toolCalls": 0,
+      "progress": 0,
+      "deliveries": 0,
+      "failed": 0
+    }
+  ],
+  "limits": [
+    "合成样例：工单来自演示库，不是真实部署。",
+    "合成样例：会话归档只统计当前窗口。",
+    "合成样例：p4 只取 tracked changelist。"
+  ]
+}
