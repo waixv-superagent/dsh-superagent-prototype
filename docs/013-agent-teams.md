@@ -131,3 +131,7 @@ The harness version must match the package's peers exactly (`0.2.1-rc.5` at the 
 
 Separately, `@deepseek-ai/dsh-llm-pi-ai` maps `./src/*` in its `exports` but does not ship `src/` in `files`, so any plugin importing `.../src/config.ts` fails to load. Our local `/ask-gpt` command depended on that path for `resolveProfiles`, which the package defines but does not export. The fix here is a pnpm patch that appends one export line; see `pnpm-workspace.yaml` → `patchedDependencies` in the superagent profile. This is an upstream packaging bug worth re-checking on every upgrade.
 
+## Appendix B — the worker-led team that exists today (2026-11-06)
+
+What exists is neither the upstream Team nor the board above. A Ticket's Executor proposes one to four teammates, each with a role, a one-line job and a model route; a person allows the roster on one card, and each allowed route becomes a grant on that Ticket. The Executor is the leader: it starts each teammate with `subagent`, partitions the files, steers them, and runs the verification itself. The shared task board, dependency edges and `waitForChange` are still absent, and the upstream packages stay uninstalled because a teammate's model route cannot be selected through `spawn_teammate`, which is the capability the request needs. [003 Execution](003-execution.md#an-agent-team) has the implemented flow; the board sketched above remains the candidate for cross-Ticket visibility.
+

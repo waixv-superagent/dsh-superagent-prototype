@@ -1,8 +1,8 @@
 /** What the Executor and its workers report about the Assignments that run tickets. */
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
-import { latestAssignment, liveTicket, MODEL_APPROVAL_OPTIONS, runningAssignment } from './model.ts'
-import type { Assignment, ModelRoute, QuestionSection, ReportState, Ticket } from './model.ts'
+import { latestAssignment, liveTicket, MODEL_APPROVAL_OPTIONS, runningAssignment, TEAM_ROLE_CHARS, TEAM_ROLES_MAX, TEAM_TASK_CHARS } from './model.ts'
+import type { Assignment, ModelRoute, QuestionSection, ReportState, TeamRoute, Ticket } from './model.ts'
 import { analysisAdviceFromSections, ANALYSIS_ADVICE_LABELS } from './analysis.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { REPAIR_LIMIT } from './invariants.ts'
@@ -34,12 +34,31 @@ export interface WorkerReport {
   sections?: QuestionSection[]
   /** With `question`: ask the person to allow this subagent model route for the ticket; the host offers 允许 and 不允许. */
   model?: ModelRoute
+  /** With `question`: ask the person to allow this agent team on the ticket, a role and job for each route; the host offers 允许 and 不允许. */
+  team?: TeamRoute[]
   /** The person's message whose request raised the question; routes the question to the channel where it was written. */
   askedBy?: string
   /** The person's question this report answers, which the worker thereby takes up; authorizes the main Session to send an answer reply. */
   answers?: string
   /** What it delivered, which the ticket keeps on its execution so the board and a person's confirmation see it. */
   delivery?: DeliveryFacts
+}
+/**
+ * Whether a team request is well-formed: one to four teammates, each with a unique role, a one-line job and a model route.
+ * The host words the whole card from this list, so a partial or ambiguous roster never reaches a person.
+ */
+function validTeam(team: readonly TeamRoute[]): boolean {
+  const roles = new Set<string>()
+  return team.length >= 1 && team.length <= TEAM_ROLES_MAX && team.every(item => {
+    if (typeof item.role !== 'string' || typeof item.task !== 'string' || typeof item.provider !== 'string' || typeof item.model !== 'string') return false
+    const role = item.role.trim()
+    if (!role || role.length > TEAM_ROLE_CHARS || !item.task.trim() || item.task.trim().length > TEAM_TASK_CHARS
+      || !item.provider.trim() || !item.model.trim()) return false
+    const name = role.toLowerCase()
+    if (roles.has(name)) return false
+    roles.add(name)
+    return true
+  })
 }
 const RECOVERY_NOTE = 'The host restarted during this ticket. Inspect the current worktree, its delivery state and the ticket\'s records before continuing. Do not repeat an already completed external operation. Finish the original assignment and report its status.'
 /** What a worker reads when the host restarted an Assignment it found running with no live worker. */
@@ -182,9 +201,15 @@ export class Assignments extends EnginePart {
     const options = report.options?.map(label => label.trim())
     if (options && (!report.question || !validCardOptions(options))) throw new UserError(report.question ? 'attentionOptions' : 'optionsWithoutQuestion')
     // A subagent model request is a permission question with fixed choices: the host puts 允许 and 不允许 on the card and
-    // never reads an approval out of free text, so the worker cannot offer choices of its own.
+    // never reads an approval out of free text, so the worker cannot offer choices of its own. A team request is the same
+    // permission for a roster of roles and routes, and it never shares a card with a single model request.
     if (report.model && (!report.question || options?.length)) throw new UserError('modelRequest')
     if (report.model && analyzing) throw new UserError('analysisReadOnly')
+    if (report.team) {
+      if (report.model || !validTeam(report.team)) throw new UserError('teamRequest')
+      if (!report.question || options?.length) throw new UserError('teamRequest')
+      if (analyzing) throw new UserError('analysisReadOnly')
+    }
     // Sections ordinarily carry a question card's context; an idle analysis has no question and puts its verdict there
     // instead (docs/025), so sections without a question are valid only for its running report.
     if (report.sections && !validQuestionSections(report.sections)) throw new UserError('attentionSections')
@@ -200,13 +225,15 @@ export class Assignments extends EnginePart {
     if (report.answers && !person(report.answers, false)) throw new UserError('notAnswerable')
     const at = this.now()
     const previous = ticket.attention
-    // A model request always offers the same two choices, whatever the worker wrote; an ordinary question keeps its own.
-    const choices = report.model ? [...MODEL_APPROVAL_OPTIONS] : options
+    // A model or team request always offers the same two choices, whatever the worker wrote; an ordinary question keeps its own.
+    const choices = report.model || report.team ? [...MODEL_APPROVAL_OPTIONS] : options
     const ask = (question: string) => ({ id: key('attention', ticketId, question, at), question,
       ...(choices?.length ? { options: choices } : {}), ...(report.sections?.length ? { sections: report.sections } : {}),
-      ...(report.model ? { model: report.model } : {}), ...(report.askedBy ? { triggerId: report.askedBy } : {}) })
+      ...(report.model ? { model: report.model } : {}), ...(report.team ? { team: report.team } : {}),
+      ...(report.askedBy ? { triggerId: report.askedBy } : {}) })
     const same = report.question === previous?.question && JSON.stringify(choices ?? []) === JSON.stringify(previous?.options ?? [])
       && JSON.stringify(report.model ?? null) === JSON.stringify(previous?.model ?? null)
+      && JSON.stringify(report.team ?? null) === JSON.stringify(previous?.team ?? null)
     const asked = report.question && !same ? ask(report.question) : previous
     const attention = report.question === null || report.state === 'ready' ? undefined : asked
     if (attention) ticket.attention = attention

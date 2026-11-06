@@ -1,8 +1,8 @@
-/** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, checking a delivered change's pipeline, approving a subagent model, and reporting status. */
+/** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, checking a delivered change's pipeline, approving a subagent model or agent team, and reporting status. */
 import { z } from 'zod'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
-import { LINKED_RELATION_KINDS, analysisRunning, liveTicket, missingVerifyLabels, PLAN_DIFF_LIMITS, ticketPhase, VERIFY_LABELS, type EngineForExecutor,
-  type ModelRoute, type Ticket } from '../../core/index.ts'
+import { LINKED_RELATION_KINDS, analysisRunning, liveTicket, missingVerifyLabels, modelRoute, PLAN_DIFF_LIMITS, TEAM_ROLE_CHARS, TEAM_ROLES_MAX,
+  TEAM_TASK_CHARS, ticketPhase, VERIFY_LABELS, type EngineForExecutor, type ModelRoute, type TeamRoute, type Ticket } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
 import { matchDeliveryTarget, deliveryTargets } from '../delivery-targets.ts'
 import { claimPull, readPull } from '../../sources/github-pull.ts'
@@ -73,6 +73,12 @@ async function routedModel(host: ExecutorToolsHost, provider: string, model: str
 /** A model-approval question that names the route and its display name, followed by the worker's own question. */
 function modelQuestion(model: ModelRoute, name: string, question: string): string {
   return [`模型授权：允许在本工单用 ${name}（${model.provider}/${model.model}）跑子 agent 吗？`, question].join('\n').slice(0, 1000)
+}
+/** A team-approval question that lists every role, its job and its model route, followed by the worker's own question. */
+function teamQuestion(team: readonly TeamRoute[], names: readonly string[], question: string): string {
+  return [`模型授权：允许在本工单用以下 agent 团队吗？`,
+    ...team.map((item, index) => `- ${item.role}：${names[index]}（${modelRoute(item)}）— ${item.task}`),
+    question].join('\n')
 }
 
 export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
@@ -206,6 +212,13 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           provider: z.string().trim().min(1).max(100),
           model: z.string().trim().min(1).max(200),
         }).strict().optional().describe('With human_action: ask the person to allow this subagent model route; the host asks 允许/不允许. Call list_subagent_models for the ids.'),
+        subagent_team: z.array(z.object({
+          role: z.string().trim().min(1).max(TEAM_ROLE_CHARS).describe('What this teammate does in the team, such as 实现 or 复核; unique in one team request.'),
+          task: z.string().trim().min(1).max(TEAM_TASK_CHARS).describe('The one-line job this teammate is given, as the person will read it before allowing its route.'),
+          provider: z.string().trim().min(1).max(100),
+          model: z.string().trim().min(1).max(200),
+        }).strict()).min(1).max(TEAM_ROLES_MAX).optional()
+          .describe('With human_action: ask the person to allow this agent team, one role and job per model route; the host asks 允许/不允许 for the whole team. Call list_subagent_models for the ids.'),
         question_for_trigger_id: z.string().optional().describe('With human_action: the human message that raised the question, which is asked where that person wrote.'),
         sections: z.array(z.object({ label: z.string().trim().min(1).max(20), text: z.string().trim().min(1).max(800),
           fold: z.boolean().optional() }).strict()).min(1).max(6).optional()
@@ -219,10 +232,14 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
       execute: async (args, signal) => {
         const current = host.store.tickets.get(ticketId)
         if (!current || !liveTicket(current)) throw new Error('Ticket ended (PR was closed or work finished); do not resume it')
-        // A subagent model request is a permission card: the host words the question with the route and fixes the choices, so
-        // a person's click is the only thing that can authorize the route, and the worker cannot offer "允许" itself.
+        // A subagent model or team request is a permission card: the host words the question with the routes and fixes the
+        // choices, so a person's click is the only thing that can authorize them, and the worker cannot offer "允许" itself.
         let humanAction = args.human_action
         let subagentModel: ModelRoute | undefined
+        let subagentTeam: TeamRoute[] | undefined
+        if (args.subagent_model && args.subagent_team) {
+          throw new Error('Ask for one subagent_model or one subagent_team, not both: a team request already approves its routes by role')
+        }
         if (args.subagent_model) {
           if (analysisRunning(current)) throw new Error('This assignment is the ticket\'s read-only idle analysis; it cannot request a subagent model approval')
           if (humanAction == null || !humanAction.trim()) throw new Error('A subagent model request needs human_action: the question for the person')
@@ -235,6 +252,31 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           }
           subagentModel = { provider, model: id }
           humanAction = modelQuestion(subagentModel, name, humanAction.trim())
+        }
+        if (args.subagent_team) {
+          if (analysisRunning(current)) throw new Error('This assignment is the ticket\'s read-only idle analysis; it cannot request an agent team')
+          if (humanAction == null || !humanAction.trim()) throw new Error('An agent team request needs human_action: the question for the person')
+          if (args.options?.length) throw new Error('An agent team request has fixed choices (允许/不允许); omit options')
+          const catalog = await host.models()
+          const displayName = (provider: string, model: string) => catalog.groups.find(group => group.id === provider)
+            ?.models.find(item => item.id === model)?.name || undefined
+          const roles = new Set<string>()
+          const roster: { route: TeamRoute; name: string }[] = args.subagent_team.map(item => {
+            const role = item.role.trim(), task = item.task.trim(), provider = item.provider.trim(), model = item.model.trim()
+            const name = displayName(provider, model)
+            if (!name) throw new Error(`Unknown model route "${provider}/${model}" for the role "${role}". list_subagent_models lists the routes this deployment provides; use its provider and model ids`)
+            const folded = role.toLowerCase()
+            if (roles.has(folded)) throw new Error(`The team names the role "${role}" twice; give each teammate a unique role`)
+            roles.add(folded)
+            if (current.execution?.modelGrants?.some(grant => grant.role === role && grant.provider === provider && grant.model === model)) {
+              throw new Error(`The person already approved ${provider}/${model} for the role "${role}"; call that teammate with subagent instead of asking again`)
+            }
+            return { route: { role, task, provider, model }, name }
+          })
+          subagentTeam = roster.map(item => item.route)
+          humanAction = teamQuestion(subagentTeam, roster.map(item => item.name), humanAction.trim())
+          // The person decides on the whole roster, so a card that would cut one role off is refused rather than sent.
+          if (humanAction.length > 1000) throw new Error('The agent team card would exceed 1000 characters: shorten the roles, the jobs or your own question')
         }
         const pull = args.pr_number != null ? await readPull(host.github, args.pr_number, signal) : undefined
         // Delivery completeness (S3): a ready report may only point at delivery that still exists on the channel's side. A
@@ -277,7 +319,7 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
             ...(args.swarm_review ? { review: args.swarm_review } : {}), ...(args.verification ? { verification: args.verification } : {}) }
           const report = { state: args.state, summary: args.summary, ...(humanAction !== undefined ? { question: humanAction } : {}),
             ...(args.options ? { options: args.options } : {}), ...(args.sections ? { sections: args.sections } : {}),
-            ...(subagentModel ? { model: subagentModel } : {}),
+            ...(subagentModel ? { model: subagentModel } : {}), ...(subagentTeam ? { team: subagentTeam } : {}),
             ...(args.question_for_trigger_id ? { askedBy: args.question_for_trigger_id } : {}),
             ...(args.reply_to_trigger_id ? { answers: args.reply_to_trigger_id } : {}),
             ...(Object.keys(delivery).length ? { delivery } : {}) }

@@ -297,8 +297,14 @@ export type TicketOutcome = 'completed' | 'merged' | 'closed' | 'dropped' | 'sto
 export interface QuestionSection { label: string; text: string; fold?: boolean }
 /** One exact provider/model route, as DeepSeek Harness names a child Session's model. */
 export interface ModelRoute { provider: string; model: string }
-/** A person's recorded authorization for one route on a ticket, and the question it answered. */
-export interface ModelGrant extends ModelRoute { at: string; attentionId: string }
+/** A person's recorded authorization for one route on a ticket, and the question it answered; `role` is the team role it was approved for. */
+export interface ModelGrant extends ModelRoute { at: string; attentionId: string; role?: string }
+/** One member of a worker's proposed agent team: the role and job a person sees before allowing its route, and that route. */
+export interface TeamRoute extends ModelRoute { role: string; task: string }
+/** The limits of one team request: how many teammates it may name, and the length of a role and of its one-line job. */
+export const TEAM_ROLES_MAX = 4
+export const TEAM_ROLE_CHARS = 40
+export const TEAM_TASK_CHARS = 200
 /** The choices a model request's card offers; only the first one records an authorization. */
 export const MODEL_APPROVAL_OPTIONS = ['允许', '不允许'] as const
 /** A ticket's subagent model route, as people and models write it. */
@@ -306,7 +312,9 @@ export const modelRoute = (route: ModelRoute): string => `${route.provider}/${ro
 /** A question for a person; `triggerId` is the human message that raised it, whose conversation it goes back to. */
 export interface Attention { id: string; question: string; /** The worker's choices, when it offers any; a card shows them and a click answers. */ options?: string[]; /** The context the worker adds, in its own order; absent keeps the card's default layout. */ sections?: QuestionSection[]; triggerId?: string
   /** The subagent model route this question asks the person to allow; absent on an ordinary question. */
-  model?: ModelRoute }
+  model?: ModelRoute
+  /** The agent team this question asks the person to allow: each role, its job and its model route; absent on an ordinary question. */
+  team?: TeamRoute[] }
 /** What a person does with a ticket the idle analysis sorted: put it in the attention pool, merge it into a duplicate, or let it sleep. */
 export type AnalysisVerdict = 'promote' | 'merge' | 'archive'
 /**

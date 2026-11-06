@@ -1214,6 +1214,50 @@ describe('worker reports', () => {
     expect(denied.execution?.modelGrants).toHaveLength(1)
     expect(denied.inputs.at(-1)).toMatchObject({ text: '人不允许模型 p/n；本工单不要用它。' })
   })
+  it('asks a person to allow a whole agent team on one card and records each role\'s route only on 允许', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.tick(1)
+    const roster = [{ role: '实现', task: '按方案改代码', provider: 'p', model: 'm' },
+      { role: '复核', task: '独立复现并读 diff', provider: 'p', model: 'n' }]
+    // A team request is a permission question too: a missing question, choices of its own, a single model request beside it,
+    // or a malformed roster never reaches a person.
+    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', team: roster }))
+      .toThrowError(expect.objectContaining({ code: 'teamRequest' }))
+    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', question: 'Q?', options: ['A', 'B'], team: roster }))
+      .toThrowError(expect.objectContaining({ code: 'teamRequest' }))
+    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', question: 'Q?', model: { provider: 'p', model: 'm' }, team: roster }))
+      .toThrowError(expect.objectContaining({ code: 'teamRequest' }))
+    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', question: 'Q?', team: [roster[0]!, roster[0]!] }))
+      .toThrowError(expect.objectContaining({ code: 'teamRequest' }))
+    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', question: 'Q?', team: [] }))
+      .toThrowError(expect.objectContaining({ code: 'teamRequest' }))
+    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', question: 'Q?',
+      team: Array.from({ length: 5 }, (_, index) => ({ role: `r${index}`, task: 't', provider: 'p', model: 'm' })) }))
+      .toThrowError(expect.objectContaining({ code: 'teamRequest' }))
+    const asked = h.engine.report(ticketId, { state: 'progress', summary: 'need a team', question: '模型授权：允许用这个团队吗？', team: roster })
+    expect(asked.attention).toEqual(expect.objectContaining({ question: '模型授权：允许用这个团队吗？', options: ['允许', '不允许'], team: roster }))
+    // A written answer that is not the card's label authorizes nothing.
+    const written = h.engine.answerAttentionText(ticketId, asked.attention!.id, '先不用')
+    expect(written.execution?.modelGrants).toBeUndefined()
+    expect(written.inputs.at(-1)).toMatchObject({ kind: 'text', text: expect.stringContaining('agent 团队未授权') })
+    // One click approves the whole roster: every route is recorded with its role, and the answer tells the leader to verify.
+    h.tick(1)
+    const again = h.engine.report(ticketId, { state: 'progress', summary: 'ask again', question: '模型授权：允许用这个团队吗？', team: roster })
+    const approved = h.engine.answerAttention(ticketId, again.attention!.id, '允许')
+    expect(approved.execution?.modelGrants).toEqual([
+      expect.objectContaining({ role: '实现', provider: 'p', model: 'm', attentionId: again.attention!.id }),
+      expect.objectContaining({ role: '复核', provider: 'p', model: 'n', attentionId: again.attention!.id }),
+    ])
+    expect(approved.inputs.at(-1)).toMatchObject({ text: expect.stringContaining('自己跑验证') })
+    // A denial records no route for the team it refused, and the earlier grants stand.
+    h.tick(1)
+    const third = h.engine.report(ticketId, { state: 'progress', summary: 'ask third', question: '模型授权：允许用分析角色吗？',
+      team: [{ role: '分析', task: '查根因', provider: 'p', model: 'o' }] })
+    const denied = h.engine.answerAttention(ticketId, third.attention!.id, '不允许')
+    expect(denied.execution?.modelGrants).toHaveLength(2)
+    expect(denied.inputs.at(-1)).toMatchObject({ text: '人不允许本工单的 agent 团队（分析 p/o）；本工单不要用这些模型。' })
+  })
   it('turns a written answer into the worker\'s input and clears the question, as a choice does', () => {
     const h = harness()
     const ticketId = accepted(h).ticketId!
