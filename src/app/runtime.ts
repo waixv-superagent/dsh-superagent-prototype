@@ -1,4 +1,4 @@
-﻿/** Application composition root and lifecycle manager for dsh-superagent. */
+/** Application composition root and lifecycle manager for dsh-superagent. */
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-subprocess'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
@@ -215,6 +215,9 @@ export class Runtime extends Service implements SourceHost {
         buildCommand: () => store.settings().executor.editor.build,
         launchCommand: () => store.settings().executor.editor.restart,
         platforms: () => [hostPlatform(process.platform)],
+        paths: () => ({ project: store.settings().executor.editor.project, engine: store.settings().executor.editor.engine,
+          editorExe: store.settings().executor.editor.editorExe }),
+        exists: path => existsSync(path),
         project: () => store.settings().executor.editor.project,
         cwd: () => { const project = store.settings().executor.editor.project; return project ? dirname(resolve(project)) : machine.stateDir },
         blocked: () => {
@@ -460,5 +463,6 @@ export class Runtime extends Service implements SourceHost {
     }
   }
 }
+
 
 

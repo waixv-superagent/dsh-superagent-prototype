@@ -1,4 +1,4 @@
-﻿/** Execution status view (active Tickets and pause control) and Execution settings group (Executor capacity and workspace environment). */
+/** Execution status view (active Tickets and pause control) and Execution settings group (Executor capacity and workspace environment). */
 import { useRef, useState } from 'react'
 import { TICKET_FILTERS, type TicketFilter } from '../app/api.ts'
 import { TICKET_KINDS, type TicketKind } from '../core/kind.ts'
@@ -205,6 +205,14 @@ export function ExecutionSettings() {
           <Field label={t('editorProject')} hint={t('editorProjectHint')}>
             <Input className="dt-mono" value={value.editor.project} placeholder={t('editorCommandEmpty')} spellCheck={false}
               onChange={event => edit({ editor: { ...value.editor, project: event.target.value } })} />
+          </Field>
+          <Field label={t('editorEngine')} hint={t('editorEngineHint')}>
+            <Input className="dt-mono" value={value.editor.engine} placeholder={t('editorCommandEmpty')} spellCheck={false}
+              onChange={event => edit({ editor: { ...value.editor, engine: event.target.value } })} />
+          </Field>
+          <Field label={t('editorExe')} hint={t('editorExeHint')}>
+            <Input className="dt-mono" value={value.editor.editorExe} placeholder={t('editorExeEmpty')} spellCheck={false}
+              onChange={event => edit({ editor: { ...value.editor, editorExe: event.target.value } })} />
           </Field>
           {(['build', 'restart', 'test'] as const).map(kind => <Field key={kind} label={t(`editorCommand.${kind}`)} hint={t('editorCommandHint')}>
             <Input className="dt-mono" value={value.editor[kind]} placeholder={t('editorCommandEmpty')} spellCheck={false}

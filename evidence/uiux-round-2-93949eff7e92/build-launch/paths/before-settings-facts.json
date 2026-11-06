@@ -1,0 +1,35 @@
+{
+  "mode": "before",
+  "facts": {
+    "hasProject": true,
+    "hasEngine": false,
+    "hasEditorExe": false,
+    "labels": [
+      "服务商",
+      "模型",
+      "推理强度（可选）",
+      "每个仓库/工作区的并行工单数",
+      "执行目录的根目录",
+      "准备命令",
+      "交付后端",
+      "P4PORT",
+      "P4USER",
+      "工作区名模板",
+      "depot 路径",
+      "同步版本",
+      "Swarm 地址",
+      "Jenkins 地址",
+      "Jenkins 用户",
+      "Jenkins API Token",
+      "Jenkins 冒烟 Job",
+      "可选审核人",
+      "autobuild Job",
+      "编辑器工程（.uproject）",
+      "编译命令",
+      "重启编辑器命令",
+      "跑测试命令",
+      "目标名",
+      "禁止调用的命令"
+    ]
+  }
+}

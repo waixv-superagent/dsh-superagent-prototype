@@ -523,6 +523,10 @@ function BuildCard() {
           <Button variant="outline" size="sm" onClick={() => navigate(settingsRoute('execution'))}>{t('buildConfigure')}</Button>
         </div>
         : <>
+          {data.paths.problem && <div className="dt-build-paths">
+            <p>{t(data.paths.problem === 'project' ? 'buildNeedProject' : 'buildNeedEngine')}</p>
+            <Button variant="outline" size="sm" onClick={() => navigate(settingsRoute('execution'))}>{t('buildConfigure')}</Button>
+          </div>}
           <div className="dt-build-controls">
             <label className="dt-build-label" htmlFor="dt-build-preset">{t('buildPresetLabel')}</label>
             <select id="dt-build-preset" className="dt-select dt-build-select" value={key(selected!)} disabled={!!active}
@@ -534,8 +538,9 @@ function BuildCard() {
             </select>
             {active
               ? <Button variant="outline" size="sm" disabled={stop.busy} onClick={() => { void stop.run(active.runId) }}>{t('buildStop')}</Button>
-              : <Button variant="primary" size="sm" disabled={run.busy || blocked !== null}
-                title={blocked ? t(blocked === 'agent' ? 'buildBlockedAgent' : 'buildBlockedJob') : undefined}
+              : <Button variant="primary" size="sm" disabled={run.busy || blocked !== null || !!data.paths.problem}
+                title={blocked ? t(blocked === 'agent' ? 'buildBlockedAgent' : 'buildBlockedJob')
+                  : data.paths.problem ? t(data.paths.problem === 'project' ? 'buildNeedProject' : 'buildNeedEngine') : undefined}
                 onClick={() => { if (selected) void run.run({ target: selected.target, configuration: selected.configuration, platform: selected.platform }) }}>
                 {t('buildRun')}</Button>}
             {active && <Tag tone="info">{t('buildRunning')}</Tag>}
@@ -567,7 +572,7 @@ function BuildCard() {
                 </select>
               </label>
             </div>
-            <p className="dt-build-command"><span>{t('buildTemplates')}</span><code>{data.build}</code><span> → </span><code>{data.launch}</code></p>
+            <p className="dt-build-command"><span>{t('buildTemplates')}</span><code>{data.build || t('buildDerived')}</code><span> → </span><code>{data.launch || t('buildDerived')}</code></p>
           </details>
           {data.runs.length > 0 && <ul className="dt-build-runs">{data.runs.map(row => <li key={row.id} data-state={row.state}>
             <Tag tone={stateTone(row.state)}>{t(`buildState.${row.state}`)}</Tag>

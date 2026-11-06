@@ -1,4 +1,4 @@
-﻿// @vitest-environment jsdom
+// @vitest-environment jsdom
 // The editor page: who holds the editor, which Tickets are working with their live tool, and what waits on a person.
 import { expect, it } from 'vitest'
 import { zh } from '../src/client/locales.ts'
@@ -384,6 +384,16 @@ it('points at the settings when no compile target is configured, and disables th
   const button = find(zh.buildRun, '.dt-build button')
   expect(button.hasAttribute('disabled')).toBe(true)
   expect(document.querySelector('.dt-build-blocked')?.textContent).toBe(zh.buildBlockedAgent)
+})
+
+it('asks for the project or engine path before a run, and links to where they are configured', async () => {
+  server.buildPage = { ...server.buildPage, paths: { ...server.buildPage.paths, project: '', problem: 'project' } }
+  await mountHome()
+  await openEditor()
+  expect(document.querySelector('.dt-build-paths')?.textContent).toContain(zh.buildNeedProject)
+  expect(find(zh.buildRun, '.dt-build-controls button').hasAttribute('disabled')).toBe(true)
+  await click(zh.buildConfigure)
+  expect(tab(zh['tab.settings']).getAttribute('aria-selected')).toBe('true')
 })
 
 

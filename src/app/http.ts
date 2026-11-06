@@ -1,4 +1,4 @@
-﻿/** Loopback-only management HTTP routes with same-origin enforcement for the web panel. */
+/** Loopback-only management HTTP routes with same-origin enforcement for the web panel. */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -20,6 +20,7 @@ import type { BuildRunner } from './build-runner.ts'
 import { VISIBLE_BUILD_RUNS } from './build-runner.ts'
 import { buildPage } from './views/build.ts'
 import { EDITOR_CONFIGURATIONS, EDITOR_PLATFORMS, EDITOR_TARGET } from '../core/editor-composition.ts'
+import { editorPathProblem } from '../core/editor-paths.ts'
 import { inside, readReproCases } from './repro.ts'
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
@@ -331,8 +332,10 @@ function routes(runtime: HttpHost): Routes {
       const runs = build.read().slice(0, VISIBLE_BUILD_RUNS)
       const active = runs.find(run => run.state === 'running')
       const editor = runtime.store.settings().executor.editor
+      const paths = { project: editor.project, engine: editor.engine, editorExe: editor.editorExe }
+      const derived = !editor.build.trim() || !editor.restart.trim()
       return buildPage({ targets: build.targets(), configurations: [...EDITOR_CONFIGURATIONS], platforms: build.platforms(),
-        build: editor.build, launch: editor.restart,
+        build: editor.build, launch: editor.restart, paths: { ...paths, problem: derived ? editorPathProblem(paths) : null },
         runs: runs.map(run => ({ id: run.id, name: run.name, target: run.target, configuration: run.configuration,
           platform: run.platform, state: run.state, startedAt: run.startedAt,
           ...run.endedAt ? { endedAt: run.endedAt } : {}, ...run.exitCode !== undefined ? { exitCode: run.exitCode } : {}, summary: run.summary })),
@@ -592,4 +595,5 @@ export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
     } })]
   return () => { for (const dispose of disposers) dispose() }
 }
+
 

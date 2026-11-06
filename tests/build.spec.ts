@@ -1,4 +1,4 @@
-﻿/** The editor page's composed compile-and-launch runs (docs/021): configuration × target × platform under one slot. */
+/** The editor page's composed compile-and-launch runs (docs/021): configuration × target × platform under one slot. */
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -31,6 +31,8 @@ function harness(overrides: Partial<BuildRunnerHost> = {}) {
   const host = {
     store, logDir: temp(), project: () => 'E:/Dev/Project/SunGame/SunGame.uproject', cwd: () => 'E:/Dev/Project/SunGame',
     targets: () => ['SunGame', 'SunGameEditor'], platforms: () => ['Win64'] as const,
+    paths: () => ({ project: 'E:/Dev/Project/SunGame/SunGame.uproject', engine: 'E:/Dev/UE_5.4', editorExe: '' }),
+    exists: () => true,
     buildCommand: () => 'Build.bat <target> <platform> <configuration> -Project=<project>',
     launchCommand: () => 'start UnrealEditor.exe <project>',
     blocked: () => null as 'agent' | 'job' | null,
@@ -64,7 +66,7 @@ it('composes Rider’s configuration × target × platform into one build-and-la
   expect(host.released).toBe(1)
 })
 
-it('refuses a second run, an unknown target, configuration or platform, and missing templates', () => {
+it('refuses a second run and an unknown target, configuration or platform', () => {
   const { host, runner } = harness()
   runner.start(EDITOR)
   expect(() => runner.start(EDITOR)).toThrow(UserError)
@@ -74,11 +76,6 @@ it('refuses a second run, an unknown target, configuration or platform, and miss
   expect(() => invalid.runner.start({ ...EDITOR, configuration: 'Debug' as never })).toThrow(/configuration/i)
   expect(() => invalid.runner.start({ ...EDITOR, platform: 'Linux' as never })).toThrow(/platform/i)
   expect(invalid.children).toEqual([])
-  // The composition needs both templates; an empty one refuses before anything is spawned or claimed.
-  const missing = harness({ launchCommand: () => '' })
-  expect(() => missing.runner.start(EDITOR)).toThrow(/launch/i)
-  expect(missing.host.taken).toEqual([])
-  expect(missing.children).toEqual([])
 })
 
 it('refuses while an agent holds the editor and when the slot is not granted', () => {
@@ -118,8 +115,10 @@ it('keeps the composed command preview and the newest runs for the page', () => 
   const runs = runner.read().slice(0, 6)
   expect(runs.map(run => run.name)).toEqual(['Development Editor SunGame'])
   expect(buildPage({ targets: runner.targets(), configurations: ['Development'], platforms: runner.platforms(),
-    build: 'Build.bat', launch: 'start', runs, blocked: 'agent' })).toMatchObject({
-    targets: ['SunGame', 'SunGameEditor'], platforms: ['Win64'], blocked: 'agent', active: null })
+    build: 'Build.bat', launch: 'start', runs, blocked: 'agent',
+    paths: { project: 'E:/Dev/Project/SunGame/SunGame.uproject', engine: 'E:/Dev/UE_5.4', editorExe: '', problem: null } })).toMatchObject({
+    targets: ['SunGame', 'SunGameEditor'], platforms: ['Win64'], blocked: 'agent', active: null,
+    paths: { project: 'E:/Dev/Project/SunGame/SunGame.uproject', engine: 'E:/Dev/UE_5.4' } })
   expect(store.get(KV.build.runs)!.runs).toHaveLength(1)
 })
 
@@ -128,4 +127,31 @@ it('reads a build verdict, else the last line and the exit code', () => {
   expect(runSummary('Compiled fine\nDone', 0)).toBe('exit 0 · Done')
   expect(runSummary('boom', 2)).toBe('exit 2 · boom')
 })
+
+it('derives the UBT build and editor launch from the configured project and engine paths', () => {
+  const { runner, spawned } = harness({ buildCommand: () => '', launchCommand: () => '' })
+  const project = 'E:/Dev/Project/SunGame/SunGame.uproject'
+  const native = project.replaceAll('/', '\\')
+  const expected = '"E:\\Dev\\UE_5.4\\Build\\BatchFiles\\Build.bat" SunGameEditor Win64 Development'
+    + ` -Project="${native}" -WaitMutex && "E:\\Dev\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe" "${native}"`
+  expect(runner.preview(EDITOR)).toBe(expected)
+  runner.start(EDITOR)
+  expect(spawned[0]!.command).toBe(expected)
+  // An explicit editor executable overrides the engine's own binary.
+  const custom = harness({ buildCommand: () => '', launchCommand: () => '',
+    paths: () => ({ project, engine: 'E:/Dev/UE_5.4', editorExe: 'D:/Custom/UnrealEditor.exe' }) })
+  expect(custom.runner.preview(EDITOR)).toContain('"D:\\Custom\\UnrealEditor.exe"')
+})
+
+it('names the missing project or engine, and a configured path that does not exist', () => {
+  const noProject = harness({ buildCommand: () => '', launchCommand: () => '',
+    paths: () => ({ project: '', engine: 'E:/UE', editorExe: '' }) })
+  expect(() => noProject.runner.start(EDITOR)).toThrow(/project/i)
+  const noEngine = harness({ buildCommand: () => '', launchCommand: () => '',
+    paths: () => ({ project: 'E:/X.uproject', engine: '', editorExe: '' }) })
+  expect(() => noEngine.runner.start(EDITOR)).toThrow(/engine/i)
+  const missing = harness({ buildCommand: () => '', launchCommand: () => '', exists: () => false })
+  expect(() => missing.runner.start(EDITOR)).toThrow(/not exist/i)
+})
+
 

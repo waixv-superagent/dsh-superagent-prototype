@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Bilingual UI dictionaries (`[zh, en]`) and glossary groupings, following the domain terms in `docs/001-domain.md`.
  */
 import { USER_ERRORS } from '../core/errors.ts'
@@ -668,6 +668,10 @@ const TEXT = {
   buildNoOutput: ['还没有输出。', 'No output yet.'],
   buildNoTargets: ['还没有配置目标名。到「设置 › 执行 › 编辑器」的「目标」里填 SunGame / SunGameEditor（一行一个）。', 'No target names are configured yet. Add SunGame / SunGameEditor (one per line) under Settings › Execution › editor.'],
   buildConfigure: ['去设置里添加', 'Add one in settings'],
+  buildNeedProject: ['先配置工程路径（.uproject）；编译启动需要它。', 'Configure the project (.uproject) first; the compile-and-launch needs it.'],
+  buildNeedEngine: ['先配置引擎目录，或自己写编译/启动命令。', 'Configure the engine directory, or write the build/launch commands yourself.'],
+  buildDerivedHint: ['由工程与引擎路径自动生成', 'Derived from the project and engine paths'],
+  buildDerived: ['自动', 'derived'],
   buildBlockedAgent: ['agent 正占着编辑器；先让它让出再编译启动。', 'An agent holds the editor; let it yield first.'],
   buildBlockedJob: ['宿主的编辑器作业还在跑；等它结束再编译启动。', 'A host-run editor job holds the editor; wait for it to end.'],
   buildExit: ['退出码 {code}', 'exit {code}'],
@@ -1012,8 +1016,13 @@ const TEXT = {
   blockedCommands: ['禁止调用的命令', 'Blocked commands'],
   blockedCommandsHint: ['执行器 Session 调用这些命令名时直接失败，例如用你个人账号登录的 CLI。gh、git、lark-cli、p4 不能禁止；p4 的包装器会拦掉 submit，只放行其他子命令。', 'Command names that fail when an Executor Session calls them, such as a CLI signed in to your own account. gh, git, lark-cli and p4 cannot be blocked; the p4 wrapper refuses submit and passes its other subcommands through.'],
   blockedCommandsNone: ['以空格分隔；没有', 'Separated by spaces; none'],
-  editorProject: ['编辑器工程（.uproject）', 'Editor project (.uproject)'],
-  editorProjectHint: ['调度读取它旁边 Saved/UE_MCP_Bridge 里 ue-mcp 写的编辑器状态；命令里的 <project> 换成它。', 'The scheduler reads the editor state ue-mcp writes under Saved/UE_MCP_Bridge beside it; <project> in a command becomes it.'],
+  editorProject: ['工程路径（.uproject）', 'Project (.uproject)'],
+  editorProjectHint: ['编译启动会替换 <project> 并据此推导命令；调度也会读它旁边 Saved/UE_MCP_Bridge 里的编辑器状态。', 'The compile-and-launch fills <project> and derives commands from it; the scheduler also reads the editor state beside it under Saved/UE_MCP_Bridge.'],
+  editorEngine: ['引擎目录', 'Engine directory'],
+  editorEngineHint: ['Unreal Engine 根目录（包含 Engine/）。和工程路径一起自动拼 UBT 编译与编辑器启动命令；自己填了编译/启动命令时以命令为准。', 'The Unreal Engine root (the directory holding Engine/). With the project it derives the UBT build and editor launch commands; explicit build/restart commands win.'],
+  editorExe: ['编辑器可执行文件', 'UnrealEditor path'],
+  editorExeHint: ['可选：非标准安装时指定 UnrealEditor(.exe)；留空则从引擎目录推导（Win64/Mac/Linux）。', 'Optional: the UnrealEditor executable for a non-standard install; empty derives it from the engine (Win64/Mac/Linux).'],
+  editorExeEmpty: ['留空：从引擎目录推导', 'Empty: derive from the engine'],
   'editorCommand.build': ['编译命令', 'Build command'],
   'editorCommand.restart': ['重启编辑器命令', 'Restart command'],
   'editorCommand.test': ['跑测试命令', 'Test command'],
@@ -1457,7 +1466,9 @@ const TEXT = {
   'userError.buildEditorBusy': ['编辑器没有交到你手里；等占用的 agent 让出后再试。', USER_ERRORS.buildEditorBusy[1]],
   'userError.buildConfiguration': ['不认识的编辑器配置：{configuration}。', USER_ERRORS.buildConfiguration[1]],
   'userError.buildPlatform': ['这个平台在本机不可用：{platform}。', USER_ERRORS.buildPlatform[1]],
-  'userError.buildMissingCommand': ['编译和启动命令都要配置（设置 › 执行 › 编辑器），才能组合出一次运行。', USER_ERRORS.buildMissingCommand[1]],
+  'userError.buildMissingProject': ['先配置工程路径（设置 › 执行 › 编辑器 › 工程路径）。', USER_ERRORS.buildMissingProject[1]],
+  'userError.buildMissingEngine': ['先配置引擎目录（设置 › 执行 › 编辑器），或自己写编译/启动命令。', USER_ERRORS.buildMissingEngine[1]],
+  'userError.buildPathMissing': ['找不到这个路径：{path}。', USER_ERRORS.buildPathMissing[1]],
   'userError.unknownBuildTarget': ['设置里没有这个构建目标：{target}。', USER_ERRORS.unknownBuildTarget[1]],
   'userError.unknownBuildRun': ['找不到这次编译启动的记录：{run}。', USER_ERRORS.unknownBuildRun[1]],
   'userError.buildNotRunning': ['这次编译启动已经结束了。', USER_ERRORS.buildNotRunning[1]],
@@ -1512,5 +1523,7 @@ export const GLOSSARY_VALUES = {
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap { dshSuperagent: DshSuperagentKey }
 }
+
+
 
 

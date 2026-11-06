@@ -222,6 +222,10 @@ export const StallConfigSchema = z.object({
 export const EditorConfigSchema = z.object({
   /** The `.uproject` the editor opens; ue-mcp's bridge status is read beside it. Empty turns the bridge reading off. */
   project: z.string().trim().max(400).default(''),
+  /** The Unreal Engine root (the directory holding `Engine/`); with the project it derives the UBT and launch commands. */
+  engine: z.string().trim().max(400).default(''),
+  /** An explicit `UnrealEditor` executable for a non-standard install; empty derives it from the engine on the host platform. */
+  editorExe: z.string().trim().max(400).default(''),
   /** The build command; `<target>`, `<configuration>`, `<platform>` and `<project>` are replaced for a composed run. */
   build: z.string().trim().max(1000).default(''),
   /** The launch command, filled the same way and run only after the build succeeded (`build && launch`). */

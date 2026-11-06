@@ -327,6 +327,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/core/idle.ts` | Idle time: the five signals (`queue`, `capacity`, `window`, `human`, `guard`), the three depths `L1`/`L2`/`L3`, the configured windows and their defaults, `idleState`, `idleAdmits` and the daily budget |
 | `src/core/analysis.ts` | The idle pool's read-only analysis (docs/025): the worker's `analysisSection` (change nothing, write the dossier, record a verdict), the `analysisBrief` its first message carries with the likely duplicates, the verdict labels, and `analysisRunning`/`analysisReady`/`analysisAdvice`/`worthAttention` |
 | `src/core/verification.ts` | The four-block verification package a delivered change reports: `VERIFY_LABELS`, `verifyLines` and `missingVerifyLabels` |
+| `src/core/editor-paths.ts` | The configured project/engine/editor locations (docs/021): what a derived command still needs, the UBT script and editor binary per platform, and the derived build/launch commands; explicit templates override them |
 | `src/core/editor-composition.ts` | Rider's editor run configuration (docs/021): the configurations and platforms, the target-name rule, the host platform mapping and `editorRunName`, shared by the runner and the panel |
 | `src/core/errors.ts` | `UserError` and `USER_ERRORS` |
 | `src/core/reasons.ts` | `Reason`, `REASONS` and `reasonText`: why the core recorded a Decision or set a Trigger aside, by code |
@@ -740,6 +741,7 @@ Point `DSH_HOME` at a temporary directory and create a new profile there. Copy t
 
 - Trust: which Trigger fields are trusted, such as the Source's actor and Thread membership, and which are not, such as the body and quotes.
 - Deployment isolation: the agent's profile on its own pinned DeepSeek Harness installation, so upgrading DeepSeek Harness elsewhere does not break it.
+
 
 
 
