@@ -401,6 +401,18 @@ function ReproInline({ ticket, steps, onChanged }: { ticket: TicketPageView; ste
  * The worker's own verification text stays visible as evidence, never as acceptance. A historical delivery is shown as a
  * backfill: what was recorded, what is missing, and — when there is nothing concrete to check — no pass button at all.
  */
+type AcceptanceView = NonNullable<TicketPageView['acceptance']>
+type EditorState = AcceptanceView['editor']['state']
+/** The state line and its tooltip: what the timestamps in `acceptance.editor` mean, in one glance. */
+const EDITOR_STATE: Record<EditorState, { label: 'verifyEditorLoaded' | 'verifyEditorRestart' | 'verifyEditorBuild'
+  | 'verifyEditorNoEditor' | 'verifyEditorUnknown'; hint: 'verifyEditorLoadedHint' | 'verifyEditorRestartHint'
+  | 'verifyEditorBuildHint' | 'verifyEditorNoEditorHint' | 'verifyEditorUnknownHint'; tone: 'success' | 'warning' | 'info' | 'outline' }> = {
+  loaded: { label: 'verifyEditorLoaded', hint: 'verifyEditorLoadedHint', tone: 'success' },
+  restart: { label: 'verifyEditorRestart', hint: 'verifyEditorRestartHint', tone: 'warning' },
+  build: { label: 'verifyEditorBuild', hint: 'verifyEditorBuildHint', tone: 'warning' },
+  'no-editor': { label: 'verifyEditorNoEditor', hint: 'verifyEditorNoEditorHint', tone: 'info' },
+  unknown: { label: 'verifyEditorUnknown', hint: 'verifyEditorUnknownHint', tone: 'outline' },
+}
 function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onChanged: () => Promise<void> }) {
   const { t, call, notify } = usePanel()
   const [returning, setReturning] = useState(false)
@@ -417,6 +429,10 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
   const reviewHref = review && /^https?:\/\//i.test(review) ? review : undefined
   const reviewText = review ? reviewLabel(review) : ''
   const deliveredRef = [delivery?.changelist !== undefined ? `CL ${delivery.changelist}` : '', reviewText].filter(Boolean).join(' · ')
+  const acceptance = ticket.acceptance
+  const editorState = acceptance ? EDITOR_STATE[acceptance.editor.state] : undefined
+  const target = acceptance ? [acceptance.workspace.backend, acceptance.workspace.target, acceptance.workspace.client
+    ? `${t('verifyClient')} ${acceptance.workspace.client}` : ''].filter(Boolean).join(' · ') : ''
   // A changelist number alone is not inspectable from this page: it gives no diff and no check. Only a file list, a
   // review, or the worker's verification count as a basis for recording a pass. Historically ended Tickets often lost
   // the lease; then the card must say so instead of pretending that a CL number is something to verify.
@@ -451,6 +467,15 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
       </div>
       <span className="dt-verify-gate-state">{backlog ? t('verifyHistorical') : t('verifyWorkerBadge')}</span>
     </header>
+    {acceptance && editorState && <div className="dt-verify-editor" data-state={acceptance.editor.state} title={t(editorState.hint)}>
+      <span className="dt-verify-editor-dot" aria-hidden="true" />
+      <span className="dt-verify-editor-state">{t(editorState.label)}</span>
+      <span className="dt-verify-editor-detail">{!acceptance.editor.build || acceptance.editor.state === 'build'
+        || acceptance.editor.state === 'unknown' ? t('verifyEditorNoBuild')
+        : acceptance.editor.state === 'no-editor' ? t('verifyEditorBuilt', { build: when(acceptance.editor.build.endedAt, t('lang')) })
+        : t('verifyEditorDetail', { build: when(acceptance.editor.build.endedAt, t('lang')),
+          editor: acceptance.editor.editors[0] ? when(acceptance.editor.editors[0], t('lang')) : t('verifyEditorNoProcess') })}</span>
+    </div>}
     {structured && judge && <div className="dt-verify-gate-judge">
       <span className="dt-verify-gate-tag">{t('verifyJudgeTitle')}</span>
       <p className="dt-verify-gate-judge-text">{judge}</p>
@@ -465,6 +490,9 @@ function VerificationGate({ ticket, onChanged }: { ticket: TicketPageView; onCha
           <div><dt>{t('verifyDeliveredLabel')}</dt><dd>{when(ticket.verification?.at ?? ticket.updatedAt, t('lang'))} · {t('verifyRound', {
             round: ticket.assignments.length })}</dd></div>
           <div><dt>{t('verifyScope')}</dt><dd>{scope.length ? t('verifyFiles', { count: scope.length }) : t('verifyScopeUnknown')}</dd></div>
+          {acceptance && <div className="dt-verify-fact-wide"><dt>{t('verifyWorkspaceLabel')}</dt><dd className="dt-mono dt-wrap" title={acceptance.workspace.directory}>
+            {acceptance.workspace.directory || t('empty')}</dd></div>}
+          {acceptance && target && <div className="dt-verify-fact-wide"><dt>{t('verifyTargetLabel')}</dt><dd className="dt-wrap" title={target}>{target}</dd></div>}
         </dl>
         {brief && <div className="dt-verify-gate-brief">
           <span>{t('verifyLastReport')}</span>

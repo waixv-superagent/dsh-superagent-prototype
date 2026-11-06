@@ -50,6 +50,17 @@ Everything is read from the execution environment, so no depot path is baked int
 
 A failed prepare fails the Ticket with the command's output and is not retried, because an existing directory counts as prepared (see 007 Architecture).
 
+### 2.1 Where a delivered change lives, and why it may be a workspace you cannot see
+
+A Ticket works in the directory its Execution block names — by default `<stateDir>/work/<short name>`, or a task centre workspace when the accept placed it in one. Under the `p4` backend that directory is also a client the host created, named from `p4.clientTemplate`; the Ticket's changelist is opened, shelved and kept in that client. A person's own P4V client therefore does not list the shelved changelist: it belongs to the Ticket's client, not to the mainline workspace the person uses day to day. The change is still visible where it matters — Swarm serves the review by id, and the Ticket page names the workspace directory, the target and the client that owns the changelist.
+
+Two layouts are reasonable:
+
+- **One workspace per Ticket (the default).** Each Ticket gets its own client and tree, so two Tickets never compile into or sync the same files, and a person can inspect one without disturbing another. The cost is that the directory is under the execution root, not in the person's usual checkout.
+- **A pooled task-centre workspace.** Several Tickets are placed in the same workspace and share one client and one build tree; each still delivers its own changelist. Use it when the Tickets are expected to build and be verified together (a shared change, a batch of small fixes) and the shared tree is the thing a person wants to test.
+
+No step moves a delivered changelist into another workspace: the workspace named on the Ticket is where it was made, shelved and left for the follow-up. A person who wants to test the shelf locally opens that directory (or adds that client in P4V); a person who only reviews reads it in Swarm.
+
 ## 3. Execution variables
 
 The p4 backend adds these to the execution environment, visible in Execution settings beside the prepare command whether or not a Source is enabled:
