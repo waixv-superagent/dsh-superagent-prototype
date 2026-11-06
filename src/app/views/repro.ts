@@ -20,6 +20,8 @@ export interface ReproRunView {
   caseId: string
   caseName: string
   state: ReproRun['state']
+  /** Who started the run; absent on runs recorded before the night queue existed, which count as a person's. */
+  origin?: ReproRun['origin']
   startedAt: string
   endedAt?: string
   exitCode?: number | null
@@ -48,10 +50,10 @@ export function reproCaseView(item: ReproCase): ReproCaseView {
     ...item.problem ? { problem: item.problem } : {} }
 }
 
-/** One run as the panel shows it: the same shape the editor page's card uses. */
+/** One run as the panel shows it: the same shape the editor page's card uses. A person's run carries no origin, as before. */
 export function reproRunView(run: ReproRun): ReproRunView {
-  return { id: run.id, caseId: run.caseId, caseName: run.caseName, state: run.state, startedAt: run.startedAt,
-    ...run.endedAt ? { endedAt: run.endedAt } : {}, ...run.exitCode !== undefined ? { exitCode: run.exitCode } : {},
+  return { id: run.id, caseId: run.caseId, caseName: run.caseName, state: run.state, ...run.origin === 'night' ? { origin: 'night' } : {},
+    startedAt: run.startedAt, ...run.endedAt ? { endedAt: run.endedAt } : {}, ...run.exitCode !== undefined ? { exitCode: run.exitCode } : {},
     summary: run.summary, ...run.report ? { report: run.report } : {} }
 }
 

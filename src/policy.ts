@@ -191,6 +191,19 @@ const IdleAnalysisSchema = z.object({
   related: z.number().int().min(0).max(3).default(IDLE_DEFAULTS.analysis.related)
     .describe('How many likely related tickets an analysis brief names, from the relation graph\'s own guess.'),
 }).strict()
+/**
+ * The night reproduction queue (docs/029): the host replays a delivered Ticket's local reproduction case inside this
+ * window, by itself and without messaging anyone. `perNight` bounds how many cases one night spends on the shared editor.
+ */
+const IdleReproSchema = z.object({
+  enabled: z.boolean().default(IDLE_DEFAULTS.repro.enabled)
+    .describe('Replay a delivered Ticket\'s local reproduction case in the night window, silently; false keeps every run a person\'s click.'),
+  window: z.object({ from: ClockTimeSchema, to: ClockTimeSchema }).strict()
+    .default(() => ({ ...IDLE_DEFAULTS.repro.window }))
+    .describe('The local window the night queue may start a case in; it crosses midnight when the end is before the start.'),
+  perNight: z.number().int().min(1).max(10).default(IDLE_DEFAULTS.repro.perNight)
+    .describe('How many cases the night queue starts in one night.'),
+}).strict()
 export const IdleConfigSchema = z.object({
   enabled: z.boolean().default(IDLE_DEFAULTS.enabled),
   windows: z.array(z.object({ from: ClockTimeSchema, to: ClockTimeSchema, level: z.enum(['L1', 'L2', 'L3']) }).strict())
@@ -203,6 +216,7 @@ export const IdleConfigSchema = z.object({
   analysisWorkers: z.number().int().min(1).max(4).default(IDLE_DEFAULTS.analysisWorkers),
   priorityAskMin: z.number().int().min(5).max(720).default(IDLE_DEFAULTS.priorityAskMin),
   analysis: IdleAnalysisSchema.default(() => IdleAnalysisSchema.parse({})),
+  repro: IdleReproSchema.default(() => IdleReproSchema.parse({})),
 }).strict()
 export type IdleSettings = z.infer<typeof IdleConfigSchema>
 /**

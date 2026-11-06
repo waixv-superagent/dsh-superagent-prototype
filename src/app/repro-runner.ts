@@ -15,6 +15,8 @@ import { killTree } from './editor-scheduler.ts'
 
 /** How a run ended: a printed verdict never overrides what the process itself did. */
 export type ReproRunState = 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+/** Who started a run: a person's click, or the night queue replaying a delivered ticket's case on its own (docs/029). */
+export type ReproRunOrigin = 'person' | 'night'
 
 /** One run of a local case; the state keeps the newest runs only, while every log stays on disk. */
 export interface ReproRun {
@@ -23,6 +25,8 @@ export interface ReproRun {
   /** The case's display name at the time of the run, so a renamed or removed folder still reads. */
   caseName: string
   state: ReproRunState
+  /** Absent on runs recorded before the night queue existed, which count as a person's. */
+  origin?: ReproRunOrigin
   startedAt: string
   endedAt?: string
   exitCode?: number | null
@@ -114,8 +118,9 @@ export class ReproRunner {
   /**
    * Starts one case. The command runs in its own folder through the platform shell, its output goes to a log, and the
    * case's declared report is recorded once the run wrote it. Only one run is in flight, because the editor is single.
+   * `origin` records who asked: a person's click, or the night queue that replays a delivered Ticket's case by itself.
    */
-  run(caseId: string): ReproRun {
+  run(caseId: string, origin: ReproRunOrigin = 'person'): ReproRun {
     const runs = this.tick()
     if (runs.some(run => run.state === 'running')) throw new UserError('reproBusy')
     const root = this.host.root()
@@ -124,7 +129,7 @@ export class ReproRunner {
     if (found.problem) throw new UserError('reproCaseInvalid', { case: found.id, reason: found.problem.code })
     if (!found.command) throw new UserError('reproCaseInvalid', { case: found.id, reason: 'missingManifest' })
     const id = randomUUID().slice(0, 12)
-    const run: ReproRun = { id, caseId: found.id, caseName: found.name, state: 'running',
+    const run: ReproRun = { id, caseId: found.id, caseName: found.name, state: 'running', origin,
       startedAt: new Date(this.now()).toISOString(), summary: '', log: '' }
     mkdirSync(this.host.logDir, { recursive: true })
     const log = join(this.host.logDir, `${id}.log`)
