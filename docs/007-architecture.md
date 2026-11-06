@@ -1,4 +1,4 @@
-﻿# 007 Architecture
+# 007 Architecture
 
 This is the developer guide to the implementation. It maps the concepts in [001 Domain model](001-domain.md) through [006 Deployment](006-deployment.md) to classes, interfaces and files. Start with the runtime and Engine, then use the module and test tables as a code index.
 
@@ -365,7 +365,9 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/editor.ts` | The editor occupancy probe: derives who holds `UnrealEditor`/`UnrealEditor-Cmd` from the operating system's process table, with the holder, activity, start time, pid and executable path; the panel reads a cached row |
 | `src/app/repro.ts` | The local reproduction cases (docs/024): where they live (`Saved/ReproTests` beside the configured editor project, else `<stateDir>/repro-tests`), the `case.json` schema and the problems a folder can carry, reading the case folders, the report path that must stay inside its folder, the platform-shell spawn and the one-line output summary |
 | `src/app/repro-runner.ts` | `ReproRunner` (docs/024): starts one local case at a time, writes its output under `<stateDir>/repro-logs`, records the run, its exit code and the report it wrote in `KV.repro.runs`, stops it on a person's click or after its timeout, and reclaims the run a restarted host left behind |
+| `src/app/build-runner.ts` | `BuildRunner` (docs/021): runs one of the person's configured compile-and-launch targets at a time under the shared editor's slot, writes its output under `<stateDir>/build-logs`, records the run and its verdict in `KV.build.runs`, stops it on a person's click or after its timeout, refuses while an agent or host job holds the editor, and reclaims the run a restarted host left behind |
 | `src/app/views/repro.ts` | The reproduction cases' page view: the folder, the cases and their problems, the newest runs, the run in flight with its output tail, and what holds the editor |
+| `src/app/views/build.ts` | The compile-and-launch card's view: the configured targets, the newest runs, the run in flight with its output tail, and what holds the editor |
 | `src/app/views/ticket-repro.ts` | The acceptance page's repro entry (docs/024): the case folders a Ticket's verification package names, by folder name or by the Ticket's first eight characters, with their runs and the run in flight; an unmatched package keeps an empty list |
 | `src/app/delivery.ts` | `AgentDelivery`: delivers a message to a DeepSeek Harness agent once per request id, also across a restored Session |
 | `src/app/retry-health.ts` | `RetryHealth`: which Sessions wait on a model budget retry, for the `models` health entry |
@@ -544,6 +546,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/panel-graph.spec.tsx` | The 概览 relation view: the timeline lanes, edges and hover title placement, the cloud, the only-related filter, both layouts' geometry, the cloud's frame loop on fake animation frames (no radius breathing, fill opacity, hover lift, hidden-tab pause, reduced motion), hub rings, the frost sheen's inline fill, chevron arrowheads, guessed edges (dotted, no arrow, opacity by strength, the switch, no growth in size, absent from the timeline, the hover reason and its placement, the weak springs), the speck schedule, label placement, node sizing, and a Ticket page's related Tickets |
 | `tests/similar.spec.ts` | The `similar` guess: near titles, a shared changelist, timing alone and tool names alone, explicit edges and shared Threads left out, mentions and their downgrade, order independence, the top-k union and cap, and a golden check against the reference analysis on synthetic tickets |
 | `tests/panel-editor.spec.tsx` | The 概览 editor view: the editor/board switch, the holder in each state, short timeline lane names, working rows split by editor use with their tool and expandable trail, the waiting rail, and the empty states |
+| `tests/build.spec.ts` | The person's compile-and-launch targets (docs/021): one run at a time, the command's placeholders and cwd, success/failure summaries, refusal while an agent holds the editor, Stop, the run a restarted host reclaims, and the page view |
 | `tests/repro.spec.ts` | The local reproduction cases: the folder beside the project or in the state directory, reading a case folder and the problems it lists, a report path kept inside it, running a case with its output and report recorded, refusing a second run, stopping, the timeout, the run a restarted host reclaims, and the page view |
 | `tests/http-repro.spec.ts` | The reproduction routes: the list and a run's output, running for a person but never while an agent or a host job holds the editor, stopping, a report served only inside its run's case folder and only on the loopback host, and a host without the runner |
 | `tests/panel-repro.spec.tsx` | The 复现用例 card: the case list with problems and the latest run, run and stop, the live output, on-demand output, the report link, the refusal while an agent holds the editor, and the empty folder |
@@ -736,4 +739,6 @@ Point `DSH_HOME` at a temporary directory and create a new profile there. Copy t
 
 - Trust: which Trigger fields are trusted, such as the Source's actor and Thread membership, and which are not, such as the body and quotes.
 - Deployment isolation: the agent's profile on its own pinned DeepSeek Harness installation, so upgrading DeepSeek Harness elsewhere does not break it.
+
+
 

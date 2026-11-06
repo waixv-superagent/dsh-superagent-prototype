@@ -75,7 +75,15 @@ export const USER_ERRORS = {
   reproBusy: ['refused', 'A reproduction case is already running; stop it before starting another'],
   reproNotRunning: ['refused', 'That reproduction run has already ended'],
   reproBlockedAgent: ['refused', 'An agent holds the shared editor; let it yield before running a local reproduction case'],
-  reproBlockedJob: ['refused', 'A host-run editor job holds the shared editor; wait for it to end before running a local reproduction case']
+  reproBlockedJob: ['refused', 'A host-run editor job holds the shared editor; wait for it to end before running a local reproduction case'],
+  buildBusy: ['refused', 'A build-and-launch is already running; stop it before starting another'],
+  buildBlockedAgent: ['refused', 'An agent holds the shared editor; let it yield before compiling and launching'],
+  buildBlockedJob: ['refused', 'A host-run editor job holds the shared editor; wait for it to end before compiling and launching'],
+  buildEditorBusy: ['refused', 'The shared editor did not become yours; let its holder yield and try again'],
+  unknownBuildTarget: ['missing', 'Unknown build target {target}'],
+  buildTargetEmpty: ['refused', 'Build target {target} has no command; set it under Settings › Execution › editor'],
+  unknownBuildRun: ['missing', 'Unknown build run {run}'],
+  buildNotRunning: ['refused', 'That build run has already ended']
 } as const satisfies Record<string, readonly ['missing' | 'refused', string]>
 export type UserErrorCode = keyof typeof USER_ERRORS
 

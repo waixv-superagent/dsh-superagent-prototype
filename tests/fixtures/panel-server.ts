@@ -113,6 +113,8 @@ export interface PanelServer {
   schedule?: ApiResponse<'GET editor'>['schedule']
   /** The local reproduction cases the editor page lists, the run in flight, and what holds the editor (docs/024). */
   repro: ApiResponse<'GET repro'>
+  /** The person's compile-and-launch targets and runs on the editor page (docs/021). */
+  buildPage: ApiResponse<'GET build'>
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; verification: TicketRow[]; working: TicketRow[]; idle: TicketRow[]; pipeline: TicketRow[]; ended: TicketRow[]
@@ -353,6 +355,7 @@ function initial(): PanelServer {
     editor: { holder: 'person', activity: 'editing', since: '2026-09-22T08:00:00.000Z', pid: 1, build: null,
       at: '2026-09-22T08:10:00.000Z' },
     repro: { root: '/w/SunGame/Saved/ReproTests', problem: null, cases: [], runs: [], active: null, blocked: null },
+    buildPage: { targets: [{ name: 'Development Editor', command: 'Build.bat -Target=SunGameEditor' }], runs: [], active: null, blocked: null },
     billing: {
       windowMinutes: 60, currency: 'CNY',
       current: { provider: 'ai-gateway', name: 'kurogames', model: 'DeepSeek V4.1 Flash', at: Date.now() - 60_000 },
@@ -434,6 +437,9 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET overview': { answer: overviewView },
   'GET editor': { answer: editorPageView },
   'GET repro': { answer: () => server.repro },
+  'GET build': { answer: () => server.buildPage },
+  'POST build/run': { body: true, answer: () => ({ started: true as const }) },
+  'POST build/stop': { body: true, answer: () => ({ stopped: true as const }) },
   'POST repro/run': { body: true, answer: () => ({ started: true as const }) },
   'POST repro/stop': { body: true, answer: () => ({ stopped: true as const }) },
   'GET repro/log': { query: ['run'], answer: () => ({ text: 'first line\nlast line' }) },
@@ -672,4 +678,5 @@ export function fakeForm(writable = true, accept = true) {
   const publish = (patch: Partial<ConfigFormSnapshot<Record<string, unknown>>>) => { snapshot = { ...snapshot, ...patch }; notify() }
   return { form, mutations, publish }
 }
+
 

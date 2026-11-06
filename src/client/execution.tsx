@@ -95,10 +95,12 @@ export function ExecutionSettings() {
   const executor = blocks.executor.value
   // The reviewer and package-recipient lists are edited as "name=value" lines and parsed back only on save.
   const saved = { ...executor, maxWorkers: String(executor.maxWorkers), blockedCommands: executor.blockedCommands.join(' '),
+    editor: { ...executor.editor, targets: pairLines(executor.editor.targets.map(item => [item.name, item.command])) },
     p4: { ...executor.p4, reviewers: pairLines(executor.p4.reviewers.map(item => [item.label, item.user])),
       autobuildTargets: pairLines(executor.p4.autobuildTargets.map(item => [item.label, item.id])) } }
   const draft = useBlockDraft('executor', saved, blocks.executor.revision,
     value => ({ ...value, maxWorkers: numberOf(value.maxWorkers), blockedCommands: value.blockedCommands.split(/[\s,]+/).filter(Boolean),
+      editor: { ...value.editor, targets: parsePairs(value.editor.targets).map(([name, command]) => ({ name, command })) },
       p4: { ...value.p4, reviewers: parsePairs(value.p4.reviewers).map(([label, user]) => ({ label, user })),
         autobuildTargets: parsePairs(value.p4.autobuildTargets).map(([label, id]) => ({ label, id })) } }))
   const value = draft.value
@@ -208,6 +210,11 @@ export function ExecutionSettings() {
             <Input className="dt-mono" value={value.editor[kind]} placeholder={t('editorCommandEmpty')} spellCheck={false}
               onChange={event => edit({ editor: { ...value.editor, [kind]: event.target.value } })} />
           </Field>)}
+          <Field label={t('editorTargets')} hint={t('editorTargetsHint')}>
+            <textarea className="dt-textarea dt-mono" rows={4} spellCheck={false} value={value.editor.targets}
+              placeholder={`Development Editor=<project 目录>\\Build.bat -Target=... && <project>`}
+              onChange={event => edit({ editor: { ...value.editor, targets: event.target.value } })} />
+          </Field>
           <Field label={t('blockedCommands')} hint={t('blockedCommandsHint')}>
             <Input className="dt-mono" value={value.blockedCommands} placeholder={t('blockedCommandsNone')} spellCheck={false}
               onChange={event => edit({ blockedCommands: event.target.value })} />

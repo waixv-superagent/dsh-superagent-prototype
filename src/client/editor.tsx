@@ -11,8 +11,8 @@ import { Button, Tag } from './controls.tsx'
 import { ticketMark } from './marks.ts'
 import { useAction, usePanel } from './provider.tsx'
 import { ReproCard } from './repro.tsx'
-import type { BoardFocus, Route } from './route.ts'
-import type { T } from './text.ts'
+import { settingsRoute, type BoardFocus, type Route } from './route.ts'
+import { errorText, type T } from './text.ts'
 import { LoadState, When } from './widgets.tsx'
 
 /** A working Ticket without an update for this long reads as possibly stuck, as on the overview. */
@@ -481,6 +481,68 @@ function ScheduleCard({ schedule, reload }: { schedule: Schedule; reload: () => 
   </section>
 }
 
+/**
+ * The person's compile-and-launch entry (docs/021): pick a configured target and the host runs its command under the
+ * shared editor's slot. The panel never starts the editor itself; the command does the compile and the launch, and the
+ * card shows the run's own output, exit code and the last runs.
+ */
+function BuildCard() {
+  const { t, call, navigate } = usePanel()
+  const { data, error, reload } = usePoll(() => call('GET build'), [])
+  const [picked, setPicked] = useState('')
+  const run = useAction((target: string) => call('POST build/run', { body: { target } }), { reload })
+  const stop = useAction((id: string) => call('POST build/stop', { body: { run: id } }), { reload })
+  const chosen = data?.targets.some(item => item.name === picked) ? picked : data?.targets[0]?.name ?? ''
+  const chosenCommand = data?.targets.find(item => item.name === chosen)?.command
+  const active = data?.active
+  const blocked = data?.blocked ?? null
+  const stateTone = (state: string) => state === 'succeeded' ? 'success' as const : state === 'failed' ? 'danger' as const
+    : state === 'running' ? 'info' as const : state === 'interrupted' ? 'warning' as const : 'outline' as const
+  return <section className="dt-build" aria-labelledby="dt-build-title" data-blocked={blocked ?? undefined}>
+    <header className="dt-build-head">
+      <div>
+        <h3 id="dt-build-title" className="dt-editor-col-title">{t('buildTitle')}</h3>
+        <p className="dt-editor-col-sub">{t('buildSub')}</p>
+      </div>
+      {error && <p className="dt-build-problem" role="alert">{errorText(error)}</p>}
+    </header>
+    {!data ? <p className="dt-build-empty">{t('loading')}</p>
+      : data.targets.length === 0
+        ? <div className="dt-build-empty">
+          <p>{t('buildNoTargets')}</p>
+          <Button variant="outline" size="sm" onClick={() => navigate(settingsRoute('execution'))}>{t('buildConfigure')}</Button>
+        </div>
+        : <>
+          <div className="dt-build-controls">
+            <label className="dt-build-label" htmlFor="dt-build-target">{t('buildTargetLabel')}</label>
+            <select id="dt-build-target" className="dt-select dt-build-select" value={chosen} disabled={!!active}
+              onChange={event => setPicked(event.target.value)}>
+              {data.targets.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}
+            </select>
+            {active
+              ? <Button variant="outline" size="sm" disabled={stop.busy} onClick={() => { void stop.run(active.runId) }}>{t('buildStop')}</Button>
+              : <Button variant="primary" size="sm" disabled={run.busy || blocked !== null}
+                title={blocked ? t(blocked === 'agent' ? 'buildBlockedAgent' : 'buildBlockedJob') : undefined}
+                onClick={() => { void run.run(chosen) }}>{t('buildRun')}</Button>}
+            {active && <Tag tone="info">{t('buildRunning')}</Tag>}
+          </div>
+          {chosenCommand && <p className="dt-build-command" title={chosenCommand}><code>{chosenCommand}</code></p>}
+          {blocked && !active && <p className="dt-build-blocked">{t(blocked === 'agent' ? 'buildBlockedAgent' : 'buildBlockedJob')}</p>}
+          {active && <div className="dt-build-active">
+            <p className="dt-build-active-line"><Tag tone="info">{t('buildRunning')}</Tag><span>{active.target}</span></p>
+            <pre className="dt-build-log">{active.tail.split(/\r?\n/).slice(-16).join('\n') || t('buildNoOutput')}</pre>
+          </div>}
+          {data.runs.length > 0 && <ul className="dt-build-runs">{data.runs.map(row => <li key={row.id} data-state={row.state}>
+            <Tag tone={stateTone(row.state)}>{t(`buildState.${row.state}`)}</Tag>
+            <span className="dt-build-run-target" title={row.summary}>{row.target}</span>
+            <When at={row.endedAt ?? row.startedAt} />
+            <span className="dt-build-run-summary" title={row.summary}>{row.summary}</span>
+            {row.exitCode !== undefined && row.exitCode !== null && <span className="dt-mono">{t('buildExit', { code: String(row.exitCode) })}</span>}
+          </li>)}</ul>}
+        </>}
+  </section>
+}
+
 export function EditorPage() {
   const { t, call } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET editor'), [])
@@ -489,6 +551,7 @@ export function EditorPage() {
     {error && <LoadState error={error} loading={false} />}
     <Hero data={data} />
     {data.schedule && <ScheduleCard schedule={data.schedule} reload={reload} />}
+    <BuildCard />
     <ReproCard />
     {data.timeline && <Timeline timeline={data.timeline} />}
     <div className="dt-editor-grid">
@@ -498,3 +561,4 @@ export function EditorPage() {
     <p className="dt-editor-foot">{t(data.schedule ? 'editorScheduleNote' : 'editorReadOnlyNote')}</p>
   </>
 }
+
