@@ -1,0 +1,10 @@
+{
+  "capturedAt": "2026-11-06T04:45:21Z",
+  "source": "the same live state with the stall set this branch computes (a P2/P3 Ticket the idle gate holds is not a queued stall), served from a local read-only proxy so scripts/feishu-status.mjs --print-card reads it unchanged; nothing was sent",
+  "stall": { "tickets": 0 },
+  "card": {
+    "title": "🟠 有 2 件等你拍板",
+    "summary": "状态｜在跑 2 · 待验证 5 · 待拍板 2",
+    "template": "orange"
+  }
+}

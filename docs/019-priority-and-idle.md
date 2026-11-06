@@ -54,12 +54,18 @@ Q + C + G 全成立才有闲时；W 与 H 决定深度：
 | `L3` 静默闲 | `L1` + 夜间窗口（H 不看） | `P2`、`P3` |
 
 启动门在 `DshExecutor.launchQueued`：`IdleScheduler.admission` 说不可以时抛 `Later` **挂起**这次 launch（不失败、
-不结束 assignment），效果队列 5 秒后重试；条件成立就正常启动，并把 `idle.launchedIn` 记在工单上。
+不结束 assignment），效果队列 5 秒后重试；条件成立就正常启动，并把 `idle.launchedIn` 记在工单上。**只有真的启动
+成功了才记**：被挂起的 launch 不写 `idle.launchedIn`/`launchedAt`，启动前为只读分析写下的 `idle.analysis` 也在挂起
+时撤回——否则这张单会被算成"闲时池正在跑的一个 worker"，它自己的重试和别的 `P2`/`P3` 都会被一个从没跑起来的记录
+挡住。老版本留下的这种记录（assignment 还在队列里却带着 idle 记录）由启动时的 `Tickets.dropUnstartedIdle` 清掉。
 人的动作不受门限制：人的消息在等这个工单（`personWaiting`，含本地验收退回的人写输入）或人按了重试（上一段
 assignment 以 `retried` 结束）都直接启动；主线级别（`P0`/`P1`）与没有优先级的旧单也永远直接启动。
 
-预算与并发：同一时刻最多 `analysisWorkers`（默认 1）个闲时启动的工单在跑；每天最多 `dailyItems`（默认 6）个
-闲时启动（按 `idle.launchedAt` 的本地日期计数）。
+预算与并发：同一时刻最多 `analysisWorkers`（默认 1）个闲时启动的工单**在跑**（assignment 已离开队列、还没出报告；
+还在等启动的不算）；每天最多 `dailyItems`（默认 6）个闲时启动（按 `idle.launchedAt` 的本地日期计数）。
+
+看板与告警分开看：`P2`/`P3` 等闲时窗口是设计内的等待，不算"卡住"；只有门已经放行却一直没启动的单才按排队超时
+告警（见 `docs/007` 的 Stall alert）。
 
 配置在 `executor.idle`（设置块里可保存，默认值即上表；`enabled: false` 恢复“所有单立刻启动”的旧行为）：
 

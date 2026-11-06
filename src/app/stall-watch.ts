@@ -30,6 +30,12 @@ export interface StallWatchHost {
   readonly activity: { read(ticketId: string): ActivityView }
   /** Whether the worker's turn ended and its shell jobs or subagents still run, which is work in progress, not a stall. */
   background(ticketId: string): boolean
+  /**
+   * Whether the idle gate is what holds a queued Ticket back, rather than its wait for a worker slot: a `P2`/`P3` Ticket
+   * the pool has not admitted yet waits by design, for hours, and is not the stall the queued alert reports (docs/019).
+   * Absent means the deployment has no idle gate and every queued Ticket waits for a slot.
+   */
+  idleHeld?(ticket: Ticket): boolean
   /** The conversation a Ticket's own messages go to, or undefined when it has none. */
   channel(ticket: Ticket): ChannelRef | undefined
   /** The text of the request that started the Ticket, which decides the notice's language. */
@@ -171,6 +177,10 @@ export class StallWatch {
     if (stage.stage !== 'working') return undefined
     const assignment = latestAssignment(ticket)
     if (stage.action === 'queued') {
+      // Waiting for an idle window is the design, not a slot that never came free: such a Ticket may wait all day while the
+      // mainline runs, so reporting it as stalled would be the alert crying wolf. Once the gate admits it and it still does
+      // not start, this check reports it like any other queued Ticket.
+      if (this.host.idleHeld?.(ticket)) return undefined
       const since = latest([assignment?.createdAt ?? ticket.createdAt])
       const minutes = Math.floor((now - since) / 60_000)
       if (!Number.isFinite(minutes) || minutes < settings.queuedMinutes) return undefined

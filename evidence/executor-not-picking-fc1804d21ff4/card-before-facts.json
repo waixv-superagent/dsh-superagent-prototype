@@ -1,0 +1,12 @@
+{
+  "capturedAt": "2026-11-06T04:44:48Z",
+  "source": "the running host, installed build b54f496, GET /orchestrator/api/state + scripts/feishu-status.mjs --print-card (not sent)",
+  "load": { "running": 2, "queued": 14, "maxWorkers": 5 },
+  "stall": { "tickets": 14, "kinds": { "queued": 14 }, "oldestMinutes": 967 },
+  "launchEffect": "15 waiting since 2026-11-05T12:34:23.629Z",
+  "card": {
+    "title": "🟠 14 张工单疑似卡住",
+    "summary": "状态｜14 张工单疑似卡住",
+    "template": "orange"
+  }
+}

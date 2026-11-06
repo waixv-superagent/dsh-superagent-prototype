@@ -20,6 +20,11 @@ const runnable = (ticket: Ticket): boolean => {
   const stage = ticketStage(ticket)
   return stage.stage === 'working'
 }
+/** Whether a ticket's Assignment left the queue and has not reported: the work the idle pool counts as a worker it runs. */
+const working = (ticket: Ticket): boolean => {
+  const stage = ticketStage(ticket)
+  return stage.stage === 'working' && stage.action !== 'queued'
+}
 /** Whether a person's message waits for this ticket, which starts at once rather than waiting for idle. */
 const personWaiting = (ticket: Ticket): boolean => ticket.undelivered.some(id => {
   const input: TicketInput | undefined = ticket.inputs.find(item => item.id === id)
@@ -85,7 +90,9 @@ export class IdleScheduler {
     if (!state.level) return { admitted: false, reason: state.reason }
     if (!idleAdmits(state.level, level)) return { admitted: false, reason: `${state.level} admits ${IDLE_ADMITS[state.level]}, not ${level}` }
     const open = this.host.store.tickets.open()
-    const idleRunning = open.filter(item => item.idle?.launchedIn && runnable(item)).length
+    // Only a worker that left the queue is one the pool is running: counting the Ticket still waiting for its own launch
+    // would make the pool wait behind itself, and one held launch would stop every other `P2`/`P3` Ticket (docs/019).
+    const idleRunning = open.filter(item => item.idle?.launchedIn && working(item)).length
     if (idleRunning >= config.analysisWorkers) return { admitted: false, reason: `the idle pool already runs ${idleRunning} of ${config.analysisWorkers} workers` }
     const today = localDay(this.now().toISOString())
     const launchedToday = this.host.store.tickets.list().filter(item => item.idle?.launchedAt && localDay(item.idle.launchedAt) === today).length

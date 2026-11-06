@@ -292,6 +292,13 @@ export class Engine {
     this.repo.atomic(() => { this.tickets.beginIdleAnalysis(ticketId, assignmentId, level) })
   }
   /**
+   * Takes back the idle-pool records of work that never started: a launch the gate admitted and then held (the launch's
+   * `Later`, retried later) or one whose Assignment was replaced before it ran. Until it is taken back the pool counts a
+   * worker it never started, the day's budget counts a launch that did not happen, and the write guard refuses files to a
+   * later launch that never asked for an analysis (docs/019, docs/025). A launch that started keeps its record.
+   */
+  dropUnstartedIdle(ticketId: string): void { this.repo.atomic(() => { this.tickets.dropUnstartedIdle(ticketId) }) }
+  /**
    * A person's click on a question card: the answer becomes a message to the worker and clears the question.
    * @throws UserError when the ticket is unknown or ended, the question is gone, or the option is not offered.
    */
@@ -446,7 +453,8 @@ export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
   | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'reply'
-  | 'submitPlan' | 'advancePhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch' | 'startIdleAnalysis'>
+  | 'submitPlan' | 'advancePhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch' | 'startIdleAnalysis'
+  | 'dropUnstartedIdle'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>
 /** What the host's watchdog tells the Engine: it recovers a ticket its worker stopped on a passing failure. */

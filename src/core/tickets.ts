@@ -755,6 +755,34 @@ export class Tickets extends EnginePart {
     this.repo.tickets.save(ticket)
   }
   /**
+   * Drops the idle-pool records of work that never started: a launch record whose latest Assignment still waits, and a
+   * read-only analysis recorded for an Assignment that is no longer the one running. The pool's concurrency, its daily
+   * budget and the worker's write guard read these records (docs/019, docs/025), so a record left by a launch the gate held,
+   * or by the restart that replaced its Assignment, would block the pool without any worker having run, and would make a
+   * later launch of that Ticket read-only. A launch that started keeps its record, so this never erases real history.
+   */
+  dropUnstartedIdle(ticketId: string): void {
+    const ticket = this.repo.tickets.get(ticketId)
+    if (!ticket || !liveTicket(ticket)) return
+    const latest = latestAssignment(ticket)
+    const idle = ticket.idle
+    if (!idle) return
+    let changed = false
+    if (idle.launchedIn !== undefined && latest?.state === 'pending') {
+      delete idle.launchedIn
+      delete idle.launchedAt
+      changed = true
+    }
+    const analysis = idle.analysis
+    if (analysis?.state === 'running' && !(latest?.state === 'running' && latest.id === analysis.assignmentId)) {
+      delete idle.analysis
+      changed = true
+    }
+    if (!changed) return
+    ticket.updatedAt = this.now()
+    this.repo.tickets.save(ticket)
+  }
+  /**
    * Records that an idle window admitted a pooled ticket for its read-only analysis (docs/025): until it reports, the
    * worker's tools refuse writes and its assignment carries the analysis brief instead of delivery instructions.
    */

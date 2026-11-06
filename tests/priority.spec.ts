@@ -200,6 +200,23 @@ describe('idle scheduler', () => {
     budget.clock.now = new Date(2026, 9, 4, 20, 11, 0)
     expect(budget.gate.admission(ticketOf({ assignments: pending() }), { running: 0, max: 3 })).toMatchObject({ admitted: false })
   })
+  it('counts only the idle launches that left the queue, so a held launch cannot stop the pool', () => {
+    // A launch the gate admitted and then held records its depth before any worker runs. Counting that waiting Ticket as a
+    // worker made the pool wait behind itself and stopped every other P2/P3 Ticket after one held attempt (docs/019).
+    const held = ticketOf({ id: 'idle-held', idle: { enteredAt: 'x', launchedIn: 'L1', launchedAt: 'x' }, assignments: pending() })
+    const waiting = clocked([held], { triggers: quiet })
+    waiting.gate.observe(0, 3)
+    waiting.clock.now = new Date(2026, 9, 4, 20, 11, 0)
+    expect(waiting.gate.admission(ticketOf({ assignments: pending() }), { running: 0, max: 3 })).toMatchObject({ admitted: true })
+    // A worker that did start still holds the pool's one slot.
+    const started = ticketOf({ id: 'idle-started', idle: { enteredAt: 'x', launchedIn: 'L2', launchedAt: 'x' },
+      assignments: [{ id: 'a', state: 'running', createdAt: 'x' }] })
+    const busy = clocked([started], { triggers: quiet })
+    busy.gate.observe(0, 3)
+    busy.clock.now = new Date(2026, 9, 4, 20, 11, 0)
+    expect(busy.gate.admission(ticketOf({ assignments: pending() }), { running: 0, max: 3 }))
+      .toMatchObject({ admitted: false, reason: 'the idle pool already runs 1 of 1 workers' })
+  })
   it('admits everything when the idle gate is switched off', () => {
     const gate = scheduler([], { now: () => new Date(2026, 9, 4, 10, 0), idle: { enabled: false } })
     expect(gate.admission(ticketOf({ assignments: pending() }), { running: 0, max: 3 })).toMatchObject({ admitted: true })
@@ -282,6 +299,32 @@ describe('priority in the engine', () => {
     expect(h.repo.tickets.get(ticket.id)!.idle).toMatchObject({ enteredAt: expect.any(String) })
     h.engine.decidePriority(ticket.id, 'P1', 'alice', 'panel')
     expect(h.repo.tickets.get(ticket.id)!.idle).toBeUndefined()
+  })
+  it('takes back the idle records of work that never started, and keeps those of work that did', () => {
+    const h = engineHarness()
+    const ticket = h.accept(TAPD_TRIGGER)
+    // The admitted launch was held (a Later, retried later): the depth it recorded describes no worker.
+    h.engine.idleLaunch(ticket.id, 'L2')
+    h.engine.dropUnstartedIdle(ticket.id)
+    expect(h.repo.tickets.get(ticket.id)!.idle).toMatchObject({ enteredAt: expect.any(String) })
+    expect(h.repo.tickets.get(ticket.id)!.idle?.launchedIn).toBeUndefined()
+    expect(h.repo.tickets.get(ticket.id)!.idle?.launchedAt).toBeUndefined()
+    // An Assignment that started keeps the record: it is the pool's history and the day's budget.
+    const startedAt = '2026-11-04T08:10:00.000Z'
+    h.repo.tickets.save({ ...h.repo.tickets.get(ticket.id)!, assignments: [{ id: 'a1', state: 'running', createdAt: startedAt, startedAt }] } as never)
+    h.engine.idleLaunch(ticket.id, 'L1')
+    h.engine.dropUnstartedIdle(ticket.id)
+    expect(h.repo.tickets.get(ticket.id)!.idle).toMatchObject({ launchedIn: 'L1' })
+    // So does the read-only analysis of the Assignment that runs, while one recorded for an older Assignment is taken back:
+    // otherwise a later launch would find its worker read-only for an analysis nobody runs (docs/025).
+    h.engine.startIdleAnalysis(ticket.id, 'a-old', 'L2')
+    h.engine.dropUnstartedIdle(ticket.id)
+    expect(h.repo.tickets.get(ticket.id)!.idle?.analysis).toBeUndefined()
+    h.engine.startIdleAnalysis(ticket.id, 'a1', 'L2')
+    h.engine.dropUnstartedIdle(ticket.id)
+    expect(h.repo.tickets.get(ticket.id)!.idle?.analysis).toMatchObject({ state: 'running', assignmentId: 'a1' })
+    // The launch record stays while it describes the Assignment that runs.
+    expect(h.repo.tickets.get(ticket.id)!.idle).toMatchObject({ launchedIn: 'L1' })
   })
   it('promotes a pooled ticket into the attention pool and starts a worker between turns', () => {
     const h = engineHarness()
