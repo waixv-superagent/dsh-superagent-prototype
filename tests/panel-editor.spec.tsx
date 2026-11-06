@@ -364,7 +364,7 @@ it('runs a configured compile-and-launch target from the editor page and shows i
   server.buildPage = { ...server.buildPage, active: { runId: 'r1', name: 'Development Game SunGame', tail: 'Building...\nResult: Succeeded\n' } }
   await click(find(zh.buildRun, '.dt-build-controls button'))
   expect(server.requests.some(request => request.path === 'build/run' && request.method === 'POST'
-    && JSON.stringify(request.body) === JSON.stringify({ target: 'SunGame', configuration: 'Development', platform: 'Win64' }))).toBe(true)
+    && JSON.stringify(request.body) === JSON.stringify({ target: 'SunGameEditor', configuration: 'Development', platform: 'Win64' }))).toBe(true)
   await settle()
   expect(document.querySelector('.dt-build-log')?.textContent).toContain('Result: Succeeded')
   expect(all('.dt-build button').map(button => button.textContent)).toContain(zh.buildStop)
@@ -385,6 +385,7 @@ it('points at the settings when no compile target is configured, and disables th
   expect(button.hasAttribute('disabled')).toBe(true)
   expect(document.querySelector('.dt-build-blocked')?.textContent).toBe(zh.buildBlockedAgent)
 })
+
 
 
 
