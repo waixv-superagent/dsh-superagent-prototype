@@ -1,4 +1,4 @@
-﻿// @vitest-environment jsdom
+// @vitest-environment jsdom
 // The Execution status, a Ticket, and the Execution settings.
 import { act } from 'react'
 import { expect, it } from 'vitest'
@@ -337,6 +337,27 @@ it('shows delivered work waiting for a person\'s local verification, with the wo
   await click(zh.verifyReturnSubmit)
   expect(server.requests.some(request => request.path === 'tickets/t8/rework' && request.method === 'POST'
     && JSON.stringify(request.body).includes('PIE 里 Q 技能仍然会卡住'))).toBe(true)
+})
+
+it('names the workspace a change lives in and whether the running editor has it', async () => {
+  const detail = { ...server.ticketDetails.t1!, id: 't10', title: '技能旋转后朝向回滚', stage: 'person' as const,
+    action: 'verify' as const, verification: { at: '2026-10-01T00:00:00Z', state: 'pending' as const },
+    actions: { retry: false, stop: true, confirm: false, verify: true, rework: true },
+    delivery: { lease: ['Source/Game/Player/'], changelist: 590001, review: 'https://review.example.com/reviews/590002/' },
+    acceptance: {
+      workspace: { directory: 'C:\\work\\aim', target: '//sun/mainline', backend: 'p4' as const, client: 'dsh-aim' },
+      editor: { state: 'restart' as const, editors: ['2026-09-30T23:00:00.000Z'],
+        build: { id: 'b1', startedAt: '2026-10-01T00:10:00.000Z', endedAt: '2026-10-01T00:20:00.000Z', directory: 'C:\\work\\aim' } } } }
+  server.ticketDetails.t10 = detail
+  at({ page: 'execution', id: 't10' })
+  await mount()
+  // The one line answers "is this acceptance Ticket in the editor I have open", with the timestamps behind its tooltip.
+  expect(document.querySelector('.dt-verify-editor')?.getAttribute('data-state')).toBe('restart')
+  expect(document.querySelector('.dt-verify-editor')?.textContent).toContain(zh.verifyEditorRestart)
+  // The workspace and the p4 client are on the page, so the CL is not only a number in an unseen tree.
+  expect(all('.dt-verify-gate-facts')[0]?.textContent).toContain('C:\\work\\aim')
+  expect(all('.dt-verify-gate-facts')[0]?.textContent).toContain('//sun/mainline')
+  expect(all('.dt-verify-gate-facts')[0]?.textContent).toContain('dsh-aim')
 })
 
 it('leads a four-block verification package with the judgement and its repro case, and re-runs the case in place', async () => {

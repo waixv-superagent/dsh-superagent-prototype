@@ -12,6 +12,7 @@ When the existing scene, data or device cannot produce a boundary — a height, 
 Record the fixture, its parameters and what each point proved in the verification package, and remove the fixture afterwards (docs/022).
 When a person may want to re-run a verification script, leave it as a local reproduction case with a `case.json` naming its command and report (docs/024).
 When the case has a measurable before and after, record the baseline and the changed run with the A/B harness (`scripts/repro-ab.mjs`, docs/026) and put its report in the verification package, instead of a prose claim that it is fixed.
+Missing reproduction information is research, not a reason to stop: search the request thread, the linked bug and its attachments, the workspace logs, existing cases and nearby tests, then report what you looked for. If it is still missing, ask the ticket owner for the repro provider in one concrete question.
 
 Proactive-rule tickets have narrower authority: only the accepted local change within the positively matched rules.
 Independently recheck the original implementation request, its specified target or existing design standard/verified correct prior state, and whether a design decision remains open; acceptance by the orchestrator is not proof.

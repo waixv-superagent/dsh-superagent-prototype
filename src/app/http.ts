@@ -22,6 +22,7 @@ import { buildPage } from './views/build.ts'
 import { EDITOR_CONFIGURATIONS, EDITOR_PLATFORMS, EDITOR_TARGET } from '../core/editor-composition.ts'
 import { editorPathProblem } from '../core/editor-paths.ts'
 import { inside, readReproCases } from './repro.ts'
+import { deliveryEditor } from './editor-readiness.ts'
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
@@ -41,6 +42,7 @@ import type { Store } from './store.ts'
 import type { TextCache } from './cache.ts'
 import type { LinkTarget, ViewHost } from './views/records.ts'
 import type { Variable } from './execution-environment.ts'
+import { p4Client } from './execution-environment.ts'
 import { policyHistory } from './settings-history.ts'
 import { editorPage } from './views/editor.ts'
 import { overview } from './views/overview.ts'
@@ -173,7 +175,27 @@ function ticketPage(runtime: HttpHost, id: string) {
   const detail = ticketDetail(views(runtime), id), ticket = runtime.store.tickets.get(id)
   if (!detail || !ticket) throw new RouteError(404, 'Ticket not found')
   const repro = runtime.repro && ticket.execution?.verification ? ticketReproView(runtime, ticket) : undefined
-  return { ...detail, environment: runtime.configured() ? runtime.ticketEnvironment(ticket) : [], ...repro ? { repro } : {} }
+  const acceptance = ticketAcceptance(runtime, ticket)
+  return { ...detail, environment: runtime.configured() ? runtime.ticketEnvironment(ticket) : [], ...acceptance ? { acceptance } : {},
+    ...repro ? { repro } : {} }
+}
+/**
+ * Where a delivered change lives and whether the editor a person is looking at has loaded it (docs/021, docs/009): the
+ * workspace path, the delivery target and, under p4, the client that owns the shelved changelist, so a CL is not only a
+ * number in a directory the person cannot find. The editor side is an inference from build and process start times.
+ */
+function ticketAcceptance(runtime: HttpHost, ticket: Ticket) {
+  const execution = ticket.execution
+  if (!execution || (execution.changelist === undefined && !execution.review)) return undefined
+  const settings = runtime.store.settings()
+  const p4 = execution.backend === 'p4' || (execution.backend === undefined && settings.executor.backend === 'p4')
+  return {
+    workspace: { directory: execution.directory, ...execution.target ? { target: execution.target } : {},
+      ...execution.backend ? { backend: execution.backend } : {},
+      ...p4 ? { client: p4Client(settings.executor.p4.clientTemplate, execution.name) } : {} },
+    editor: deliveryEditor({ deliveredAt: ticket.verification?.at ?? ticket.ended?.at, directory: execution.directory,
+      editor: runtime.editor.read(), jobs: runtime.editorScheduler?.read().jobs ?? [] }),
+  }
 }
 /** The cases the Ticket names and their runs, read from the same root the editor page's card lists. */
 function ticketReproView(runtime: HttpHost, ticket: Ticket) {

@@ -786,6 +786,8 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-verify-gate-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 12px; margin: 0; }
 .dt-verify-gate-facts dt { font-size: 10.5px; line-height: 15px; color: var(--dsw-alias-label-caption); }
 .dt-verify-gate-facts dd { margin: 2px 0 0; font-size: 12px; line-height: 17px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-verify-gate-facts dd.dt-wrap { white-space: normal; overflow-wrap: break-word; word-break: break-all; }
+.dt-verify-gate-facts .dt-verify-fact-wide { grid-column: span 2; }
 .dt-verify-gate-brief { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--dsw-alias-label-primary) 3%, transparent); }
 .dt-verify-gate-brief > span { font-size: 10.5px; line-height: 15px; color: var(--dsw-alias-label-caption); }
 .dt-verify-gate-brief p { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
@@ -811,6 +813,14 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-verify-gate-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding-top: 10px; border-top: .5px solid var(--dsw-alias-border-l2); }
 /* The acceptance page leads with the one judgement, then the reproduction entry, then the evidence (docs/024). */
 .dt-verify-gate-judge { display: flex; align-items: flex-start; gap: 10px; padding: 9px 11px; border-left: 3px solid #d4a300; border-radius: 8px; background: color-mix(in srgb, #d4a300 8%, transparent); }
+.dt-verify-editor { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 7px 10px; border: .5px solid var(--dsw-alias-border-l2); border-radius: 8px; background: color-mix(in srgb, var(--dsw-alias-label-primary) 3%, transparent); }
+.dt-verify-editor-dot { flex: none; width: 7px; height: 7px; border-radius: 999px; align-self: center; background: var(--dsw-alias-label-caption); }
+.dt-verify-editor[data-state="loaded"] .dt-verify-editor-dot { background: #2f9e63; }
+.dt-verify-editor[data-state="restart"] .dt-verify-editor-dot, .dt-verify-editor[data-state="build"] .dt-verify-editor-dot { background: #d4a300; }
+.dt-verify-editor[data-state="no-editor"] .dt-verify-editor-dot { background: #4a7fd4; }
+.dt-verify-editor-state { font-size: 12px; line-height: 17px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.dt-verify-editor-detail { font-size: 11px; line-height: 17px; color: var(--dsw-alias-label-caption); }
+.dt-verify-editor-detail::before { content: '·'; margin-right: 6px; color: var(--dsw-alias-label-caption); }
 .dt-verify-gate-judge-text { margin: 0; font-size: 13px; line-height: 20px; font-weight: 500; color: var(--dsw-alias-label-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
 .dt-verify-gate-prose { margin: 0; font-size: 12px; line-height: 19px; color: var(--dsw-alias-label-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
 .dt-verify-gate-prereq { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border: .5px solid var(--dsw-alias-border-l2); border-radius: 8px; background: color-mix(in srgb, var(--dsw-alias-label-primary) 3%, transparent); }

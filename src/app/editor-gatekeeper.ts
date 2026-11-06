@@ -4,8 +4,9 @@
  * that ends or a person who preempts used to leave the editor or build running, and the queue moved on while the next
  * holder opened a second editor. The gatekeeper is the resident process that closes that gap. It takes ownership of
  * the editor, commandlet and build processes a lease starts (from the guard's exact match, or from the process table),
- * and on every sweep it stops the ones whose lease has lapsed — no heartbeat, Ticket ended or process reclaimed. It
- * also gives a holder one gated way to close its editor (`close`), so stopping is a host decision, not a script's.
+ * stops the build and commandlet processes whose lease has lapsed, and keeps an interactive editor a lease opened
+ * running for the next holder — loading the editor is the expensive part, so a release is a hand-over, not a close.
+ * It also gives a holder one gated way to close its editor (`close`), so stopping is a host decision, not a script's.
  *
  * Only what the gatekeeper adopted is ever stopped, and only after the probe still shows the same process; a person's
  * editor, an editor a person yielded and a process whose pid was recycled are all left alone. The probe, the ue-mcp
@@ -48,13 +49,16 @@ export interface OwnedProcess {
   expiresAt: string | null
 }
 
-/** What the gatekeeper keeps: the processes it owns and how many it has reclaimed. */
+/** What the gatekeeper keeps: the processes it owns and how many it has closed or kept running. */
 export interface GatekeeperState {
   owned: OwnedProcess[]
+  /** Build and commandlet processes stopped after their lease lapsed. */
   reclaimed: number
+  /** Interactive editors left running for the next holder after their lease lapsed. */
+  kept: number
 }
 
-export const emptyGatekeeper = (): GatekeeperState => ({ owned: [], reclaimed: 0 })
+export const emptyGatekeeper = (): GatekeeperState => ({ owned: [], reclaimed: 0, kept: 0 })
 
 /** What the gatekeeper needs from the host; every effect is injected so a test can watch the decisions. */
 export interface EditorGatekeeperHost {
@@ -63,7 +67,7 @@ export interface EditorGatekeeperHost {
     set<V>(key: string & { readonly __value?: V }, value: V): void
   }
   /** The schedule whose leases the gatekeeper enforces; `reclaim` records the event and grants the next waiter. */
-  readonly schedule: Pick<EditorScheduler, 'read' | 'reclaim' | 'release'>
+  readonly schedule: Pick<EditorScheduler, 'read' | 'reclaim' | 'release' | 'keep'>
   /** The probe's latest rows, or null before the first probe finishes; a sweep never runs a probe of its own. */
   rows(): readonly EditorProcess[] | null
   alive(pid: number): boolean
@@ -81,8 +85,10 @@ export interface EditorGatekeeperHost {
 export interface GatekeeperStatus {
   /** Live managed processes now. */
   owned: number
-  /** Processes stopped after their lease lapsed, since the host's state was created. */
+  /** Build and commandlet processes stopped after their lease lapsed, since the host's state was created. */
   reclaimed: number
+  /** Interactive editors left running for the next holder, since the host's state was created. */
+  kept: number
   /** Sweeps completed since start. */
   sweeps: number
   lastSweep: string | null
@@ -149,13 +155,13 @@ export class EditorGatekeeper {
   read(): GatekeeperState { return { ...emptyGatekeeper(), ...this.host.store.get(KV.editor.gatekeeper) } }
 
   private write(state: GatekeeperState): void {
-    this.host.store.set(KV.editor.gatekeeper, { owned: state.owned, reclaimed: state.reclaimed })
+    this.host.store.set(KV.editor.gatekeeper, { owned: state.owned, reclaimed: state.reclaimed, kept: state.kept })
   }
 
   /** What the panel's health entry and a status read report. */
   status(): GatekeeperStatus {
-    return { owned: this.read().owned.length, reclaimed: this.read().reclaimed, sweeps: this.sweeps, lastSweep: this.lastSweep,
-      lastReclaim: this.lastReclaim }
+    return { owned: this.read().owned.length, reclaimed: this.read().reclaimed, kept: this.read().kept, sweeps: this.sweeps,
+      lastSweep: this.lastSweep, lastReclaim: this.lastReclaim }
   }
 
   /** Begins the sweep loop and runs one sweep at once; a lapsed lease from before a restart is reclaimed then too. */
@@ -226,10 +232,11 @@ export class EditorGatekeeper {
   }
 
   /**
-   * One sweep: adopt what the current agent lease started, then stop the processes whose lease is gone or whose
-   * heartbeat lapsed, record the reclamation, tell a live holder what happened, and let the scheduler grant the next
-   * waiter. A person's claim is never a reclaim target. Nothing is killed before the probe has seen the process, so a
-   * stale pid after a restart is not mistaken for an editor.
+   * One sweep: adopt what the current agent lease started, then settle the processes whose lease is gone or whose
+   * heartbeat lapsed — stopping the build tools and commandlets it opened and handing an interactive editor to the next
+   * holder — record the decision, tell a live holder what happened, and let the scheduler grant the next waiter. A
+   * person's claim is never a reclaim target. Nothing is acted on before the probe has seen the process, so a stale pid
+   * after a restart is not mistaken for an editor.
    */
   async sweep(): Promise<void> {
     if (this.disposed) return
@@ -247,7 +254,7 @@ export class EditorGatekeeper {
     const rows = this.host.rows()
     const state = this.read()
     let dirty = false
-    const reclaim = new Map<string, { ticketId: string; reason: string; pids: number[] }>()
+    const lapsed = new Map<string, { ticketId: string; reason: string; closed: number[]; kept: number[] }>()
     const kept: OwnedProcess[] = []
 
     if (rows) {
@@ -261,7 +268,7 @@ export class EditorGatekeeper {
           dirty = true
         }
         // An editor a previous agent lease or a host restart job opened still reads as the agent's in `agentPids`. The
-        // current holder owns it too, so a released or lapsed editor left open is closed instead of outliving its slot.
+        // current holder owns it too, so it is handed over again when this lease ends instead of being loaded twice.
         if (lease.purpose === 'use' || lease.purpose === 'restart') {
           const ownedPids = new Set(state.owned.map(owned => owned.pid))
           for (const row of rows) {
@@ -294,36 +301,46 @@ export class EditorGatekeeper {
       if (!rows) { kept.push(owned); continue }
       // The probe no longer shows the process the gatekeeper adopted (gone, or a recycled pid); it is not its to stop.
       if (!sameProcess(rows, owned)) { dirty = true; continue }
-      this.host.kill(owned.pid)
-      state.reclaimed += 1
+      const group = lapsed.get(owned.leaseId) ?? { ticketId: owned.ticketId, reason, closed: [], kept: [] }
+      // Loading the editor is the expensive step, so an interactive editor outlives its lease and the next holder reuses
+      // it. Build and commandlet processes still end with the work that asked for them.
+      if (owned.kind === 'editor') { group.kept.push(owned.pid); state.kept += 1 }
+      else {
+        this.host.kill(owned.pid)
+        state.reclaimed += 1
+        group.closed.push(owned.pid)
+      }
       dirty = true
-      const group = reclaim.get(owned.leaseId) ?? { ticketId: owned.ticketId, reason, pids: [] }
-      group.pids.push(owned.pid)
-      reclaim.set(owned.leaseId, group)
+      lapsed.set(owned.leaseId, group)
     }
     state.owned = kept
     if (dirty) this.write(state)
 
-    for (const [leaseId, value] of reclaim) {
-      const what = `${value.pids.length} process(es) pid ${value.pids.join(', ')}`
-      const detail = `closed ${what} after ${value.reason}`
+    for (const [leaseId, value] of lapsed) {
+      const parts: string[] = []
+      if (value.kept.length) parts.push(`kept ${value.kept.length} editor(s) pid ${value.kept.join(', ')} running`)
+      if (value.closed.length) parts.push(`closed ${value.closed.length} process(es) pid ${value.closed.join(', ')}`)
+      const detail = `${parts.join('; ')} after ${value.reason}`
       const ending = value.reason === 'the heartbeat lapsed' ? 'expired' : value.reason === 'the Ticket ended' ? 'ended' : 'released'
       this.host.schedule.reclaim(leaseId, detail, ending)
-      this.lastReclaim = { at: iso(now), detail }
+      for (const pid of value.kept) this.host.schedule.keep(pid, value.ticketId, detail)
+      if (value.closed.length) this.lastReclaim = { at: iso(now), detail }
       if (value.reason === 'the heartbeat lapsed' && this.host.live(value.ticketId) && !this.notified.has(leaseId)) {
         this.notified.add(leaseId)
+        const what = value.kept.length ? 'the editor it opened is still running for the next holder'
+          : `the ${value.closed.length} process(es) it opened were closed`
         void this.host.notify(value.ticketId, `editor-reclaim:${leaseId}`,
-          `Your shared editor lease lapsed without a heartbeat, so the gatekeeper closed the ${what} it started. `
+          `Your shared editor lease lapsed without a heartbeat; ${what}. `
           + 'Acquire the editor again if the work still needs it, and heartbeat during long steps.').catch(error => {
           this.host.warn(`editor reclaim notice failed: ${String(error)}`)
         })
       }
     }
-    if (reclaim.size) this.refreshHealth()
+    if (lapsed.size) this.refreshHealth()
     this.finishSweep(now)
   }
 
-  /** Why this owned process must be closed now, or null while its lease still holds the slot. */
+  /** Why this owned process has to be settled now, or null while its lease still holds the slot. */
   private lapsed(lease: EditorLease | null, owned: OwnedProcess, now: number): string | null {
     if (lease?.id === owned.leaseId) {
       // A person's claim holds every agent process back; the scheduler drains and lapses the agent's own lease first.
@@ -348,9 +365,10 @@ export class EditorGatekeeper {
 
   /** Mirrors what is owned into the `editor-gatekeeper` health entry; a lapsed sweep is an error. */
   private refreshHealth(): void {
-    const { owned, reclaimed } = this.read()
+    const { owned, reclaimed, kept } = this.read()
     const at = iso(this.now())
     const parts = [`${owned} process(es) of the shared editor belong to a lease`, `${reclaimed} reclaimed`]
+    if (kept) parts.push(`${kept} editor(s) left running for the next holder`)
     if (this.lastSweep) parts.push(`last sweep ${this.lastSweep}`)
     if (this.lastError) {
       this.host.health.set({ state: 'error', detail: `The editor gatekeeper's last sweep failed: ${this.lastError}`, at })

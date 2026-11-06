@@ -1,0 +1,32 @@
+{
+  "mode": "before",
+  "viewport": "1920x1080",
+  "theme": "dark",
+  "facts": {
+    "title": "【示例】技能旋转后朝向回滚（含复现用例）",
+    "gate": true,
+    "editor": null,
+    "facts": [
+      {
+        "label": "CL",
+        "value": "590001"
+      },
+      {
+        "label": "Swarm review",
+        "value": "review 590002"
+      },
+      {
+        "label": "交付",
+        "value": "1小时前 · 第 1 轮"
+      },
+      {
+        "label": "改动范围",
+        "value": "2 个文件"
+      }
+    ],
+    "judge": "待你判断1) 4.8° 的残余偏差是否可接受；2) 是否把该用例挂到技能旋转的其它触发路径。",
+    "hasRepro": true,
+    "height": 676,
+    "text": "待你本地验证等了 1 小时worker 已交付，等待你确认worker 自验待你判断1) 4.8° 的残余偏差是否可接受；2) 是否把该用例挂到技能旋转的其它触发路径。CL590001Swarm reviewreview 590002交付1小时前 · 第 1 轮改动范围2 个文件worker 最后的交付说明已完成改动并通过自验，CL 590001 已 shelve，等你在本地验证。复现步骤worker 自验站定后释放技能并立刻接起步，采样角色朝向与位移；用同一用例在 baseline 与 change 两臂各跑一次，比较转向收敛时间与最大朝向偏差。复现用例按验证包里的用例目录匹配技能旋转后朝向回滚 A/B还没跑过站定后释放技能并立刻接起步，采样朝向与位移；baseline 与 change 两臂各跑一次。py -3 run.py运行用例在编辑器页打开 →改动文件src/client/overview.tsxsrc/client/client.css预期与证据worker 自验baseline 朝向偏差 31.2°、收敛 640ms；change 偏差 4.8°、收敛 210ms；A/B 报告 reports/latest.html，判定通过，退出码 0。验证包原文版本与前置：//sun/mainline head 2026/11/06；SunEditor Win64 Development 编译通过（Result: Succeeded）；交付 CL 590001，仅 src/client/overview.tsx 与 src/client/client.css；工作区 C:/demo/tickets/verify-editor；本机复现用例 Saved/ReproTests/lab-aim-exit。\n复现步骤：站定后释放技能并立刻接起步，采样角色朝向与位移；用同一用例在 baseline 与 change 两臂各跑一次，比较转向收敛时间与最大朝向偏差。\n预期与证据：baseline 朝向偏差 31.2°、收敛 640ms；change 偏差 4.8°、收敛 210ms；A/B 报告 reports/latest.html，判定通过，退出码 0。\n待你判断：1) 4.8° 的残余偏差是否可接受；2) 是否把该用例挂到技能旋转的其它触发路径。版本与前置//sun/mainline head 2026/11/06；SunEditor Win64 Development 编译通过（Result: Succeeded）；交付 CL 590001，仅 src/client/overview.tsx 与 src/client/client.css；工作区 C:/demo/tickets/verify-editor；本机复现用例 Saved/ReproTests/lab-aim-exit。验什么、怎么验打开 review，先核对 diff 和改动文件。按 worker 写下的命令在本地复跑；流水线通过不等于你验收过。确认无误后点「本地验证通过」；只记录，不 submit。打开 review通过只会记录验收，不会 submit；提交始终由你执行。本地验证通过有问题，退回打开 Session"
+  }
+}
