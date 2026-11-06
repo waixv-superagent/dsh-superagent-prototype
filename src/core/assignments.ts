@@ -1,8 +1,8 @@
 /** What the Executor and its workers report about the Assignments that run tickets. */
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
-import { latestAssignment, liveTicket, runningAssignment } from './model.ts'
-import type { Assignment, QuestionSection, ReportState, Ticket } from './model.ts'
+import { latestAssignment, liveTicket, MODEL_APPROVAL_OPTIONS, runningAssignment } from './model.ts'
+import type { Assignment, ModelRoute, QuestionSection, ReportState, Ticket } from './model.ts'
 import { analysisAdviceFromSections, ANALYSIS_ADVICE_LABELS } from './analysis.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { REPAIR_LIMIT } from './invariants.ts'
@@ -32,6 +32,8 @@ export interface WorkerReport {
   options?: string[]
   /** The context the question card adds, in the worker's own order; 1–6 sections. */
   sections?: QuestionSection[]
+  /** With `question`: ask the person to allow this subagent model route for the ticket; the host offers 允许 and 不允许. */
+  model?: ModelRoute
   /** The person's message whose request raised the question; routes the question to the channel where it was written. */
   askedBy?: string
   /** The person's question this report answers, which the worker thereby takes up; authorizes the main Session to send an answer reply. */
@@ -179,6 +181,10 @@ export class Assignments extends EnginePart {
     if (report.askedBy && !report.question) throw new UserError('askerWithoutQuestion')
     const options = report.options?.map(label => label.trim())
     if (options && (!report.question || !validCardOptions(options))) throw new UserError(report.question ? 'attentionOptions' : 'optionsWithoutQuestion')
+    // A subagent model request is a permission question with fixed choices: the host puts 允许 and 不允许 on the card and
+    // never reads an approval out of free text, so the worker cannot offer choices of its own.
+    if (report.model && (!report.question || options?.length)) throw new UserError('modelRequest')
+    if (report.model && analyzing) throw new UserError('analysisReadOnly')
     // Sections ordinarily carry a question card's context; an idle analysis has no question and puts its verdict there
     // instead (docs/025), so sections without a question are valid only for its running report.
     if (report.sections && !validQuestionSections(report.sections)) throw new UserError('attentionSections')
@@ -194,10 +200,13 @@ export class Assignments extends EnginePart {
     if (report.answers && !person(report.answers, false)) throw new UserError('notAnswerable')
     const at = this.now()
     const previous = ticket.attention
+    // A model request always offers the same two choices, whatever the worker wrote; an ordinary question keeps its own.
+    const choices = report.model ? [...MODEL_APPROVAL_OPTIONS] : options
     const ask = (question: string) => ({ id: key('attention', ticketId, question, at), question,
-      ...(options?.length ? { options } : {}), ...(report.sections?.length ? { sections: report.sections } : {}),
-      ...(report.askedBy ? { triggerId: report.askedBy } : {}) })
-    const same = report.question === previous?.question && JSON.stringify(options ?? []) === JSON.stringify(previous?.options ?? [])
+      ...(choices?.length ? { options: choices } : {}), ...(report.sections?.length ? { sections: report.sections } : {}),
+      ...(report.model ? { model: report.model } : {}), ...(report.askedBy ? { triggerId: report.askedBy } : {}) })
+    const same = report.question === previous?.question && JSON.stringify(choices ?? []) === JSON.stringify(previous?.options ?? [])
+      && JSON.stringify(report.model ?? null) === JSON.stringify(previous?.model ?? null)
     const asked = report.question && !same ? ask(report.question) : previous
     const attention = report.question === null || report.state === 'ready' ? undefined : asked
     if (attention) ticket.attention = attention

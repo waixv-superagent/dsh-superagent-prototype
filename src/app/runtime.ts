@@ -334,6 +334,7 @@ export class Runtime extends Service implements SourceHost {
         pipeline: this.pipeline }
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
         get repository() { return setup.deployment.repository },
+        models: () => ctx.sessionController.modelCatalog(),
         pipeline: this.pipeline, editor: this.editorScheduler, gatekeeper: this.editorGatekeeper,
         workspaceOf: ticket => this.executor.workspaceOf(ticket),
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },

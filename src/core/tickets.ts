@@ -1,8 +1,8 @@
 /** Tickets: their lifecycle from an accept to their end, their Subscriptions and their Inputs. */
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
-import { latestAssignment, latestReport, liveTicket, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
-import type { Assignment, Backend, ChannelRef, Evaluation, Follow, LinkedRelationKind, Mandate, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketEndBy,
+import { latestAssignment, latestReport, liveTicket, MODEL_APPROVAL_OPTIONS, modelRoute, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
+import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, LinkedRelationKind, Mandate, ModelGrant, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketEndBy,
   TicketInput, TicketOutcome, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
@@ -629,8 +629,13 @@ export class Tickets extends EnginePart {
     const at = this.now()
     this.replies.withdrawAttention(attention.id)
     delete ticket.attention
-    this.addInput(ticket, { id: key('input', ticketId, 'answer', attentionId, at), kind: 'text', at,
-      text: `人对「${attention.question}」选了：${option}` })
+    // A model request records its authorization on the ticket before the answer reaches the worker: the tool guard reads it,
+    // and the input says whether the worker may now select that route.
+    const granted = attention.model && option === MODEL_APPROVAL_OPTIONS[0] ? this.grantModel(ticket, attention, at) : undefined
+    const text = granted ? `人允许了模型 ${modelRoute(granted)}（本工单的子 agent 可用，授权已记录）。可以用 subagent 的 provider/model 指定它。`
+      : attention.model ? `人不允许模型 ${modelRoute(attention.model)}；本工单不要用它。`
+      : `人对「${attention.question}」选了：${option}`
+    this.addInput(ticket, { id: key('input', ticketId, 'answer', attentionId, at), kind: 'text', at, text })
     return this.require(ticketId)
   }
   /**
@@ -649,9 +654,31 @@ export class Tickets extends EnginePart {
     const at = this.now()
     this.replies.withdrawAttention(attention.id)
     delete ticket.attention
-    this.addInput(ticket, { id: key('input', ticketId, 'answer', attentionId, at), kind: 'text', at,
-      text: `人对「${attention.question}」的答复：${answer.slice(0, 4000)}` })
+    // A written answer authorizes a model only when it is exactly one of the card's labels; anything else is a message, and
+    // the input tells the worker that no route was authorized, so it does not try one the guard will refuse.
+    const granted = attention.model && answer === MODEL_APPROVAL_OPTIONS[0] ? this.grantModel(ticket, attention, at) : undefined
+    const message = granted ? `人答复了「${attention.question}」：${answer}（模型 ${modelRoute(granted)} 已授权，本工单的子 agent 可用）。`
+      : attention.model && answer === MODEL_APPROVAL_OPTIONS[1] ? `人答复了「${attention.question}」：${answer}（模型 ${modelRoute(attention.model)} 未授权）。`
+      : attention.model ? `人对「${attention.question}」的答复：${answer.slice(0, 4000)}（模型 ${modelRoute(attention.model)} 未授权：授权要点卡片上的 允许）`
+      : `人对「${attention.question}」的答复：${answer.slice(0, 4000)}`
+    this.addInput(ticket, { id: key('input', ticketId, 'answer', attentionId, at), kind: 'text', at, text: message })
     return this.require(ticketId)
+  }
+  /**
+   * Record a person's approval of one subagent model route on the ticket, idempotently. The grant is what the worker's tool
+   * guard reads, so the route can be selected after the next delivery without any further host state.
+   */
+  private grantModel(ticket: Ticket, attention: Attention, at: string): ModelGrant {
+    const model = attention.model!
+    const execution = ticket.execution ?? { name: '', directory: '', assignment: '' }
+    const existing = execution.modelGrants?.find(item => item.provider === model.provider && item.model === model.model)
+    if (existing) return existing
+    const grant: ModelGrant = { provider: model.provider, model: model.model, at, attentionId: attention.id }
+    ticket.execution = { ...execution, modelGrants: [...execution.modelGrants ?? [], grant] }
+    // Persist the grant before the answer Input: an Input id is idempotent, so a repeat answered in the same millisecond must
+    // not be the only thing that would have recorded the authorization.
+    this.repo.tickets.save(ticket)
+    return grant
   }
   /**
    * A worker moves its ticket one phase forward: implement (only through a person's plan approval) → verify → deliver, the

@@ -1444,6 +1444,7 @@ const TEXT = {
   'userError.planSections': ['方案卡的语境分块是 1–6 块，每块一个简短不重复的标题和一段正文。', USER_ERRORS.planSections[1]],
   'userError.planDiff': ['方案附的代码 diff 必须是一份能渲染的 unified diff：{problem}', USER_ERRORS.planDiff[1]],
   'userError.optionsWithoutQuestion': ['选项要跟着它回答的问题一起给出，请用 human_action 提问。', USER_ERRORS.optionsWithoutQuestion[1]],
+  'userError.modelRequest': ['申请子 agent 模型授权时，要给人一句问题，选项固定为 允许 / 不允许。', USER_ERRORS.modelRequest[1]],
   'userError.attentionOptions': ['问题卡提供 2–4 个不重复的短选项，每个最多 24 字。', USER_ERRORS.attentionOptions[1]],
   'userError.attentionSections': ['提问卡的语境分块是 1–6 块，每块一个简短不重复的标题和一段正文。', USER_ERRORS.attentionSections[1]],
   'userError.notAttentionOption': ['这个选项不是当前问题提供的选项。', USER_ERRORS.notAttentionOption[1]],

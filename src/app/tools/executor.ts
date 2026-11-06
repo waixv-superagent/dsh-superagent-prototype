@@ -1,7 +1,8 @@
-/** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, checking a delivered change's pipeline, and reporting status. */
+/** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, checking a delivered change's pipeline, approving a subagent model, and reporting status. */
 import { z } from 'zod'
+import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { LINKED_RELATION_KINDS, analysisRunning, liveTicket, missingVerifyLabels, PLAN_DIFF_LIMITS, ticketPhase, VERIFY_LABELS, type EngineForExecutor,
-  type Ticket } from '../../core/index.ts'
+  type ModelRoute, type Ticket } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
 import { matchDeliveryTarget, deliveryTargets } from '../delivery-targets.ts'
 import { claimPull, readPull } from '../../sources/github-pull.ts'
@@ -27,6 +28,8 @@ export interface ExecutorToolsHost {
   readonly pipeline: Pick<PipelineChecks, 'review' | 'status' | 'changeState' | 'jenkins' | 'rerun'>
   /** GitHub Source context whose pull-request rules govern claiming a reported PR. */
   readonly github: SourceContext
+  /** The deployment's routable models, which a subagent model request is checked against. */
+  models(): Promise<ModelCatalog>
   /** Sends a submitted P1 plan to the person who decides it, and returns the card's message id when it went out. */
   notifyPlan(ticket: Ticket): Promise<string | undefined>
   sendReplies(): Promise<void>
@@ -60,6 +63,16 @@ function editorStatusFor(scheduler: EditorScheduler, ticketId: string) {
     ...engine ? { engine: { phase: engine.phase, modal: engine.modal, handler: engine.handler, slow_task: engine.slowTask,
       compiling: engine.compiling, stale: engine.stale, ...engine.detail ? { detail: engine.detail } : {} } } : {},
   }
+}
+
+/** The model catalog's display name for an exact route, or undefined when the deployment does not route it. */
+async function routedModel(host: ExecutorToolsHost, provider: string, model: string): Promise<string | undefined> {
+  const catalog = await host.models()
+  return catalog.groups.find(group => group.id === provider)?.models.find(item => item.id === model)?.name || undefined
+}
+/** A model-approval question that names the route and its display name, followed by the worker's own question. */
+function modelQuestion(model: ModelRoute, name: string, question: string): string {
+  return [`模型授权：允许在本工单用 ${name}（${model.provider}/${model.model}）跑子 agent 吗？`, question].join('\n').slice(0, 1000)
 }
 
 export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
@@ -189,6 +202,10 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
         human_action: z.string().trim().min(1).max(1000).nullish().describe('One concrete question for a person, also with state=progress; omit to keep the pending one, null to clear it.'),
         options: z.array(z.string().trim().min(1).max(24)).min(2).max(4).optional()
           .describe('With human_action: 2–4 choices at a key node where a click is fastest, such as confirming a plan; everyday questions stay plain text.'),
+        subagent_model: z.object({
+          provider: z.string().trim().min(1).max(100),
+          model: z.string().trim().min(1).max(200),
+        }).strict().optional().describe('With human_action: ask the person to allow this subagent model route; the host asks 允许/不允许. Call list_subagent_models for the ids.'),
         question_for_trigger_id: z.string().optional().describe('With human_action: the human message that raised the question, which is asked where that person wrote.'),
         sections: z.array(z.object({ label: z.string().trim().min(1).max(20), text: z.string().trim().min(1).max(800),
           fold: z.boolean().optional() }).strict()).min(1).max(6).optional()
@@ -202,6 +219,23 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
       execute: async (args, signal) => {
         const current = host.store.tickets.get(ticketId)
         if (!current || !liveTicket(current)) throw new Error('Ticket ended (PR was closed or work finished); do not resume it')
+        // A subagent model request is a permission card: the host words the question with the route and fixes the choices, so
+        // a person's click is the only thing that can authorize the route, and the worker cannot offer "允许" itself.
+        let humanAction = args.human_action
+        let subagentModel: ModelRoute | undefined
+        if (args.subagent_model) {
+          if (analysisRunning(current)) throw new Error('This assignment is the ticket\'s read-only idle analysis; it cannot request a subagent model approval')
+          if (humanAction == null || !humanAction.trim()) throw new Error('A subagent model request needs human_action: the question for the person')
+          if (args.options?.length) throw new Error('A subagent model request has fixed choices (允许/不允许); omit options')
+          const { provider, model: id } = args.subagent_model
+          const name = await routedModel(host, provider, id)
+          if (!name) throw new Error(`Unknown model route "${provider}/${id}". list_subagent_models lists the routes this deployment provides; use its provider and model ids`)
+          if (current.execution?.modelGrants?.some(grant => grant.provider === provider && grant.model === id)) {
+            throw new Error(`The person already approved ${provider}/${id} for this ticket; pass it to subagent instead of asking again`)
+          }
+          subagentModel = { provider, model: id }
+          humanAction = modelQuestion(subagentModel, name, humanAction.trim())
+        }
         const pull = args.pr_number != null ? await readPull(host.github, args.pr_number, signal) : undefined
         // Delivery completeness (S3): a ready report may only point at delivery that still exists on the channel's side. A
         // closed pull request, a submitted or deleted changelist, or a vanished review is not ready work; the worker fixes the
@@ -241,8 +275,9 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           if (refused) throw new Error(refused)
           const delivery = { ...(args.changelist != null ? { changelist: args.changelist } : {}),
             ...(args.swarm_review ? { review: args.swarm_review } : {}), ...(args.verification ? { verification: args.verification } : {}) }
-          const report = { state: args.state, summary: args.summary, ...(args.human_action !== undefined ? { question: args.human_action } : {}),
+          const report = { state: args.state, summary: args.summary, ...(humanAction !== undefined ? { question: humanAction } : {}),
             ...(args.options ? { options: args.options } : {}), ...(args.sections ? { sections: args.sections } : {}),
+            ...(subagentModel ? { model: subagentModel } : {}),
             ...(args.question_for_trigger_id ? { askedBy: args.question_for_trigger_id } : {}),
             ...(args.reply_to_trigger_id ? { answers: args.reply_to_trigger_id } : {}),
             ...(Object.keys(delivery).length ? { delivery } : {}) }

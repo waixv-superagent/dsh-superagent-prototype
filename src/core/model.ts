@@ -295,8 +295,18 @@ export type TicketEndBy = 'executor' | 'human'
 export type TicketOutcome = 'completed' | 'merged' | 'closed' | 'dropped' | 'stopped'
 /** One context block a worker puts on a question card: its own label and text; `fold` puts it behind the detail tap. */
 export interface QuestionSection { label: string; text: string; fold?: boolean }
+/** One exact provider/model route, as DeepSeek Harness names a child Session's model. */
+export interface ModelRoute { provider: string; model: string }
+/** A person's recorded authorization for one route on a ticket, and the question it answered. */
+export interface ModelGrant extends ModelRoute { at: string; attentionId: string }
+/** The choices a model request's card offers; only the first one records an authorization. */
+export const MODEL_APPROVAL_OPTIONS = ['允许', '不允许'] as const
+/** A ticket's subagent model route, as people and models write it. */
+export const modelRoute = (route: ModelRoute): string => `${route.provider}/${route.model}`
 /** A question for a person; `triggerId` is the human message that raised it, whose conversation it goes back to. */
-export interface Attention { id: string; question: string; /** The worker's choices, when it offers any; a card shows them and a click answers. */ options?: string[]; /** The context the worker adds, in its own order; absent keeps the card's default layout. */ sections?: QuestionSection[]; triggerId?: string }
+export interface Attention { id: string; question: string; /** The worker's choices, when it offers any; a card shows them and a click answers. */ options?: string[]; /** The context the worker adds, in its own order; absent keeps the card's default layout. */ sections?: QuestionSection[]; triggerId?: string
+  /** The subagent model route this question asks the person to allow; absent on an ordinary question. */
+  model?: ModelRoute }
 /** What a person does with a ticket the idle analysis sorted: put it in the attention pool, merge it into a duplicate, or let it sleep. */
 export type AnalysisVerdict = 'promote' | 'merge' | 'archive'
 /**
@@ -452,7 +462,9 @@ export interface Execution { name: string; directory: string; assignment: string
   backend?: Backend
   /** The configured repository or workspace the work belongs to, once an accept or a Source named one. */
   target?: string
-  changelist?: number; review?: string; verification?: string }
+  changelist?: number; review?: string; verification?: string
+  /** The subagent model routes a person allowed on this ticket, each with the question it answered. */
+  modelGrants?: ModelGrant[] }
 
 /** A delivery environment: this deployment's git source repository, or its Perforce depot. */
 export type Backend = 'git' | 'p4'
