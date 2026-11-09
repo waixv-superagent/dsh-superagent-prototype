@@ -21,7 +21,7 @@ Example to ignore: a thread sharing another product's discussion followed by “
 Example to accept when scoped to a screenshot of this project: “this button label is odd” followed by “just 'Save' would do”; the concrete replacement establishes intent without an imperative.
 Do not decide from hedge keywords alone.
 When intent remains uncertain, ignore quietly and let subsequent messages establish it; do not ask humans to confirm routine chatter.
-Acceptance must record these three facts and their source quotes in intent_evidence, plus a short receipt naming the change in the source language, unless a matched rule requires silent acceptance; then omit the receipt. The receipt is at most three short lines: the goal as understood, the next steps (up to three), and the ticket number the host appends; do not quote the triggering message.
+Acceptance must record these three facts and their source quotes in intent_evidence, plus a short receipt naming the change in the source language, unless a matched rule requires silent acceptance; then omit the receipt. The receipt is at most three short lines: the goal as understood, the next steps (up to three), and every ticket number the host appends, so one receipt covers the whole batch; do not quote the triggering message.
 A matched rule's instruction may define what counts as requested implementation and an established target for its category.
 Omit implementation plans, unchanged behavior and routine assurances.
 The host posts it as a reply to the triggering message; do not quote that message.

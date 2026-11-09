@@ -256,6 +256,22 @@ it('relays an explicit member mention as a candidate and creates the ticket, ack
   expect(await route({ kind: 'accept', trigger_id: trigger.id, title: 'again', worktree_name: worktreeName, acknowledgement: 'x' })).toMatchObject({ ticket: { ticket_id: ticket.id } })
 })
 
+it('sends one receipt naming every ticket a multi-goal accept opened, so the batch is visible in the conversation', async () => {
+  const trigger = feishu('9', '@bot 修列表，并把测试和文档补上')
+  await receive(trigger)
+  const result = await route({ kind: 'accept', trigger_id: trigger.id, title: '修列表', worktree_name: 'fix-list',
+    acknowledgement: '修列表\n补测试\n补文档', parts: [
+      { title: '补测试', worktree_name: 'add-test' },
+      { title: '补文档', worktree_name: 'add-docs' },
+    ] })
+  const tickets = (result.tickets as { ticket_id: string }[]).map(ticket => ticket.ticket_id)
+  expect(tickets).toHaveLength(3)
+  const larkCalls = vi.mocked(Commands.prototype.lark).mock.calls.map(([args]) => args)
+  const receipt = larkCalls.filter(args => args[1] === '+messages-reply').at(-1)!
+  expect(JSON.parse(receipt[receipt.indexOf('--content') + 1]!)).toEqual({ zh_cn: { content: [[{ tag: 'md',
+    text: `修列表\n补测试\n补文档\n工单 ${tickets.map(id => id.slice(0, 8)).join('、')}` }]] } })
+})
+
 it('records the kind an accept names, derives one otherwise, and lets the board filter and count tickets by kind', async () => {
   const { ticket } = await acceptedTicket()
   // The default backend here is git, the deployment's own repository: work there is the agent's self-iteration.

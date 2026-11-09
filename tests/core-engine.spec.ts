@@ -2286,7 +2286,7 @@ describe('P1 plan gate', () => {
     expect(() => h.engine.submitPlan(ticketId, PLAN, undefined, undefined, undefined, 'design'))
       .toThrowError(expect.objectContaining({ code: 'planIncomplete' }))
   })
-  it('opens one ticket per part under a single Decision, with one receipt naming it', () => {
+  it('opens one ticket per part under a single Decision, with one receipt naming every ticket', () => {
     const h = harness({}, { prepareTicket: (ticket, outcome) => ({ ...ticket, execution: { name: outcome.name ?? '', directory: '', assignment: '' } }) })
     h.engine.receive(trigger('1', { threads: [{ source: 'chat', id: 't1' }] })); h.pump()
     const decision = h.decide(h.requests.at(-1)!, { kind: 'accept', title: 'Fix list', scope: 'list fix', reason: 'requested',
@@ -2300,10 +2300,11 @@ describe('P1 plan gate', () => {
     expect(tickets.map(ticket => ticket.title)).toEqual(['Fix list', 'Add test', 'Docs'])
     expect(tickets.map(ticket => ticket.execution?.name)).toEqual(['list-fix', 'list-test', 'list-docs'])
     expect(tickets.map(ticket => ticket.decisionId)).toEqual([decision.id, decision.id, decision.id])
-    // One receipt: keyed by the single trigger, whose text now names the ticket the host created.
+    // One receipt, keyed by the single trigger: it names the whole batch, so a person sees that three tickets were opened.
     const acks = h.outbox.filter(message => message.kind === 'acknowledgement')
     expect(acks).toHaveLength(1)
-    expect(acks[0]!.text).toContain('工单')
+    expect(acks[0]!.text).toBe(`修列表\n接着补测试\n工单 ${decision.ticketIds!.map(id => id.slice(0, 8)).join('、')}`)
+    expect(acks[0]!.ticketId).toBe(decision.ticketId)
     // Every part follows the source thread, so a later message reaches each ticket's worker.
     expect(h.repo.threads.get('chat:t1')!.subscriptions).toEqual(expect.arrayContaining(decision.ticketIds!))
   })

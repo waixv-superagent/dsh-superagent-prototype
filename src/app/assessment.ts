@@ -42,7 +42,7 @@ export const AssessmentSchema = z.object({
   worktree_name: WorktreeNameSchema.optional(),
   scope: z.string().max(1500),
   intent_evidence: z.string().trim().min(1).max(700).nullish().describe('For acceptance: the quotes that establish the three facts.'),
-  acknowledgement: AcknowledgementSchema.nullish().describe('For acceptance: a receipt in the source language as 2–3 short lines — line 1 the goal as understood, line 2 the next steps up to three; the host appends the ticket number. Posted as a reply to the trigger; omit only when a matched rule asks for silence.'),
+  acknowledgement: AcknowledgementSchema.nullish().describe('For acceptance: a receipt in the source language as 2–3 short lines — line 1 the goal as understood, line 2 the next steps up to three; the host appends every ticket number the accept opened. Posted as a reply to the trigger; omit only when a matched rule asks for silence.'),
   reply: ChatReplySchema.nullish().describe('For chat: the answer sent to the person, in the source language.'),
   escalation: EscalationSchema.nullish().describe('For chat: something the conversation established that deserves its own ticket; the reply still goes out.'),
   reason: z.string().min(1).max(500),
