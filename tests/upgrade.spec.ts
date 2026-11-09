@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BUILD_INFO, dependenciesChanged, installedCommit, onlyVersionFields, parseCommits, Upgrade, UpgradeRefused, type Runner,
   type UpgradeHost } from '../src/app/upgrade.ts'
 import { NO_UPGRADE } from '../src/deployment.ts'
-import { parsePlan, runSwitch, type SwitchIo, type SwitchPlan } from '../scripts/upgrade-switch.mjs'
+import { failedStatus, openSwitchLog, parsePlan, runSwitch, type SwitchIo, type SwitchPlan } from '../scripts/upgrade-switch.mjs'
 
 const A = 'a'.repeat(40), B = 'b'.repeat(40), C = 'c'.repeat(40)
 const log = (...shas: string[]) => shas.map((sha, index) => [sha, `feat: change ${index}`, 'dev', '2026-11-05T00:00:00+08:00'].join('\x1f')).join('\n')
@@ -145,15 +145,27 @@ describe('update run', () => {
     const plan = JSON.parse(Object.entries(files).find(([path]) => path.endsWith('upgrade/plan.json'))![1]) as SwitchPlan
     expect(plan.wasPaused).toBe(true)
   })
-  it('refuses a second update while one runs, and reads an interrupted switch as down after a restart', async () => {
+  it('refuses a second update while one runs, and reads a switch that died as down after a restart', async () => {
     const { run, files } = runner(installed(A), GIT)
     const upgrade = new Upgrade(host(run, { activeCount: () => 1 }).value)
     await upgrade.check()
     upgrade.begin()
     expect(() => upgrade.begin()).toThrow('running')
     await upgrade.cancel()
-    files['/state/upgrade/status.json'] = JSON.stringify({ state: 'switching', sha: C, from: A, startedAt: '', steps: [], error: null })
+    const stale = new Date(Date.now() - 21 * 60_000).toISOString()
+    files['/state/upgrade/status.json'] = JSON.stringify({ state: 'switching', sha: C, from: A, startedAt: stale, steps: [], error: null })
     expect(new Upgrade(host(run).value).view().run).toMatchObject({ state: 'down' })
+  })
+  it('shows the outcome a switch writes after the new host started while it was still finalizing', () => {
+    const { run, files } = runner(installed(A), GIT)
+    const startedAt = new Date().toISOString()
+    const switching = { state: 'switching', sha: C, from: A, startedAt, steps: [], error: null }
+    files['/state/upgrade/status.json'] = JSON.stringify(switching)
+    const upgrade = new Upgrade(host(run).value)
+    expect(upgrade.view().run).toMatchObject({ state: 'switching' })
+    files['/state/upgrade/status.json'] = JSON.stringify({ ...switching, state: 'done', endedAt: new Date().toISOString(),
+      steps: [{ name: 'replace', state: 'done', detail: '', at: startedAt }] })
+    expect(upgrade.view().run).toMatchObject({ state: 'done', steps: [{ name: 'replace' }] })
   })
 })
 
@@ -247,5 +259,23 @@ describe('switch', () => {
   it('refuses a plan without a start command', () => {
     expect(() => parsePlan(JSON.stringify({ sha: C, source: '/n', install: '/i', stateDir: '/s', backup: '/b', statusFile: '/f', url: 'u', pid: 1 })))
       .toThrow('start command')
+  })
+})
+
+describe('switch setup', () => {
+  it('falls back to the handles the switch already has when the launcher holds its log', () => {
+    expect(openSwitchLog(undefined)).toBe('ignore')
+    expect(openSwitchLog('/state/upgrade/switch.log', () => 7)).toBe(7)
+    expect(openSwitchLog('/state/upgrade/switch.log', () => {
+      throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+    })).toBe('inherit')
+  })
+  it('records a failed switch when setup dies before the switch starts', () => {
+    const plan = parsePlan(JSON.stringify({ sha: C, from: A, source: '/new', install: '/install', stateDir: '/state', backup: '/backup',
+      statusFile: '/state/upgrade/status.json', url: 'http://127.0.0.1:3082', pid: 42, start: { argv: ['node', 'dsh'] },
+      startedAt: '2026-11-05T00:00:00.000Z', steps: [{ name: 'fetch', state: 'done', detail: '', at: '2026-11-05T00:00:00.000Z' }] }))
+    const status = failedStatus(plan, 'EBUSY: resource busy or locked')
+    expect(status).toMatchObject({ state: 'failed', sha: C, from: A, error: 'EBUSY: resource busy or locked', rolledBack: false })
+    expect(status.steps.map(step => step.name)).toEqual(['fetch'])
   })
 })
