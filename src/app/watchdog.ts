@@ -2,15 +2,17 @@
  * The host's recovery from a passing outage of the model gateway or the network — the deployment's UPS. It keeps the control plane
  * alive: a main Session whose turn ended on such a failure is told to go on after a growing backoff, and one that disappeared is
  * created again. It also retries a Ticket whose worker stopped on the same kind of failure, so one outage does not leave every
- * Ticket waiting for a person. A Ticket a person already continued, a failure a later try would meet again (an exhausted account
- * quota, a credential, an oversized context) and paused processing are left alone; a failure chain past its last retry waits for a
- * person (see docs/003).
+ * Ticket waiting for a person. A Ticket a person already continued, a failure a later try would meet again and paused processing
+ * are left alone; but a main Session whose provider ran out of account quota is moved to another provider that offers the same
+ * model and told to go on at once (`masterQuota`), and a failure chain past its last retry waits for a person (see docs/003).
  */
 import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { latestAssignment, waitsForPerson, type EngineForWatchdog, type Ticket } from '../core/index.ts'
 import { transient } from '../executor/dsh.ts'
 import type { HealthEntry } from '../infra/health.ts'
+import { quotaExhausted, type FailoverSwitch } from './provider-failover.ts'
 import type { Sessions } from './sessions.ts'
 
 /** The retry delays after a passing failure: 1, 2, 5, 10, 15 and 30 minutes, the last one repeated. */
@@ -21,6 +23,8 @@ export const RECOVERY_TRIES = 12
 const HEARTBEAT_MS = 10_000
 /** How long a main Session retry waits while the Session runs or processing is paused. */
 const LOOK_AGAIN_MS = 5_000
+/** How soon the main Session is told to go on after the host moved it to another provider for an exhausted quota. */
+const QUOTA_CONTINUE_MS = 1_000
 /** The longest failure text the host repeats in a message or a health detail. */
 const MAX_MESSAGE = 300
 /** Host dependencies used by `Watchdog`. */
@@ -32,7 +36,7 @@ export interface WatchdogHost {
   readonly engine: Pick<EngineForWatchdog, 'recoverTicket'>
   /** The main Session: its id, the title it is created with, and the directory it runs in. */
   readonly master: { readonly id: string; readonly title: string; directory(): string }
-  readonly sessions: Pick<Sessions, 'ensure' | 'prompt'>
+  readonly sessions: Pick<Sessions, 'ensure' | 'prompt' | 'failover'>
   /** The `watchdog` health entry. */
   readonly health: HealthEntry
   /** Whether processing is paused, which holds every recovery until it resumes. */
@@ -43,8 +47,8 @@ export interface WatchdogHost {
 }
 /** One ticket's retries of a passing failure: how many it has had, the report they started from, and when the next is due. */
 interface Recovery { attempts: number; reportAt: string; nextAt: number }
-/** The main Session's failed turn: the next retry attempt and the failure it repeats. */
-interface MasterFailure { attempts: number; message: string }
+/** The main Session's failed turn: the next retry attempt, the failure it repeats, and whether an exhausted quota caused it. */
+interface MasterFailure { attempts: number; message: string; kind: 'passing' | 'quota' }
 /** What the watchdog is recovering now, which the state API reports and the Feishu status card shows. */
 export interface WatchdogStatus {
   /** Whether a passing failure is being recovered: a Ticket waits for or runs an automatic retry, or the main Session is retried. */
@@ -86,7 +90,9 @@ export class Watchdog {
     this.started = true
     this.stopped = false
     this.disposers.push(this.host.context.on('agent/error', ({ agent, error }) => {
-      if (agent.id === this.host.master.id) this.masterTurnFailed(error)
+      if (agent.id !== this.host.master.id) return
+      if (quotaExhausted(error)) { void this.masterQuota(agent, error); return }
+      this.masterTurnFailed(error)
     }))
     // A turn that ended without an error means the conversation is not stuck on the failure.
     this.disposers.push(this.host.context.on('session/event', (session, event) => {
@@ -157,16 +163,37 @@ export class Watchdog {
   }
 
   /**
-   * Starts or continues the main Session's retry chain after a turn failed for a passing reason. A later passing failure of the
-   * same outage keeps the chain's count; a turn end that is not an error clears it (`masterRecovered`).
+   * A main Session turn failed for an exhausted account quota: move the Session to another provider that offers the same model
+   * and tell it to go on at once, instead of leaving the conversation silent. With no provider left the host sets the gave-up
+   * state it shows for a recovery that stopped, because it never crosses a quota hard gate by changing the model (docs/003).
    */
-  masterTurnFailed(error: unknown): void {
-    if (this.stopped || !transient(error)) return
+  private async masterQuota(agent: Agent, error: unknown): Promise<void> {
+    if (this.stopped) return
+    let switched: FailoverSwitch | undefined
+    try { switched = await this.host.sessions.failover(agent) } catch (failure) {
+      this.host.warn?.(`the main Session could not be moved to another provider after a quota failure: ${failureText(failure)}`)
+    }
+    if (this.stopped) return
+    if (!switched) {
+      this.masterGaveUp = true
+      this.host.warn?.(`the main Session's provider ran out of account quota and no other provider offers its model: ${failureText(error)}`)
+      this.refresh(this.now())
+      return
+    }
+    this.masterTurnFailed(error, 'quota')
+  }
+  /**
+   * Starts or continues the main Session's retry chain after a turn failed for a passing reason. A later passing failure of the
+   * same outage keeps the chain's count; a turn end that is not an error clears it (`masterRecovered`). A `quota` failure has no
+   * passing retry: it is called only after the Session moved to another provider, and it is told to go on at once.
+   */
+  masterTurnFailed(error: unknown, kind: 'passing' | 'quota' = 'passing'): void {
+    if (this.stopped || (kind === 'passing' && !transient(error))) return
     this.masterGaveUp = false
     const failure = this.masterFailure
-    if (failure) failure.message = failureText(error)
-    else this.masterFailure = { attempts: 0, message: failureText(error) }
-    if (this.masterTimer === undefined) this.armMaster(this.delay(this.masterFailure?.attempts ?? 0))
+    if (failure) { failure.message = failureText(error); failure.kind = kind }
+    else this.masterFailure = { attempts: 0, message: failureText(error), kind }
+    if (this.masterTimer === undefined) this.armMaster(kind === 'quota' ? QUOTA_CONTINUE_MS : this.delay(this.masterFailure?.attempts ?? 0))
     this.refresh(this.now())
   }
 
@@ -178,7 +205,7 @@ export class Watchdog {
     const agent = this.host.context.agents.get(this.host.master.id as SessionId)
     if (agent?.status === 'running') { this.armMaster(LOOK_AGAIN_MS); return }
     if (failure.attempts >= RECOVERY_TRIES) {
-      this.host.warn?.(`the main Session still fails for a passing reason after ${failure.attempts} automatic retries; leaving it to a person`)
+      this.host.warn?.(`the main Session still fails after ${failure.attempts} automatic retries; leaving it to a person`)
       this.masterFailure = undefined
       if (this.masterTimer !== undefined) clearTimeout(this.masterTimer)
       this.masterTimer = undefined
@@ -187,8 +214,11 @@ export class Watchdog {
       return
     }
     failure.attempts += 1
-    const text = `Your last turn failed for a passing reason (${failure.message}). Continue with the work that reached you; the `
-      + 'messages that arrived meanwhile are in your history. Do not repeat actions that already succeeded.'
+    const text = failure.kind === 'quota'
+      ? 'Your last turn stopped because the model provider ran out of account quota; the host moved this Session to another provider '
+        + 'that offers the same model. Continue with the work that reached you; the messages that arrived meanwhile are in your history.'
+      : `Your last turn failed for a passing reason (${failure.message}). Continue with the work that reached you; the `
+        + 'messages that arrived meanwhile are in your history. Do not repeat actions that already succeeded.'
     try {
       if (!agent) await this.ensureMaster()
       await this.host.sessions.prompt(this.host.master.id, `recover:master:${failure.attempts}`, text, 'queue')
@@ -273,9 +303,11 @@ export class Watchdog {
     const tickets = this.recovered.size, master = this.masterFailure
     const parts: string[] = []
     if (tickets) parts.push(`${tickets} ticket(s) stopped on a passing failure wait for an automatic retry`)
-    if (master) parts.push(`the main Session is retried after a passing failure (attempt ${master.attempts + 1})`)
+    if (master) parts.push(master.kind === 'quota'
+      ? `the main Session is told to go on after moving to another provider (attempt ${master.attempts + 1})`
+      : `the main Session is retried after a passing failure (attempt ${master.attempts + 1})`)
     if (this.masterDown) parts.push('the main Session is missing and could not be created again')
-    if (this.masterGaveUp) parts.push('the main Session still failed for a passing reason after its last automatic retry and waits for a person')
+    if (this.masterGaveUp) parts.push('the main Session is not recovering automatically and waits for a person')
     if (!parts.length) {
       this.host.health.set({ state: 'ready', detail: 'No passing model or network failure waits for automatic recovery', at })
       return

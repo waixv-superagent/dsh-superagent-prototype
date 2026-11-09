@@ -31,6 +31,7 @@ interface Harness {
   recover: ReturnType<typeof vi.fn<(id: string) => Ticket>>
   ensure: ReturnType<typeof vi.fn>
   prompt: ReturnType<typeof vi.fn>
+  failover: ReturnType<typeof vi.fn>
   agents: Map<string, { id: string; status: string }>
   open: { tickets: Ticket[]; open: () => Ticket[] }
   health: { value: { state: string; detail: string } }
@@ -59,12 +60,13 @@ function harness (tickets: Ticket[] = []): Harness {
   const recover = vi.fn<(id: string) => Ticket>()
   const ensure = vi.fn(async (id: string) => { agents.set(id, { id, status: 'idle' }); return agents.get(id) })
   const prompt = vi.fn(async () => {})
+  const failover = vi.fn(async () => undefined as { from: { provider: string; model: string }; to: { provider: string; model: string } } | undefined)
   const host: WatchdogHost = { context: context as unknown as Context, tickets: open, engine: { recoverTicket: recover },
     master: { id: MASTER, title: 'orchestrator', directory: () => '/state' },
-    sessions: { ensure, prompt } as unknown as Pick<Sessions, 'ensure' | 'prompt'>, health: entry,
+    sessions: { ensure, prompt, failover } as unknown as Pick<Sessions, 'ensure' | 'prompt' | 'failover'>, health: entry,
     paused: () => paused.value, now: () => clock.value }
   const emit = (event: string, ...args: unknown[]): void => { for (const handler of listeners.get(event) ?? []) handler(...args) }
-  return { watch: new Watchdog(host), recover, ensure, prompt, agents, open, health, paused, clock, emit }
+  return { watch: new Watchdog(host), recover, ensure, prompt, failover, agents, open, health, paused, clock, emit }
 }
 
 afterEach(() => { vi.useRealTimers() })
@@ -231,5 +233,34 @@ describe('the main Session', () => {
     h.paused.value = false
     await vi.advanceTimersByTimeAsync(5_000)
     expect(h.prompt).toHaveBeenCalledTimes(1)
+  })
+
+  it('is moved to another provider when its provider ran out of quota, and told to go on at once', async () => {
+    vi.useFakeTimers()
+    const h = harness()
+    h.agents.set(MASTER, { id: MASTER, status: 'idle' })
+    h.failover.mockResolvedValueOnce({ from: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' },
+      to: { provider: 'deepseek-account', model: 'deepseek-v4.1-flash' } })
+    h.watch.start()
+    h.emit('agent/error', { agent: h.agents.get(MASTER), error: Object.assign(new Error('account quota exhausted'), { code: 'ACCOUNT_QUOTA', status: 402 }) })
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(h.failover).toHaveBeenCalled()
+    expect(h.prompt).toHaveBeenCalledWith(MASTER, 'recover:master:1', expect.stringContaining('another provider that offers the same model'), 'queue')
+    expect(h.watch.status()).toMatchObject({ recovering: true, master: true, gaveUp: false })
+    await h.watch.stop()
+  })
+
+  it('waits for a person when no other provider offers the quota-failed model', async () => {
+    vi.useFakeTimers()
+    const h = harness()
+    h.agents.set(MASTER, { id: MASTER, status: 'idle' })
+    h.watch.start()
+    h.emit('agent/error', { agent: h.agents.get(MASTER), error: Object.assign(new Error('account quota exhausted'), { code: 'ACCOUNT_QUOTA', status: 402 }) })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(h.failover).toHaveBeenCalled()
+    expect(h.prompt).not.toHaveBeenCalled()
+    expect(h.watch.status()).toMatchObject({ gaveUp: true })
+    expect(h.health.value.detail).toContain('waits for a person')
+    await h.watch.stop()
   })
 })

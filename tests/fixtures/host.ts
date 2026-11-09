@@ -39,8 +39,25 @@ export function feishu(id: string, text: string, overrides: Record<string, unkno
 type RegisteredTool = { name: string; execute: (args: unknown, execution: { signal: AbortSignal }) => Promise<unknown> }
 type FakeAgent = {
   id: string; status: string; inbox: { nextTurn: UserMessage[]; nextStep: UserMessage[] }
+  model: { current: () => { provider: string; model: string; reasoningEffort?: string } | undefined; select: Mock<(selection: unknown) => void> }
   cancel: Mock; inject: Mock<(message: UserMessage) => void>; steer: Mock<(message: UserMessage) => void>; followup: Mock<(message: UserMessage) => void>
 }
+/** The model routes a test deployment provides: two providers offering the same model, as a failover needs, plus one extra model. */
+export const CATALOG = {
+  default: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash', reasoningEffort: 'max' },
+  routableProviders: ['deepseek-account', 'ai-gateway'],
+  groups: [
+    { id: 'deepseek-account', name: 'DeepSeek', models: [{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash',
+      reasoning: { efforts: [{ id: 'off', name: 'Off' }, { id: 'max', name: 'Max' }], defaultEffort: 'max' } }] },
+    { id: 'ai-gateway', name: 'kurogames', models: [
+      { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', reasoning: { efforts: [{ id: 'off', name: 'Off' }, { id: 'max', name: 'Max' }] } },
+      { id: 'claude-opus-5.5', name: 'Opus 5.5' },
+    ] },
+  ],
+  failures: [],
+}
+/** The route a `ProviderFailover` test's Session starts on, until a failover selects another. */
+export const SESSION_MODEL = { provider: 'deepseek-account', model: 'deepseek-v4.1-flash', reasoningEffort: 'max' }
 /** A text message, as DSH's job tools and subagents send their notices. */
 const notice = (id: string, text: string) => ({ id, role: 'user', content: [{ type: 'text', text }], source: { kind: 'tool-jobs', form: 'notice' } }) as unknown as UserMessage
 type HttpHandler = (req: unknown, res: unknown) => Promise<void>
@@ -224,7 +241,12 @@ export async function startRuntime(seed?: (store: Store) => void, options: { mis
         turn++
         take(true)
       })
-      const session = { id: sessionId, snapshotEvents: () => [], requestHeader: () => undefined, append: vi.fn() }
+      // The model the Session runs on: the deployment default, seeded by its role model, changed by a quota failover; the catalog
+      // names where else it may run.
+      const model = { ...CATALOG.default } as { provider: string; model: string; reasoningEffort?: string }
+      const session = { id: sessionId, snapshotEvents: () => [], requestHeader: () => undefined,
+        append: vi.fn((type: string, data: unknown) => { if (type === 'model/selection' && data && typeof data === 'object') Object.assign(model, data) }) }
+      const selection = { current: () => model, select: vi.fn((next: unknown) => { Object.assign(model, next) }) }
       let status = 'idle'
       const idle: (() => void)[] = []
       // A cancel drops the inbox unless kept, and the turn it stops ends a moment later, which DSH says.
@@ -238,12 +260,13 @@ export async function startRuntime(seed?: (store: Store) => void, options: { mis
           ctx.emit('agent/status', { agent, status: 'idle' } as never)
         })
       })
-      agents.set(sessionId, { id: sessionId, ctx: agentCtx, inbox, followup: deliver('queue'), steer: deliver('steer'), inject: vi.fn(), session, cancel,
+      agents.set(sessionId, { id: sessionId, ctx: agentCtx, inbox, model: selection, followup: deliver('queue'), steer: deliver('steer'), inject: vi.fn(), session, cancel,
         get status() { return status }, set status(next: string) { status = next; if (next === 'idle') for (const wake of idle.splice(0)) wake() },
         // Once its turn ended, as DSH's does.
         whenIdle: () => status === 'idle' ? Promise.resolve() : new Promise<void>(resolve => { idle.push(resolve) }) } as never)
     }),
     selectModel: vi.fn(async () => {}), resolveAgent: vi.fn(resolveDefault), rename: vi.fn(async () => {}),
+    modelCatalog: vi.fn(async () => CATALOG),
     prompt: vi.fn(() => { throw new Error('Plugin delivery must not use user RPC') }),
   }
   const query = { observeSession: vi.fn(async () => ({ events: [], [Symbol.asyncDispose]: async () => {} })) }

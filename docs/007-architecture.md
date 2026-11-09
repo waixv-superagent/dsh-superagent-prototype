@@ -204,7 +204,7 @@ A Channel sends with the Source's own `state` too, so it can settle a record of 
 
 `WorkerSlots` reserves capacity before a launch or a delivery that wakes an idle worker. The limit is per delivery environment (the Ticket's recorded target, or the target its backend falls back to), and a human message can use one slot beyond `maxWorkers` in its own environment; wakes have priority over launches. `activeCount` supplies panel load.
 
-Transient provider and network failures get three retries. Launches use effect backoff; failed turns receive continuation messages after 15, 30 and 60 seconds. `transient` decides what counts as passing: DeepSeek Harness's retryable failure codes (`RATE_LIMIT`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE`) first, then an HTTP 408, 429 or 5xx or a connection failure; its terminal codes (`QUOTA`, `ACCOUNT_QUOTA`, `AUTH`, the credential codes, `CONTEXT_WINDOW_EXCEEDED`, `IMAGE_OFFLOAD_REQUIRED`) win over their message. A failure that outlasts those retries is the Watchdog's. `inputMessage` renders each Input from current Ticket state, and `mandateInstructions` adds the matched-rule limits for inferred work.
+Transient provider and network failures get three retries. Launches use effect backoff; failed turns receive continuation messages after 15, 30 and 60 seconds. `transient` decides what counts as passing: DeepSeek Harness's retryable failure codes (`RATE_LIMIT`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE`) first, then an HTTP 408, 429 or 5xx or a connection failure; its terminal codes (`QUOTA`, `ACCOUNT_QUOTA`, `AUTH`, the credential codes, `CONTEXT_WINDOW_EXCEEDED`, `IMAGE_OFFLOAD_REQUIRED`) win over their message. An exhausted account quota is not retried on the same provider but handed to `ProviderFailover`, which moves the Session to another provider offering the same model (docs/003). A failure that outlasts those retries is the Watchdog's. `inputMessage` renders each Input from current Ticket state, and `mandateInstructions` adds the matched-rule limits for inferred work.
 
 `install` subscribes to Session events; `dispose` unsubscribes. A turn end normally reports waiting, except after readiness or while human action is required. Errors report failed. At startup, `resume` reports interrupted Assignments through `assignmentInterrupted` and requeues pending launches that do not wait for a person, oldest Ticket first.
 
@@ -234,7 +234,7 @@ Validation inherits an omitted base from the saved override, drops removed parts
 
 ### Sessions
 
-`Sessions` (`src/app/sessions.ts`) manages DeepSeek Harness Sessions for both roles. `ensure` creates a Session with its role's model. `install` follows agent events and registers prompts, skills and tools for managed Sessions.
+`Sessions` (`src/app/sessions.ts`) manages DeepSeek Harness Sessions for both roles. `ensure` creates a Session with its role's model, seeded away from a provider that recently ran out of account quota (`ProviderFailover`). `install` follows agent events and registers prompts, skills and tools for managed Sessions.
 
 `prompt` delivers once per request id. `relay` and `notify` enqueue main-Session messages handled by the `relay` and `notice` effects. `src/app/notices.ts` defines their content; `delivery` checks whether a message arrived.
 
@@ -242,9 +242,13 @@ Each model request binds the Session to the current prompt revision. The revisio
 
 `status` and `promptVersion` serve prompt pages. Saves go through `Prompts.save` and notify the main Session. `modelRetry` exposes model-budget retry state.
 
+### Provider failover
+
+`ProviderFailover` (`src/app/provider-failover.ts`) runs a Session on another provider when its provider refuses a request for an exhausted account quota — DeepSeek Harness's `QUOTA` or `ACCOUNT_QUOTA`, or an HTTP 402. It reads the deployment's model catalog (`SessionController.modelCatalog`) and picks the same model id on a provider that offers it, never a different model. The Executor asks it to fail over a worker whose turn stopped on such a failure and tells the worker to go on; the Watchdog asks it for the main Session (`masterQuota`). Each Session's failure chain tries one provider once, and a turn that ends as turns do starts a new chain. A provider that failed that way is gated for thirty minutes: a new Session of either role is seeded on another provider offering its configured model (`preferred`), a successful request on it clears the gate, and with no provider left the worker's Ticket fails naming the route while the main Session waits for a person.
+
 ### Watchdog
 
-`Watchdog` (`src/app/watchdog.ts`) recovers from a passing outage of the model gateway or the network. Its `poll` scans the open Tickets: a latest Report `failed` that `transient` counts as passing, a Ticket that still waits for a person and neither a question nor a failed delivery intervenes, is retried through `Engine.recoverTicket` after 1, 2, 5, 10, 15 and 30 minutes, up to twelve tries, the last delay repeated. The chain keeps its count across the host's own retries and starts again when a person retried; past its last try it waits for a person. `start` also watches the main Session: a turn that ended on such a failure is prompted to go on after the same backoff — a turn that ends as turns do clears the chain — and a main Session that disappeared is created again. The `watchdog` health entry names the pending recoveries, `status()` reports what is being recovered for `/orchestrator/api/state` and the Feishu status card, and `stop` waits for a scan in flight so none reaches a closed Store.
+`Watchdog` (`src/app/watchdog.ts`) recovers from a passing outage of the model gateway or the network. Its `poll` scans the open Tickets: a latest Report `failed` that `transient` counts as passing, a Ticket that still waits for a person and neither a question nor a failed delivery intervenes, is retried through `Engine.recoverTicket` after 1, 2, 5, 10, 15 and 30 minutes, up to twelve tries, the last delay repeated. The chain keeps its count across the host's own retries and starts again when a person retried; past its last try it waits for a person. `start` also watches the main Session: a turn that ended on such a failure is prompted to go on after the same backoff — a turn that ends as turns do clears the chain — and a main Session that disappeared is created again. A main Session whose provider ran out of account quota is moved to another provider offering the same model and told to go on at once (`masterQuota`), or waits for a person with no provider left. The `watchdog` health entry names the pending recoveries, `status()` reports what is being recovered for `/orchestrator/api/state` and the Feishu status card, and `stop` waits for a scan in flight so none reaches a closed Store.
 
 ### Stall alert
 
@@ -375,6 +379,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/views/ticket-repro.ts` | The acceptance page's repro entry (docs/024): the case folders a Ticket's verification package names, by folder name or by the Ticket's first eight characters, with their runs and the run in flight; an unmatched package keeps an empty list |
 | `src/app/delivery.ts` | `AgentDelivery`: delivers a message to a DeepSeek Harness agent once per request id, also across a restored Session |
 | `src/app/retry-health.ts` | `RetryHealth`: which Sessions wait on a model budget retry, for the `models` health entry |
+| `src/app/provider-failover.ts` | `ProviderFailover` (docs/003): an exhausted account quota's failure codes, the same model on another provider, the provider a new Session avoids while its quota is used up, and one switch per provider in a failure chain |
 | `src/app/billing.ts` | The board's billing strip: replays each billed `assistant/message` into a minute-granular rolling hour, prices it from the route's published `/v1/models` list, persists the aggregate, proves the route that is charging now, and reads the gateway account's settled hour and period quota |
 | `src/app/role-models.ts` | Resolves the Eval and Executor models, and seeds a new Session with its role's model |
 | `src/app/assessment.ts` | The MasterAssessor, the assessment schema and the window `orchestrator_eval` answers |
@@ -505,6 +510,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/health.spec.ts` | One health entry per part, each cleared by its own next success |
 | `tests/delivery.spec.ts` | `AgentDelivery` |
 | `tests/retry-health.spec.ts`, `tests/role-models.spec.ts` | Model budget retries, and the models of the two roles |
+| `tests/provider-failover.spec.ts` | Provider failover: the failure codes and HTTP 402 it reads, the same-model switch and the gate it opens and clears, one try per provider in a failure chain, and the cases that take no switch |
 | `tests/runtime.spec.ts` | The whole application on a simulated DeepSeek Harness host, through tools and HTTP |
 | `tests/web.spec.ts` | The Web Source: a panel request's Trigger and Thread, its Ticket through the normal Eval and accept path, the receipt delivered into the main Session, the Policy list it needs, and the refusal while the Source is off |
 | `tests/panel-request.spec.tsx` | The panel's request form: the submitted text and its length, the queued notice, the dialog closing, and a host that cannot take the request |

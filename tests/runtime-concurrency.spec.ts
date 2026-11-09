@@ -227,6 +227,48 @@ it('lets a worker go on after a passing provider failure, three times, before it
   fail(busy)
   await vi.waitFor(() => expect(latestAssignment(ticket())?.report).toMatchObject({ state: 'failed', summary: expect.stringContaining('Service Unavailable') }))
 })
+it('moves a worker that ran out of account quota to another provider and tells it to go on', async () => {
+  const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
+  const ticket = () => h.runtime.store.tickets.get(one.ticket.id)!
+  const agent = h.agents.get(one.sessionId)!
+  h.ctx.emit('agent/error', { agent, turn: 1, step: 1,
+    error: Object.assign(new Error('The account quota is used up'), { code: 'ACCOUNT_QUOTA', status: 402 }) } as never)
+  await vi.waitFor(() => expect(agent.model.current()).toMatchObject({ provider: 'deepseek-account', model: 'deepseek-v4.1-flash' }))
+  // The worker is told what happened and to go on, not handed a failed ticket.
+  await vi.waitFor(() => expect(h.deliveries.mock.calls.map(([call]) => call).filter(call => call.sessionId === one.sessionId).at(-1)!.text)
+    .toContain('over its account quota'))
+  expect(latestAssignment(ticket())?.report).toBeUndefined()
+  // The main Session gets a notice of the switch, but is not woken for it.
+  await h.runtime.idle()
+  const master = h.agents.get(h.runtime.masterId)! as unknown as { inject: { mock: { calls: [{ content: { text: string }[] }?][] } } }
+  const injected = master.inject.mock.calls.map(([message]) => message?.content.map(part => part.text).join('') ?? '')
+  expect(injected.some(text => text.includes('"provider_failover"') && text.includes('deepseek-account/deepseek-v4.1-flash'))).toBe(true)
+})
+
+it('starts a recreated worker Session away from a provider that ran out of quota', async () => {
+  const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
+  const agent = h.agents.get(one.sessionId)!
+  h.ctx.emit('agent/error', { agent, turn: 1, step: 1,
+    error: Object.assign(new Error('The account quota is used up'), { code: 'ACCOUNT_QUOTA', status: 402 }) } as never)
+  await vi.waitFor(() => expect(agent.model.current()).toMatchObject({ provider: 'deepseek-account' }))
+  // The host's gate keeps a Session it creates again off the provider whose quota failed, which is also the deployment default.
+  agent.status = 'idle'
+  h.agents.delete(one.sessionId)
+  h.runtime.receive(feishu('8', '一的补充', { mentions: [], root_id: 'om_1', sender_id: 'ou_guest' })); await h.runtime.idle()
+  expect(h.agents.get(one.sessionId)!.model.current()).toMatchObject({ provider: 'deepseek-account', model: 'deepseek-v4.1-flash' })
+})
+
+it('fails a worker that ran out of quota with no other provider offering its model', async () => {
+  const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
+  const agent = h.agents.get(one.sessionId)!
+  // Only one of the catalog's providers offers this model, so there is no provider to move to.
+  agent.model.select({ provider: 'ai-gateway', model: 'claude-opus-5.5' } as never)
+  h.ctx.emit('agent/error', { agent, turn: 1, step: 1,
+    error: Object.assign(new Error('The account quota is used up'), { code: 'ACCOUNT_QUOTA', status: 402 }) } as never)
+  await vi.waitFor(() => expect(latestAssignment(h.runtime.store.tickets.get(one.ticket.id)!)?.report)
+    .toMatchObject({ state: 'failed', summary: expect.stringContaining('No other provider offers ai-gateway/claude-opus-5.5') }))
+})
+
 describe('a worker that goes on after a passing failure', () => {
   const busy = () => Object.assign(new Error('Service Unavailable'), { status: 503 })
   const told = (sessionId: string) => h.deliveries.mock.calls.map(([call]) => call)
