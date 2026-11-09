@@ -475,14 +475,18 @@ it('stops a ticket on a person\'s instruction for good, and resumes an ended one
   await runtime.pump()
   expect(runtime.store.tickets.get(ticket.id)!.ended).toBeDefined()
   await expect(route({ kind: 'attach', ticket_id: ticket.id, trigger_id: guest.id })).rejects.toThrow('stopped')
-  // A ticket that ended by itself resumes on a person's message on its thread, whoever sent it.
+  // A ticket that ended by itself takes no message from its thread: the message is assessed, and the main Session
+  // resumes the ticket only by attaching it, whoever wrote it.
   const other = await acceptedTicket(feishu('20', '@bot 修另一个'))
   await runTool(other.sessionId, 'orchestrator_report', { state: 'dropped', summary: 'not reproduced' })
   expect(runtime.store.tickets.get(other.ticket.id)!.ended).toBeDefined()
-  await receive(feishu('21', '我这边还能复现', { mentions: [], root_id: 'om_20', sender_id: 'ou_guest' }))
+  const again = feishu('21', '我这边还能复现', { mentions: [], root_id: 'om_20', sender_id: 'ou_guest' })
+  await receive(again)
   await runtime.pump()
+  expect(runtime.store.tickets.get(other.ticket.id)!.ended).toBeDefined()
+  await route({ kind: 'attach', ticket_id: other.ticket.id, trigger_id: again.id })
+  await vi.waitFor(() => expect(runtime.store.tickets.get(other.ticket.id)!.ended).toBeUndefined())
   const resumed = runtime.store.tickets.get(other.ticket.id)!
-  expect(resumed.ended).toBeUndefined()
   expect(resumed.assignments).toHaveLength(2)
   expect(resumed.inputs.map(input => input.kind)).toContain('resumed')
 })
@@ -1302,7 +1306,7 @@ it('keeps the receipt of a message withdrawn while it went out, so its id is not
   expect([runtime.store.receipts.get('raced'), runtime.effects.pending('reply')]).toEqual([expect.objectContaining({ text: 'Done', status: 'sent' }), false])
 })
 
-it('resumes several ended tickets on one thread from one message without the launch waiting on itself', async () => {
+it('resumes two ended tickets from their own attached messages without the launch waiting on itself', async () => {
   const first = await acceptedTicket()
   const other = feishu('30', '@bot 顺手把这里也改了', { root_id: undefined })
   await receive(other)
@@ -1313,7 +1317,12 @@ it('resumes several ended tickets on one thread from one message without the lau
   await runTool(first.sessionId, 'orchestrator_trigger_handback', { trigger_id: another.id, reason: 'Another change.' })
   const second = await acceptedTicket(another)
   for (const ticket of [first, second]) await runTool(ticket.sessionId, 'orchestrator_report', { state: 'dropped', summary: 'nothing to do' })
-  await receive(feishu('32', '还有问题', { mentions: [], root_id: 'om_1', sender_id: 'ou_guest' }))
+  // Each message on the thread the tickets share is assessed; attaching one to an ended ticket resumes it.
+  const messages = [feishu('32', '还有问题', { mentions: [], root_id: 'om_1', sender_id: 'ou_guest' }),
+    feishu('33', '这边也有问题', { mentions: [], root_id: 'om_1', sender_id: 'ou_guest' })]
+  for (const message of messages) await receive(message)
+  await route({ kind: 'attach', ticket_id: first.ticket.id, trigger_id: messages[0]!.id })
+  await route({ kind: 'attach', ticket_id: second.ticket.id, trigger_id: messages[1]!.id })
   await vi.waitFor(() => expect([first, second].map(ticket => runtime.store.tickets.get(ticket.ticket.id)!.ended)).toEqual([undefined, undefined]), { timeout: 3000 })
   await vi.waitFor(() => expect([first, second].map(ticket => runtime.store.tickets.get(ticket.ticket.id)!.assignments.at(-1)!.state)).toEqual(['running', 'running']), { timeout: 3000 })
 })

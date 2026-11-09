@@ -187,21 +187,20 @@ it('takes the message a follow-up answers from its Source kind, whichever kind i
   expect(repliedTo(h.runtime, followup('3', 'yes', { parent_id: 'om_1' }))).toEqual(parent)
 })
 
-it('tells the main Session of a follow-up to an ended ticket once the ticket resumes, and not when it cannot', async () => {
+it('takes no message from an ended ticket\'s thread: it is assessed as new work, with no follow-up notice', async () => {
   h = await startRuntime()
   const { ticket, sessionId } = await h.acceptedTicket(feishu('1', '@bot 修一下回归'))
   await h.runTool(sessionId, 'orchestrator_report', { state: 'ready', summary: 'Done' })
   expect(h.runtime.store.tickets.get(ticket.id)!.ended).toBeDefined()
-  // While processing is paused the message waits for the ticket, which has not resumed: the main Session hears nothing yet.
-  await h.runtime.settings.pause(true, 'panel')
   h.deliveries.mockClear()
   const message = followup('2', '再改一下标题')
   h.runtime.receive(message); await h.runtime.idle()
+  // The ended ticket neither woke nor resumed, and the main Session was told nothing about a follow-up to it.
+  expect(h.runtime.store.tickets.get(ticket.id)!.ended).toBeDefined()
+  expect(h.relays(sessionId)).toEqual([])
   expect(notices(h)).toEqual([])
-  await h.runtime.settings.pause(false, 'panel')
-  await h.runtime.pump(); await h.runtime.idle()
-  expect(h.runtime.store.tickets.get(ticket.id)!.ended).toBeUndefined()
-  expect(notices(h)).toEqual([expect.objectContaining({ trigger_id: message.id, delivered_to: [expect.objectContaining({ ticket_id: ticket.id })] })])
+  // The message reached Eval, as one that reached no ticket does, so new work may be accepted from it.
+  expect(h.candidates()).toEqual([message.id])
 })
 
 it('tells the main Session nothing of a message it attached to an ended ticket, which resumes for it', async () => {
