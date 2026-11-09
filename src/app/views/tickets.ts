@@ -1,5 +1,5 @@
 /** Ticket list, ticket detail, mandate basis formatting, and executor load views. */
-import { completedArchived, latestReport, liveTicket, pendingPlan, planLines, planTemplate, threadKey, ticketKind, ticketStage, type AcceptMode, type TicketKind, type AdmissionCell,
+import { completedArchived, latestReport, liveTicket, pendingPlan, planLines, planTemplate, threadKey, ticketKind, ticketPriority, ticketStage, type AcceptMode, type TicketKind, type AdmissionCell,
   type MandateBasis, type Ticket, type TicketStage } from '../../core/index.ts'
 import { workerSessionId } from '../../executor/dsh.ts'
 import { KV } from '../../kv.ts'
@@ -174,6 +174,19 @@ export interface ExecutorLoad { running: number; queued: number }
 export function executorLoad(store: Store, running: number): ExecutorLoad {
   const queued = (ticket: Ticket) => { const stage = ticketStage(ticket); return stage.stage === 'working' && stage.action === 'queued' }
   return { running, queued: store.tickets.open().filter(queued).length }
+}
+/**
+ * The P0 Tickets a restart would cut off right now: those whose worker Session is in a turn (docs/006). A queued
+ * Assignment or a Ticket between turns loses nothing a restart does not resume anyway, so it is not listed.
+ * `scripts/dsh-superagent` waits on this list before restarting, and any other restart routine reads the same fact
+ * from `GET state` as `active.p0`.
+ */
+export function runningP0(store: Store): { id: string; title: string }[] {
+  return store.tickets.open().flatMap(ticket => {
+    if (ticketPriority(ticket) !== 'P0') return []
+    const stage = ticketStage(ticket)
+    return stage.stage === 'working' && stage.action !== 'queued' ? [{ id: ticket.id, title: ticket.title }] : []
+  })
 }
 /** The plan a ticket carries, split into lines so the panel can lead with the decision and keep the evidence behind one fold. */
 function planView(ticket: Ticket) {
