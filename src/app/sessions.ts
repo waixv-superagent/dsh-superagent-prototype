@@ -13,6 +13,7 @@ import type { BillingEvent } from './billing.ts'
 import type { Effects } from './effects.ts'
 import type { Variable } from './execution-environment.ts'
 import { RetryHealth } from './retry-health.ts'
+import { ProviderFailover, type FailoverSwitch } from './provider-failover.ts'
 import { initializeRoleModel } from './role-models.ts'
 import { bundledSkills } from './skill-files.ts'
 import { SKILL_PREFIX, type PromptVersion, type Prompts } from './prompts.ts'
@@ -148,16 +149,20 @@ function noWait({ name, arguments: input }: { name: string; arguments: unknown }
  * Creates and decorates orchestrator and worker DSH `Agent` sessions with role models, system prompt sections from `Prompts`, runtime skills, and restricted tool sets.
  * `Runtime`, `DshExecutor`, `MasterAssessor`, `Settings`, and management routes/tools use it to ensure sessions, deliver deduplicated messages via `AgentDelivery`, and process ordered `relay` and `notice` effects.
  * Feeds session events into `RetryHealth` to report model budget waits on the `models` `HealthEntry`, and durably records which prompt revisions each session has worked under in `Store` (`KV.sessions.prompts`) to authorize prompt version reads.
+ * A provider that ran out of its account quota does not get a new Session's first request, and a Session that stopped on one is moved to another provider offering the same model (`ProviderFailover`, docs/003).
  */
 export class Sessions {
   private readonly agentDelivery: AgentDelivery
   /** Decorated agents mapped to their registered disposers and skill scope until the agent is disposed or `Sessions.dispose()` runs. */
   private readonly bindings = new Map<Agent, SessionBinding>()
   private readonly retryHealth = new RetryHealth()
+  /** Seeding away from a provider that ran out of quota, and switching a Session that stopped on one (see `ProviderFailover`). */
+  private readonly providers: ProviderFailover
   private readonly ctx: Context
   /** Registers ordered `relay` and `notice` effect handlers that deliver to the main Session. */
   constructor(private readonly host: SessionsHost) {
     this.ctx = host.context
+    this.providers = new ProviderFailover({ context: host.context })
     this.agentDelivery = new AgentDelivery(host.context)
     // Deliver relays and notices to the main Session in the order they were queued.
     host.effects.handle('relay', ({ text }, requestId) => this.prompt(host.masterId, requestId, text, 'steer'), { ordered: true })
@@ -166,6 +171,7 @@ export class Sessions {
   /** Subscribes to host agent and session events so newly created sessions are decorated and model-budget retries are reflected in health. Call once at startup. */
   install(): void {
     const ctx = this.ctx
+    this.providers.install()
     ctx.on('agent/disposed', ({ agent }) => {
       this.release(agent)
       this.retryHealth.clear(agent.id); this.updateModelHealth()
@@ -216,7 +222,10 @@ export class Sessions {
     const ctx = this.ctx
     const agent = await this.open(id, cwd, role)
     const settings = this.host.store.settings()
-    await initializeRoleModel(ctx, agent, role === 'orchestrator' ? settings.eval.model : settings.executor.model)
+    // A provider that ran out of quota recently does not get a new Session's first request: the same model starts on a provider
+    // that still has quota (see `ProviderFailover`). An existing Session keeps the model it already runs on.
+    const configured = role === 'orchestrator' ? settings.eval.model : settings.executor.model
+    await initializeRoleModel(ctx, agent, await this.providers.preferred(configured))
     await this.decorate(agent)
     ctx.permissionPresets.set(agent.session, 'danger-full-access')
     // A worker Session shares its workspace with the person's own conversations, so its title must say what it is:
@@ -257,6 +266,11 @@ export class Sessions {
       this.ctx.logger.warn('dsh-superagent could not seed a Session\'s subagent model-selection policy: %s', String(error))
     }
   }
+  /**
+   * Switches `agent`'s Session to another provider that offers its current model after that provider's account quota ran out
+   * (see `ProviderFailover`); undefined when the failure chain has no provider left or the route does not resolve.
+   */
+  failover(agent: Agent): Promise<FailoverSwitch | undefined> { return this.providers.failover(agent) }
   /**
    * Resolves `id` to its live Agent, creating the Session when the store has none. A store that DSH cannot open is reopened
    * with backoff up to `SESSION_REOPEN_RETRIES` times: the common `jsonl flush` failure leaves a torn tail that the write path
@@ -539,5 +553,5 @@ export class Sessions {
     }
   }
   /** Releases prompt sections, skills, and tools registered by `Sessions` across all decorated agents. */
-  dispose(): void { for (const agent of [...this.bindings.keys()]) this.release(agent) }
+  dispose(): void { this.providers.dispose(); for (const agent of [...this.bindings.keys()]) this.release(agent) }
 }

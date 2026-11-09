@@ -13,6 +13,7 @@ import type { Settings } from '../policy.ts'
 import type { Store } from '../app/store.ts'
 import { Later, type Effects } from '../app/effects.ts'
 import { deliveryKey, resolveDelivery } from '../app/delivery-targets.ts'
+import { quotaExhausted, routeText, type FailoverSwitch } from '../app/provider-failover.ts'
 import { claimsWorkspace, conflicts, normalizePath, place, workspaceClient, type Active, type Peer, type Workspace } from './workspace.ts'
 import { executionRoot, p4Prepare, type Variable } from '../app/execution-environment.ts'
 import type { Sessions } from '../app/sessions.ts'
@@ -111,7 +112,7 @@ export interface ExecutorHost {
   readonly machine: Pick<Machine, 'stateDir'>
   readonly lifetime: AbortSignal
   /** Session manager for worker sessions and for relaying worker reports to the main Session. */
-  readonly sessions: Pick<Sessions, 'ensure' | 'prompt' | 'promptedId' | 'relay' | 'holds' | 'workerToolGap' | 'ensureModelSelectionPolicy'>
+  readonly sessions: Pick<Sessions, 'ensure' | 'prompt' | 'promptedId' | 'relay' | 'holds' | 'workerToolGap' | 'ensureModelSelectionPolicy' | 'failover' | 'notify'>
   closing(): boolean
   /** Whether processing is paused, which holds launches and input deliveries. */
   paused(): boolean
@@ -776,6 +777,9 @@ export class DshExecutor implements Executor {
       const assignment = ticket && runningAssignment(ticket)
       if (!ticket || !assignment || !liveTicket(ticket) || this.host.closing()) return
       if (this.retries(assignment.id, error)) { this.resumeAfter(ticket.id, assignment.id, error); return }
+      // An exhausted account quota is not retried on the same provider: the worker moves to another provider offering the same
+      // model and goes on, or the Ticket fails naming the route when no provider is left (docs/003).
+      if (quotaExhausted(error)) { void this.background(this.quotaFailover(ticket.id, assignment.id, agent, error)); return }
       void this.background(Promise.resolve().then(() => { this.failed(ticket.id, String(error)) }))
     }))
   }
@@ -857,6 +861,43 @@ export class DshExecutor implements Executor {
   private resumeAfter(ticketId: string, assignmentId: string, error: unknown): void {
     const tries = this.transient.get(assignmentId)!
     const text = `Your last turn failed for a passing reason (${String(error).slice(0, 200)}). Continue the assignment where it stopped.`
+    this.continueTurn(ticketId, assignmentId, text, `retry:${assignmentId}:${tries}`, TRANSIENT_BACKOFF_MS * 2 ** (tries - 1))
+  }
+  /**
+   * Moves a worker whose provider ran out of account quota to another provider that offers the same model and tells it to go on
+   * at once; with no provider left the Ticket fails naming the exhausted route, because the host never crosses a quota hard gate
+   * by swapping in a different model on its own (docs/003).
+   */
+  private async quotaFailover(ticketId: string, assignmentId: string, agent: Agent, error: unknown): Promise<void> {
+    const live = () => {
+      const stored = this.host.store.tickets.get(ticketId)
+      return stored && liveTicket(stored) && runningAssignment(stored)?.id === assignmentId ? stored : undefined
+    }
+    if (!live()) return
+    let switched: FailoverSwitch | undefined
+    try { switched = await this.host.sessions.failover(agent) } catch (failure) {
+      this.host.context.logger.warn('dsh-superagent could not move a Session to another provider after a quota failure: %s', String(failure))
+    }
+    if (!live()) return
+    if (!switched) {
+      const route = agent.model.current()
+      this.failed(ticketId, `The model provider refused the request for an exhausted account quota (${String(error)}). `
+        + `No other provider offers ${route ? routeText(route) : 'the model'}, so the Ticket stops rather than change models by itself; `
+        + 'a person must top up the account or configure another model.')
+      return
+    }
+    this.host.sessions.notify(`failover:${ticketId}`, { provider_failover: { ticket_id: ticketId, from: routeText(switched.from),
+      to: routeText(switched.to), at: now() } }, `Ticket ${ticketId} switched from ${routeText(switched.from)} to ${routeText(switched.to)} `
+      + `after ${switched.from.provider} ran out of account quota`)
+    this.continueTurn(ticketId, assignmentId, `Your last turn stopped because provider ${switched.from.provider} is over its account `
+      + `quota. The host switched this Session to ${routeText(switched.to)}, which offers the same model; continue the assignment where it stopped.`,
+      `failover:${assignmentId}:${switched.to.provider}`, 0)
+  }
+  /**
+   * Tells a worker whose turn stopped to go on, once processing and a worker slot allow it. `requestId` identifies the one
+   * delivery, so rescheduling or a restart cannot duplicate the message.
+   */
+  private continueTurn(ticketId: string, assignmentId: string, text: string, requestId: string, delayMs: number): void {
     this.resuming.add(assignmentId)
     const go = () => {
       if (this.host.closing()) return
@@ -870,11 +911,12 @@ export class DshExecutor implements Executor {
         if (!(failure instanceof Later)) throw failure
         this.after(SLOT_WAIT_MS, go); return
       }
-      const sent = this.host.sessions.prompt(sessionId, `retry:${assignmentId}:${tries}`, text, 'queue')
+      const sent = this.host.sessions.prompt(sessionId, requestId, text, 'queue')
       void this.background(sent.finally(() => { if (waking) this.slots.free(ticketId); this.resuming.delete(assignmentId) })
         .catch(failure => { this.failed(ticketId, String(failure)) }))
     }
-    this.after(TRANSIENT_BACKOFF_MS * 2 ** (tries - 1), go)
+    if (delayMs > 0) this.after(delayMs, go)
+    else go()
   }
   /** Schedules `then` to run after `ms` milliseconds unless `dispose()` is called first. */
   private after(ms: number, then: () => void): void {
