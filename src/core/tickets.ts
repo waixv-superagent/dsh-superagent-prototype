@@ -75,7 +75,10 @@ export class Tickets extends EnginePart {
     const assignment = this.newAssignment(ticket)
     this.repo.tickets.save(ticket)
     for (const triggerId of triggerIds) for (const ref of this.repo.triggers.get(triggerId)?.threads ?? []) this.subscribe(id, ref)
-    if (outcome.acknowledgement && primary) this.replies.acknowledgeAccepted(ticket, primary, outcome.acknowledgement)
+    // The receipt is the only message an accept sends, so it names every ticket the same Decision opened: a person sees
+    // the whole batch in the conversation instead of only the first ticket and has to find the rest in the panel.
+    if (outcome.acknowledgement && primary) this.replies.acknowledgeAccepted(ticket, primary, outcome.acknowledgement,
+      this.repo.decisions.get(decisionId)?.ticketIds)
     this.options.executor.start(this.require(id), assignment)
     this.emit('ticket.created', { ticketId: id, decisionId, strength: mandate.strength })
   }

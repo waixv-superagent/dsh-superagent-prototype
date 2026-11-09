@@ -53,7 +53,8 @@ export type AssessmentOutcome =
     name?: string; note?: string; paths?: string[]; category?: 'bug' | 'feature'; target?: string; ticketKind?: TicketKind
     /**
      * The other separable goals of the same message, each opened as its own ticket under this Decision. One source message
-     * becomes one Decision and 1–4 tickets; only the first carries the receipt, and every part follows the same threads.
+     * becomes one Decision and 1–4 tickets; only the first carries the receipt, which names every ticket this Decision
+     * opened, and every part follows the same threads.
      */
     parts?: AcceptPart[] }
   /**
