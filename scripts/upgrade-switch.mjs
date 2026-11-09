@@ -153,10 +153,20 @@ function killTree (pid) {
   else { try { process.kill(pid, 'SIGKILL') } catch { /* Already gone. */ } }
 }
 
+/**
+ * The log for the start command's output. The launcher that started this switch already redirects its own stdout and
+ * stderr to the same file, and on Windows a second open of that file fails with EBUSY; the child then inherits the
+ * handles the switch already has, which are that log.
+ */
+export function openSwitchLog (path, open = openSync) {
+  if (!path) return 'ignore'
+  try { return open(path, 'a') } catch { return 'inherit' }
+}
+
 /** The real effects: files, processes and the management API on loopback. */
 export function systemIo (plan) {
   const started = []
-  const log = plan.log ? openSync(plan.log, 'a') : 'ignore'
+  const log = openSwitchLog(plan.log)
   return {
     now: () => new Date().toISOString(),
     exists: path => existsSync(path),
@@ -207,11 +217,28 @@ export function systemIo (plan) {
 }
 function readText (path) { try { return readFileSync(path, 'utf8') } catch { return '' } }
 
+/**
+ * The status a switch leaves when it dies before writing one, so the panel and the next host do not wait in `switching`
+ * forever: the steps the host already recorded carry over, minus the stop step it did not finish.
+ */
+export function failedStatus (plan, error, now = () => new Date().toISOString()) {
+  return { state: 'failed', sha: plan.sha, from: plan.from ?? null, startedAt: plan.startedAt ?? now(), endedAt: now(),
+    steps: Array.isArray(plan.steps) ? plan.steps.filter(item => item.name !== 'stop') : [], error: String(error), rolledBack: false }
+}
+
 const invoked = process.argv[1] ? pathToFileURL(process.argv[1]).href.toLowerCase() === import.meta.url.toLowerCase() : false
 if (invoked) {
-  const plan = parsePlan(readFileSync(process.argv[2], 'utf8'))
-  runSwitch(plan, systemIo(plan)).then(status => { process.exitCode = status.state === 'done' ? 0 : 1 }, error => {
+  let plan
+  const record = error => {
     console.error(String(error?.stack ?? error))
+    // A setup failure happens before runSwitch, so only this path can still tell the panel the switch did not run.
+    try {
+      if (plan) writeFileSync(plan.statusFile, JSON.stringify(failedStatus(plan, String(error?.message ?? error)), null, 2) + '\n')
+    } catch { /* Nothing to record. */ }
     process.exitCode = 1
-  })
+  }
+  try {
+    plan = parsePlan(readFileSync(process.argv[2], 'utf8'))
+    runSwitch(plan, systemIo(plan)).then(status => { process.exitCode = status.state === 'done' ? 0 : 1 }, error => record(error))
+  } catch (error) { record(error) }
 }

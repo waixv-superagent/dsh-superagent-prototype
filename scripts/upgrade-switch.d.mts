@@ -47,4 +47,8 @@ export interface SwitchIo {
 }
 export function parsePlan(text: string): Required<Pick<SwitchPlan, 'exitTimeoutMs' | 'healthTimeoutMs' | 'wasPaused' | 'holdFile'>> & SwitchPlan
 export function runSwitch(plan: SwitchPlan, io: SwitchIo): Promise<SwitchStatus>
+/** Opens the start command's log, or inherits the switch's own handles when the launcher already holds that file. */
+export function openSwitchLog(path: string | undefined, open?: (path: string, flags: string) => number): number | 'inherit' | 'ignore'
+/** The status a switch records when it dies before runSwitch could write one. */
+export function failedStatus(plan: SwitchPlan, error: string, now?: () => string): SwitchStatus
 export function systemIo(plan: SwitchPlan): SwitchIo

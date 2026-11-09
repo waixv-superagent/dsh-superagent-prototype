@@ -18,6 +18,8 @@ const STEP_TIMEOUT_MS = 20 * 60_000
 const FETCH_TIMEOUT_MS = 2 * 60_000
 const MAX_COMMITS = 30
 const LOG_TAIL = 4_000
+/** A switch a starting host finds in progress is normally finalizing; only one this old has died without writing its outcome. */
+const SWITCH_STALE_MS = 20 * 60_000
 
 /** The steps of one update, in order; the last four run in the switch process after this host stopped. */
 export const UPGRADE_STEPS = ['fetch', 'worktree', 'install', 'typecheck', 'test', 'build', 'pause', 'idle', 'stop', 'backup', 'replace',
@@ -203,8 +205,14 @@ export class Upgrade {
     if (!text) return null
     try {
       const run = JSON.parse(text) as UpgradeRun
-      // A switch that was still `switching` when this host started has ended without a word: the switch process died.
-      return run.state === 'switching' ? { ...run, state: 'down', error: run.error ?? 'The switch process stopped before it finished' } : run
+      // A host that starts while the switch is still finalizing finds `switching` and must not call it dead: the switch
+      // starts this host and only then writes the outcome. One this old really has ended without a word.
+      if (run.state !== 'switching') return run
+      const started = Date.parse(run.startedAt)
+      if (Number.isFinite(started) && this.now() - started > SWITCH_STALE_MS) {
+        return { ...run, state: 'down', error: run.error ?? 'The switch process stopped before it finished' }
+      }
+      return run
     } catch { return null }
   }
   start(): void {
@@ -217,6 +225,12 @@ export class Upgrade {
   stop(): void { this.stopped = true; if (this.timer) clearInterval(this.timer) }
 
   view(): UpgradeView {
+    // While a switch is finishing, the file it writes is the source of truth: this host started before the switch wrote
+    // its outcome, so a cached `switching` must give way to the final state.
+    if (this.current?.state === 'switching') {
+      const latest = this.readLast()
+      if (latest && latest.state !== 'switching') this.current = latest
+    }
     const installed = installedCommit(this.run.read, this.install)
     const busy = !!this.current && ['preparing', 'waiting', 'switching'].includes(this.current.state)
     return { enabled: this.enabled, installed, remote: this.remote, behind: this.behind, more: this.more,
