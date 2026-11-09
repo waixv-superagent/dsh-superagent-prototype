@@ -19,11 +19,11 @@ The Web panel's request form is a Source too: it submits as the deployment's ope
 
 ### Subscriptions: continuing existing work
 
-Every message on a subscribed Thread reaches its subscribed Tickets as context, including messages from bots and CI. This delivery bypasses the gate and grants no new authority. Each Ticket remains limited by its Mandate.
+Every message on a subscribed Thread reaches the subscribed Tickets that have neither delivered nor ended as context, including messages from bots and CI. This delivery bypasses the gate and grants no new authority. Each Ticket remains limited by its Mandate.
 
 A person's message on a Ticket's own Thread belongs to that Ticket's Executor to decide. The same applies when the main Session attaches a message to a Ticket. While an Executor owns the message, it takes no Eval and gets no Decision. Each Executor either handles the request within its Ticket's scope or hands it back for routing elsewhere.
 
-Ownership continues while the Ticket is live, even if a person removes its Subscription. It also covers an ended Ticket that was not stopped by a person and has the message waiting to resume it.
+Ownership continues while the Ticket is live and has not delivered, even if a person removes its Subscription. It also covers a message the main Session attaches to an ended Ticket and that waits to resume it.
 
 The main Session receives a follow-up notice. While an Executor owns the message, the main Session may only stop work on the person's request; accept, attach, ignore and requeue are refused. A stop still passes through the gate with the follow-up strength described below.
 
@@ -132,7 +132,7 @@ A condition on what the Executor may do with its own result, such as when it may
 
 ## Resume and stop
 
-An ended Ticket keeps its Mandate. A person's message on one of its own Threads can resume the same work without a new Eval or Decision, regardless of who sent it. Bots and CI do not wake ended Tickets. The Executor decides whether the request fits the scope and ends the round if it does not.
+An ended Ticket keeps its Mandate. A person's message on one of its own Threads no longer resumes it: the message is assessed like any other, and the main Session resumes the Ticket only by attaching that message to it, without a new Eval or Decision, since the message continues work the Mandate already covers. A Ticket that delivered its result (`ready`) or found nothing to do (`dropped`) takes no new message from its Threads either, and bots and CI never wake a Ticket that has ended. The Executor decides whether an attached request fits the scope and ends the round if it does not.
 
 A person can also write in the Ticket's worker Session itself, from the panel. That message reaches no Source and leaves no Trigger behind, so the person's act is the authorization: the Ticket resumes under the same Mandate, with no new Decision, and the worker's tools and reports work again for that turn. A Ticket a person stopped stays ended.
 
@@ -140,7 +140,7 @@ Only three operations change a Mandate: accept creates it, a person's stop withd
 
 ### Revalidation before resume
 
-The Source must still listen to the original Thread. The remaining checks depend on the Mandate's basis:
+The Source must still listen to the Thread the attached message came from. The remaining checks depend on the Mandate's basis:
 
 - An explicit follow-up Mandate passes.
 - An inferred Mandate needs `auto` mode and its matched rules still enabled.

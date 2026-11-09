@@ -612,6 +612,14 @@ export const completedArchived = (ticket: Pick<Ticket, 'ended'>, now = new Date(
   && Date.parse(ticket.ended.at) + COMPLETED_RETENTION_DAYS * 24 * 60 * 60 * 1000 <= Date.parse(now)
 /** Whether a ticket is open: it has not ended. */
 export const liveTicket = (ticket: Pick<Ticket, 'ended'>): boolean => !ticket.ended
+/**
+ * Whether a ticket has delivered its answer or ended, so its Threads no longer wake it: its worker reported `ready`
+ * (delivered work, an analysis dossier, or an answer) or `dropped` (nothing to do), or the ticket ended. A later message
+ * on one of its Threads is assessed like any other; the main Session continues that ticket only by attaching the message
+ * to it, and new work starts a new ticket (docs/003).
+ */
+export const deliveredTicket = (ticket: Pick<Ticket, 'ended' | 'assignments'>): boolean =>
+  !!ticket.ended || ticket.assignments.some(assignment => assignment.report?.state === 'ready' || assignment.report?.state === 'dropped')
 /** Whether a delivered ticket waits for a person's local verification. */
 export const awaitsVerification = (ticket: Pick<Ticket, 'verification'>): boolean =>
   ticket.verification?.state === 'pending'

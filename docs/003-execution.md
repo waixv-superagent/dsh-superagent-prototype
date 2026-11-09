@@ -113,13 +113,13 @@ Reviews without a body, such as approvals, also arrive as Triggers and can wake 
 ## How a Ticket ends
 
 - **Ready without delivered work:** a `ready` Report with no changelist and no review ends the Ticket as completed. Analysis answers and other work with nothing to run locally end here.
-- **Ready with delivered work:** a `ready` Report that shelves a changelist or names a review does not end the Ticket. It records `verification: pending`, keeps the person's local check (the P4.5 gate, defined in the gates document) as a parallel gate, and starts the host's automatic pipeline follow-up on a p4 Ticket. The host polls Swarm and Jenkins itself: a new failure wakes the worker with the failing checks and Jenkins errors (a worker can ask Swarm to rerun the same version with `orchestrator_pipeline_rerun`, and a stuck failure asks a person), a green review queues one "Swarm 已通过，待人工审核" message and goes blocked+manual, an approval moves to "Swarm 已审核通过，等待提交", and the submit completes the Ticket with `verification.by: pipeline`. Returning the local check starts a new Assignment with the person's note as its first Input; passing it is recorded without ending the Ticket, because the submit is still the end. A git backend has no such follow-up: its local check ends the Ticket. A merged pipeline is history once a person's later message on the Ticket's Threads resumes it: that round is not pipeline work again, ends with its own `ready` or `dropped` Report unless it delivers new work, and a new delivery drops the merged observation and reopens the local check. A completed Ticket leaves the board after seven days and stays findable by id and search.
-- **Nothing to do:** an Executor that finds no work for a person to act on, such as a request that does not reproduce or is superseded, reports `dropped`. The Ticket ends without a message, unless a matched rule asks for one, and a person's later message on its Threads resumes it.
+- **Ready with delivered work:** a `ready` Report that shelves a changelist or names a review does not end the Ticket. It records `verification: pending`, keeps the person's local check (the P4.5 gate, defined in the gates document) as a parallel gate, and starts the host's automatic pipeline follow-up on a p4 Ticket. The host polls Swarm and Jenkins itself: a new failure wakes the worker with the failing checks and Jenkins errors (a worker can ask Swarm to rerun the same version with `orchestrator_pipeline_rerun`, and a stuck failure asks a person), a green review queues one "Swarm 已通过，待人工审核" message and goes blocked+manual, an approval moves to "Swarm 已审核通过，等待提交", and the submit completes the Ticket with `verification.by: pipeline`. Returning the local check starts a new Assignment with the person's note as its first Input; passing it is recorded without ending the Ticket, because the submit is still the end. A git backend has no such follow-up: its local check ends the Ticket. A merged pipeline is history once the main Session resumes the Ticket by attaching a later message: that round is not pipeline work again, ends with its own `ready` or `dropped` Report unless it delivers new work, and a new delivery drops the merged observation and reopens the local check. A completed Ticket leaves the board after seven days and stays findable by id and search.
+- **Nothing to do:** an Executor that finds no work for a person to act on, such as a request that does not reproduce or is superseded, reports `dropped`. The Ticket ends without a message, unless a matched rule asks for one, and a later message on its Threads is assessed as new work; only one the main Session attaches resumes it.
 ### Pull requests
 
 A Ticket follows the pull request it started from once its Executor reports it. It also follows each pull request opened from its branch once reported by the Executor or found by the GitHub Source. Reopened pull requests are followed again.
 
-The Ticket is done when none of the pull requests it opened remain open. If it opened none, all pull requests it follows must be closed. It then ends with the outcome of the last relevant close and keeps its Subscriptions, allowing a later human comment to resume it.
+The Ticket is done when none of the pull requests it opened remain open. If it opened none, all pull requests it follows must be closed. It then ends with the outcome of the last relevant close and keeps its Subscriptions; a later message there is assessed as new work, and only one the main Session attaches resumes the Ticket.
 
 A close does not end the Ticket while resumed, retried or recovered work is unfinished. It also waits if the Executor acknowledged or answered a follow-up it owns but has not since made a non-progress Report or ended a turn after reading that message. A later `ready` Report ends the Ticket once the same pull-request completion rule is satisfied.
 
@@ -131,11 +131,13 @@ Chat Channels receive one final notice about the pull-request outcome. GitHub al
 
 ### Follow-ups and context Threads
 
-The Executor decides human follow-ups on its Ticket's own Threads. It handles in-scope requests and hands back requests beyond its scope or for another Ticket. Once no Executor owns the message, it becomes a candidate for the main Session. The main Session may otherwise act on the follow-up only to stop work at the person's request.
+The Executor decides human follow-ups on its Ticket's own Threads while the Ticket has neither delivered nor ended. It handles in-scope requests and hands back requests beyond its scope or for another Ticket. Once no Executor owns the message, it becomes a candidate for the main Session. The main Session may otherwise act on the follow-up only to stop work at the person's request.
+
+A Ticket that delivered or ended takes no new message from its Threads: such a message is assessed like any other, and the main Session continues that Ticket only by attaching the message to it, while new work starts a new ticket.
 
 An Input counts as read after the Session takes it into a step and subsequently reports or ends a turn. When a Ticket ends, unread messages that were not acknowledged, answered or handed back return to Eval, as described in [002 Authorization](002-authorization.md). Read messages left without action, such as thanks, do not.
 
-Threads followed only for context still deliver messages, but do not give the Ticket ownership of human follow-ups or resume ended Tickets. Those messages can be assessed independently.
+Threads followed only for context still deliver messages while the Ticket has not delivered or ended, but do not give the Ticket ownership of human follow-ups. Those messages can be assessed independently.
 
 Sources poll subscribed Threads while a live Ticket subscribes, and for two weeks after the later of the last Trigger and the subscribing Tickets' end. Afterwards, messages arrive only through ordinary intake: GitHub notifications or Feishu live events.
 
@@ -227,7 +229,7 @@ Sources keep recording Triggers, and a running Executor turn is not interrupted.
 
 A person on a Source's allowed list can set the pause from the Source's own conversation. In Feishu a whole message of `挂起` pauses processing and `恢复` resumes it, even while processing is paused; the Source answers in the same thread, and that control message is not recorded as a Trigger. The other messages sent while paused wait as usual.
 
-A person's message to an ended Ticket waits: the first pass after the pause resumes the Ticket, if its Mandate holds under the Policy then.
+A message attached to an ended Ticket waits: the first pass after the pause resumes the Ticket, if its Mandate holds under the Policy then.
 
 An Eval in progress does not expire during a pause; its deadline moves later by the pause's length.
 ### Invalid configuration

@@ -44,10 +44,10 @@ export class Engine {
   // Sources
 
   /**
-   * A Source's request to take in a Trigger: store it once, fan it out to the tickets that subscribe to its Threads (to an
-   * ended one only a person's message, which resumes it at once unless processing is paused, and to none a person stopped),
-   * and queue it for Eval on its primary Thread unless a ticket's worker decides it (see `followupOwners`).
-   * Triggers that arrive while an Eval of that Thread runs wait together for the next one.
+   * A Source's request to take in a Trigger: store it once, fan it out to the tickets that subscribe to its Threads and have
+   * neither delivered nor ended (a ticket that did either takes no new message there; the main Session continues it by
+   * attaching one, docs/003), and queue it for Eval on its primary Thread unless a ticket's worker decides it (see
+   * `followupOwners`). Triggers that arrive while an Eval of that Thread runs wait together for the next one.
    */
   receive(trigger: Trigger): ReceiveResult { return this.repo.atomic(() => this.intake.receive(trigger)) }
   /**
@@ -85,8 +85,8 @@ export class Engine {
 
   /**
    * Requeues overdue Evals up to `REQUEUES` times before recording `unavailable` (undelivered Evals never expire), starts the
-   * Evals of Threads whose queued Triggers wait, and resumes ended tickets a person's message reached while processing was
-   * paused. While processing is paused, nothing expires: each Eval in progress notes when the pause began, and its deadline
+   * Evals of Threads whose queued Triggers wait, and resumes ended tickets whose attached message waited for processing to
+   * resume. While processing is paused, nothing expires: each Eval in progress notes when the pause began, and its deadline
    * moves forward by the pause's length once processing resumes. Each Eval and each ticket update takes one transaction.
    */
   evaluateDue(): void {

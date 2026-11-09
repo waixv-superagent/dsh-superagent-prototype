@@ -15,7 +15,7 @@ P1 的 S4–S6 落了一部分领域机制（等待分类、目标改派、验�
 | 建议 | 本单落点 | 强制点 | 未做 |
 | --- | --- | --- | --- |
 | S1 方案过程化与选项自含 | `fix` / `analysis` / `design` 三套模板；`PlanOption.description`；设计型必须 2–4 个带描述的选项；grill 文档写进 `work` 提示词 | `missingPlanLabels` 按模板校验；设计型缺选项/描述被拒 | 单独的 grill 文档工具；面板之外的移动端排版 |
-| S2 线程即工单与接单回执 | 同话题输入继续归原单（已有订阅）；接单回执改 2–3 行并由主机补工单号；`orchestrator_route` 的 `parts` 把一个消息的 2–4 个目标拆成同 Decision 的子单，只有主单发回执 | 一个 Trigger 一个 Decision、1–4 张单；回执缺失渠道时回退到工单渠道 | 跨目标的一批输入按子单精确分流（当前所有子单共享话题订阅） |
+| S2 线程即工单与接单回执 | 同话题输入在交付前继续归原单（已有订阅）；单子交付（`ready`）或结束（`dropped` 等）后同话题消息转入评估，主会话 `attach` 续做或开新单；接单回执改 2–3 行并由主机补工单号；`orchestrator_route` 的 `parts` 把一个消息的 2–4 个目标拆成同 Decision 的子单，只有主单发回执 | 一个 Trigger 一个 Decision、1–4 张单；回执缺失渠道时回退到工单渠道 | 跨目标的一批输入按子单精确分流（当前所有子单共享话题订阅） |
 | S3 交付完整性闸 | ready 前重读交付事实：PR 必须仍 open，p4 CL 必须仍 pending，review 必须仍可读；任何一项不成立直接拒绝 ready | `orchestrator_report` 的 ready 分支 | 任意文档链接的存活探测；CL「过期」的深度比对（需要同步基线） |
 | S4 状态语义 | `waitingOf`：每单一句「等谁 / 在做什么 / 唯一已知截止」，进入 ticket 卡片与 `orchestrator_read` | 由现有 stage 机派生，不改状态机 | 三卡注意力预算/每日摘要：依赖尚未设计的注意力子系统 |
 | S5 路由错配 | `orchestrator_redispatch`：worker 按真实目标把票改派到配置的仓库/depot，无需人点；`redispatch` 记录目标 | 未配置目标被拒并点名；改派换 Assignment | 016 的一项目一实例/独立 Router：仍是后续设计 |

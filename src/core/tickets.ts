@@ -989,10 +989,12 @@ export class Tickets extends EnginePart {
     else if (latest?.state === 'pending' && !waitsForPerson(ticket)) this.options.executor.start(ticket, latest)
   }
   /**
-   * Resume an ended ticket under its unchanged Mandate when a person's message on one of its Threads waits for it: no Eval
-   * and no Decision, since nothing new is authorized. One whose Mandate the current Policy no longer holds stays ended and
-   * takes nothing (see `refuse`). While processing is paused the message waits, and the first pass after the pause resumes
-   * the ticket under the Policy then. Reads the ticket afresh, so it is idempotent and leaves an already-resumed ticket alone.
+   * Resume an ended ticket under its unchanged Mandate when a person's message the main Session attached to it waits: no Eval
+   * and no Decision, since the message continues work already authorized. A person's message on one of its own Threads no
+   * longer resumes it (docs/003): such a message is assessed, and the main Session continues the ticket only by attaching it.
+   * One whose Mandate the current Policy no longer holds stays ended and takes nothing (see `refuse`). While processing is
+   * paused the message waits, and the first pass after the pause resumes the ticket under the Policy then. Reads the ticket
+   * afresh, so it is idempotent and leaves an already-resumed ticket alone.
    */
   wake(ticketId: string): void {
     const ticket = this.repo.tickets.get(ticketId)

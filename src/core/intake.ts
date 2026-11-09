@@ -1,6 +1,6 @@
 /** Trigger ingestion, thread correlation, subscription fan-out, and evaluation queuing. */
 import { key } from './ids.ts'
-import { isoTime, liveTicket, threadKey } from './model.ts'
+import { deliveredTicket, isoTime, threadKey } from './model.ts'
 import type { Ticket, Trigger } from './model.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { pendingPlan, planChoice, planDecision } from './plan.ts'
@@ -11,9 +11,8 @@ export type ReceiveResult = 'stored' | 'duplicate' | 'filtered'
 
 /**
  * Ingests incoming triggers from Sources, deduplicating and filtering them against SourceScope before recording thread correlations.
- * Fans listened triggers out to subscribed tickets via Tickets and queues for Eval, on its primary thread, every trigger no
- * ticket's worker decides (see `followupOwners`).
- * Engine delegates trigger reception to this part.
+ * Fans listened triggers out to the subscribed tickets that have neither delivered nor ended, and queues for Eval, on its
+ * primary thread, every trigger no ticket's worker decides (see `followupOwners`). Engine delegates trigger reception to this part.
  */
 export class Intake extends EnginePart {
   constructor(options: EngineOptions, private readonly tickets: Tickets) { super(options) }
@@ -39,11 +38,11 @@ export class Intake extends EnginePart {
       thread.correlated = [...new Set([...thread.correlated, ...keys.filter(other => other !== thread.key)])]
       for (const ticketId of thread.subscriptions) {
         const ticket = this.repo.tickets.get(ticketId)
-        // Only a person's message on a non-context thread resumes an ended ticket; bots and CI do not (the Executor re-reads
-        // threads when it resumes), and a human-stopped ticket receives nothing because its Mandate was withdrawn.
+        // A ticket that delivered or ended takes no new message from its Threads: the message is assessed like any other,
+        // and the main Session continues that ticket only by attaching it, while new work starts a new ticket (docs/003).
+        // A ticket a person stopped receives nothing either, since its Mandate was withdrawn.
+        if (!ticket || deliveredTicket(ticket)) continue
         const followed = !!thread.context?.includes(ticketId)
-        const resumes = trigger.human && ticket?.ended?.by !== 'human' && !followed
-        if (!ticket || (!liveTicket(ticket) && !resumes)) continue
         reached.set(ticketId, { ticket, context: followed && (reached.get(ticketId)?.context ?? true) })
       }
       this.repo.threads.save(thread)

@@ -229,7 +229,10 @@ async function drive(host: Host) {
   await runtime.pump()
   await runtime.idle()
   await run(workerA, 'orchestrator_report', { state: 'ready', summary: 'Done.' })
-  await runtime.receive(feishu('2', '再加一个按钮', { mentions: [], root_id: 'om_1' }))
+  const again = feishu('2', '再加一个按钮', { mentions: [], root_id: 'om_1' })
+  await runtime.receive(again)
+  // The ended ticket takes no message from its thread: the main Session continues it by attaching that message.
+  await run(master, 'orchestrator_route', { decisions: [{ kind: 'attach', ticket_id: a, trigger_id: again.id }] })
   await vi.waitFor(async () => {
     await runtime.pump()
     expect(runtime.store.tickets.get(a)!.inputs.some(input => input.kind === 'resumed')).toBe(true)
