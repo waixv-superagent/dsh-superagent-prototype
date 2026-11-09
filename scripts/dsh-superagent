@@ -3,7 +3,8 @@
 
 `status`, `start`, and `restart` exit 0 while the service runs normally; 1 when it is stopped, duplicated, unreachable, or
 reporting a runtime error, which `restart` may fix; 2 when it runs while a component such as a Source reports an error;
-and 3 when it runs and waits for setup. A restart fixes neither 2 nor 3: they need a person.
+and 3 when it runs and waits for setup. A restart fixes neither 2 nor 3: they need a person. `restart` also exits 1
+without stopping anything while a P0 Ticket is in a turn after `--p0-wait` seconds; `--now` restarts anyway (docs/006).
 """
 
 import argparse
@@ -89,15 +90,22 @@ def state(url):
         # Keys omitted by another version read as empty so the service is not mistaken for unreachable.
         health, setup = value.get('health') or {}, value.get('setup') or {}
         entries = {name: entry if isinstance(entry, dict) else {} for name, entry in health.items()}
+        # The P0 Tickets whose worker Session is in a turn, which a restart must not cut off. None when the host is older
+        # than the field, so the restart says it cannot wait rather than reading "no P0 work" into a missing answer.
+        active = value.get('active')
+        reported = active.get('p0') if isinstance(active, dict) else None
+        p0 = [{'id': str(item.get('id', '')), 'title': str(item.get('title', ''))} for item in reported
+              if isinstance(item, dict)] if isinstance(reported, list) else None
         return {'health': {name: entry.get('state') for name, entry in entries.items()},
                 'errors': {name: str(entry.get('detail', '')) for name, entry in entries.items() if entry.get('state') == 'error'},
-                'setup': setup.get('problem'), 'feishu': setup.get('feishuProblem')}
+                'setup': setup.get('problem'), 'feishu': setup.get('feishuProblem'), 'p0': p0}
     except (OSError, ValueError, AttributeError):
         return None
 
 
 PART_ERROR = 2
 SETUP_WAITS = 3
+P0_POLL = 2
 
 
 def runtime_up(current):
@@ -128,6 +136,38 @@ def status(args):
                       'errors': current and current['errors'], 'setup': current and current['setup'],
                       'feishu': current and current['feishu']}, ensure_ascii=False, indent=2))
     return outcome(pids, current)
+
+
+def wait_for_p0(args):
+    """Wait while a P0 Ticket has a worker Session in a turn, so a restart does not cut its answer off.
+
+    Returns whether the restart may go on: False when a P0 Ticket is still in a turn after `--p0-wait` seconds.
+    """
+    deadline = time.monotonic() + args.p0_wait
+    announced = None
+    while True:
+        current = state(args.url)
+        # Nothing answers, so nothing can be interrupted; the restart repairs it.
+        if current is None:
+            return True
+        p0 = current['p0']
+        if p0 is None:
+            print('The host does not report running P0 Tickets, so this restart cannot wait for them.', file=sys.stderr)
+            return True
+        if not p0:
+            if announced:
+                print('No P0 Ticket is in a turn any more.', flush=True)
+            return True
+        names = ', '.join(f"{item['id'][:8]} {item['title']}".strip() for item in p0)
+        count = f'{len(p0)} P0 Ticket' if len(p0) == 1 else f'{len(p0)} P0 Tickets'
+        if names != announced:
+            print(f'Waiting for {count} in a turn: {names}', flush=True)
+            announced = names
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            print(f'Refusing to restart: {count} still in a turn after {args.p0_wait:g} s: {names}', file=sys.stderr)
+            return False
+        time.sleep(min(P0_POLL, remaining))
 
 
 def stop(args, intentional=True):
@@ -219,9 +259,15 @@ def main():
                         help='Graceful shutdown timeout in seconds; running Executor Sessions finish their step first.')
     parser.add_argument('--respect-stop', action='store_true',
                         help='For monitoring: never start/restart after an intentional stop.')
+    parser.add_argument('--p0-wait', type=float, default=600,
+                        help='Seconds a restart waits for a P0 Ticket in a turn before refusing it; 0 turns the wait off.')
+    parser.add_argument('--now', action='store_true',
+                        help='Restart without waiting for a P0 Ticket in a turn.')
     args = parser.parse_args()
     if args.timeout <= 0 or args.stop_timeout <= 0:
         parser.error('--timeout and --stop-timeout must be positive')
+    if args.p0_wait < 0:
+        parser.error('--p0-wait must not be negative')
     if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]*', args.profile):
         parser.error('--profile must be a DSH profile name')
     os.umask(0o077)
@@ -236,6 +282,15 @@ def main():
         if args.action == 'status':
             return status(args)
         if args.action in ('stop', 'restart'):
+            # A restart returns the service as it was, so it waits for P0 work a person is waiting on; `--now` says they
+            # want the restart instead. A stop is how a person ends work now, so it never waits (docs/006).
+            if args.action == 'restart' and not args.now and args.p0_wait > 0:
+                # Refuse a duplicate before waiting on it: two instances are an error to fix, not work to wait for.
+                if len(processes(args.profile)) > 1:
+                    raise RuntimeError('Multiple dsh-superagent processes found; refusing to choose one.')
+                if not wait_for_p0(args):
+                    print('Rerun with --now to restart anyway, or wait until the P0 Ticket finishes.', file=sys.stderr)
+                    return 1
             # Only a stop keeps automatic recovery off; a restart whose stop timed out leaves it on.
             stop(args, intentional=args.action == 'stop')
         if args.action in ('start', 'restart'):

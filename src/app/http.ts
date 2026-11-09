@@ -49,7 +49,7 @@ import { overview } from './views/overview.ts'
 import { settingsView } from './views/settings.ts'
 import { sourcesStatus, type SetupState } from './views/sources.ts'
 import { decisionList, search, threadDetail, threadList } from './views/threads.ts'
-import { executorLoad, ticketDetail, ticketList, ticketSearch } from './views/tickets.ts'
+import { executorLoad, runningP0, ticketDetail, ticketList, ticketSearch } from './views/tickets.ts'
 import { ticketGraph } from './views/graph.ts'
 import { reproPage } from './views/repro.ts'
 import { ticketRepro } from './views/ticket-repro.ts'
@@ -159,6 +159,9 @@ export function stateView(runtime: HttpHost) {
   const settings = runtime.store.settings()
   return { setup: setupView(runtime), load: { ...executorLoad(runtime.store, runtime.executor.activeCount()),
     maxWorkers: settings.executor.maxWorkers },
+    // What a restart of the service would cut off now: a P0 Ticket's worker Session is in a turn. The service script
+    // waits on it before restarting, so a restart does not break a P0 answer a person is waiting for (docs/006).
+    active: { p0: runningP0(runtime.store) },
     masterId: runtime.masterId, paused: settings.paused, health: runtime.health, watchdog: runtime.watchdog.status(),
     ...runtime.stallWatch ? { stall: runtime.stallWatch.status() } : {} }
 }

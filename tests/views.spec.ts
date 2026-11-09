@@ -9,7 +9,7 @@ import { SourceRegistry } from '../src/sources/registry.ts'
 import { feishuKind } from '../src/sources/feishu.ts'
 import { githubKind } from '../src/sources/github.ts'
 import { snapshot, threadSummary, ticketSummary, triggerView } from '../src/app/views/records.ts'
-import { basisFacts, ticketDetail, ticketRow, ticketSearch } from '../src/app/views/tickets.ts'
+import { basisFacts, runningP0, ticketDetail, ticketRow, ticketSearch } from '../src/app/views/tickets.ts'
 import { ticketGraph, ticketRelations } from '../src/app/views/graph.ts'
 import { search, threadDetail } from '../src/app/views/threads.ts'
 import { droppedReplies, sourcesStatus } from '../src/app/views/sources.ts'
@@ -303,6 +303,20 @@ it('archives completed Tickets from the board after seven days but keeps them in
   expect(page.ended.map(ticket => ticket.title)).toEqual(['新交付'])
   expect(page.endedStats).toMatchObject({ completed: 1, archived: 1 })
   expect(ticketSearch(host, '7001').tickets[0]).toMatchObject({ archived: true, ticket: { title: '旧交付' } })
+})
+
+it('names the P0 Tickets a restart would cut off, and only work that is in a turn now', () => {
+  const running = { id: 'a1', state: 'running' as const, createdAt: at, startedAt: at }
+  const urgent = { level: 'P0' as const, source: 'human' as const, at }
+  live('urgent'); store.tickets.save({ ...store.tickets.get('urgent')!, title: '主线崩溃', priority: urgent, assignments: [running] })
+  // A P0 Ticket queued for a slot and one between turns lose nothing a restart does not resume, so neither is listed.
+  live('queued'); store.tickets.save({ ...store.tickets.get('queued')!, title: '排队中', priority: urgent,
+    assignments: [{ ...running, state: 'pending' }] })
+  live('between'); store.tickets.save({ ...store.tickets.get('between')!, title: '两轮之间', priority: urgent,
+    assignments: [{ ...running, state: 'ended' }] })
+  // P1 work in a turn is the ordinary case and never holds a restart.
+  live('mainline'); store.tickets.save({ ...store.tickets.get('mainline')!, priority: { ...urgent, level: 'P1' }, assignments: [running] })
+  expect(runningP0(store)).toEqual([{ id: 'urgent', title: '主线崩溃' }])
 })
 
 const load = { running: 0, queued: 0 }

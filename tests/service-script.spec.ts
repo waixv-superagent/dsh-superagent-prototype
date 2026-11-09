@@ -66,6 +66,20 @@ async function answering(state: unknown = READY, always = false): Promise<string
   await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve))
   return `http://127.0.0.1:${(server!.address() as AddressInfo).port}`
 }
+/** Whether the process still runs, as a stopped service stops answering at its URL. */
+const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true } catch { return false } }
+/**
+ * Start a mock HTTP server that answers like a running service: while `pid` serves the URL, and again once tmux has
+ * launched its replacement. In between, nothing answers, which is what the script's duplicate-start guard reads.
+ */
+async function whileServing(pid: number, answer: () => unknown): Promise<string> {
+  server = createServer((_request, response) => {
+    if (!alive(pid) && !existsSync(join(root, 'launched'))) { response.writeHead(503).end(); return }
+    response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(answer()))
+  })
+  await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve))
+  return `http://127.0.0.1:${(server!.address() as AddressInfo).port}`
+}
 const status = async (profile: string, url = 'http://127.0.0.1:9') =>
   JSON.parse((await run('status', '--profile', profile, '--url', url)).stdout) as { pids: number[]; manually_stopped: boolean }
 
@@ -181,6 +195,53 @@ it('restarts the service, and a restart whose graceful stop timed out does not k
   expect(await run('restart', '--url', url, '--timeout', '10', '--stop-timeout', '1'))
     .toMatchObject({ code: 1, stderr: expect.stringContaining('Graceful stop timed out') })
   expect(await status('superagent')).toMatchObject({ manually_stopped: false })
+}, 20_000)
+it('waits while a P0 Ticket is in a turn before restarting, and goes on when it leaves the turn', async () => {
+  const old = sleeper(), pid = sleeper()
+  let p0 = [{ id: 'abc12345', title: '主线崩溃' }]
+  const url = await whileServing(old, () => ({ ...READY, active: { p0 } }))
+  processes(service(old))
+  writeFileSync(join(root, 'pane'), `${pid}\n`)
+  started(service(pid))
+  const restarted = run('restart', '--url', url, '--timeout', '10', '--stop-timeout', '5', '--p0-wait', '10')
+  setTimeout(() => { p0 = [] }, 1500)
+  const result = await restarted
+  expect(result).toMatchObject({ code: 0, stdout: expect.stringContaining('Waiting for 1 P0 Ticket in a turn: abc12345 主线崩溃') })
+  expect(result.stdout).toContain('No P0 Ticket is in a turn any more.')
+  expect(result.stdout).toContain('dsh-superagent stopped.')
+}, 20_000)
+it('refuses to restart while a P0 Ticket stays in a turn, and --now restarts anyway', async () => {
+  const old = sleeper(), pid = sleeper()
+  const url = await whileServing(old, () => ({ ...READY, active: { p0: [{ id: 'abc12345', title: '主线崩溃' }] } }))
+  processes(service(old))
+  writeFileSync(join(root, 'pane'), `${pid}\n`)
+  started(service(pid))
+  const refused = await run('restart', '--url', url, '--timeout', '10', '--stop-timeout', '5', '--p0-wait', '1')
+  expect(refused).toMatchObject({ code: 1, stderr: expect.stringContaining(
+    'Refusing to restart: 1 P0 Ticket still in a turn after 1 s: abc12345 主线崩溃') })
+  expect(refused.stderr).toContain('Rerun with --now to restart anyway')
+  // Nothing was stopped and no stop was recorded, so a retry is a normal restart.
+  expect(() => process.kill(old, 0)).not.toThrow()
+  expect(existsSync(join(control('superagent'), 'manually-stopped'))).toBe(false)
+  expect(await run('restart', '--url', url, '--now', '--timeout', '10', '--stop-timeout', '5'))
+    .toMatchObject({ code: 0, stdout: expect.stringContaining('dsh-superagent stopped.') })
+}, 20_000)
+it('restarts at once when the host does not report running P0 Tickets', async () => {
+  const old = sleeper(), pid = sleeper()
+  const url = await whileServing(old, () => READY)
+  processes(service(old))
+  writeFileSync(join(root, 'pane'), `${pid}\n`)
+  started(service(pid))
+  const restarted = await run('restart', '--url', url, '--timeout', '10', '--stop-timeout', '5')
+  expect(restarted).toMatchObject({ code: 0, stderr: expect.stringContaining('The host does not report running P0 Tickets') })
+  expect(restarted.stdout).toContain('dsh-superagent stopped.')
+}, 20_000)
+it('stops at once while a P0 Ticket is in a turn, because a stop is how a person ends work now', async () => {
+  const url = await answering({ ...READY, active: { p0: [{ id: 'abc12345', title: '主线崩溃' }] } }, true)
+  processes(service(sleeper()))
+  const stopped = await run('stop', '--url', url, '--stop-timeout', '5')
+  expect(stopped).toMatchObject({ code: 0, stdout: expect.stringContaining('dsh-superagent stopped. Automatic recovery is paused') })
+  expect(stopped.stdout).not.toContain('Waiting for')
 }, 20_000)
 it('refuses a second control operation while one holds the profile\'s lock', async () => {
   mkdirSync(control('superagent'), { recursive: true })
