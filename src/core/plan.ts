@@ -94,6 +94,10 @@ export const validQuestionSections = (sections: readonly QuestionSection[]): boo
   && new Set(sections.map(section => section.label.trim())).size === sections.length
   && sections.every(section => section.label.trim().length > 0 && Array.from(section.label).length <= QUESTION_SECTION_LIMITS.label
     && section.text.trim().length > 0 && Array.from(section.text).length <= QUESTION_SECTION_LIMITS.text)
+/** Every phase's place in the one-way order; a person's rollback moves to a lower one (docs/031). */
+const PHASE_RANK: Readonly<Record<TicketPhase, number>> = { plan: 0, implement: 1, verify: 2, deliver: 3 }
+/** How far along the phases a phase is, so a move can be told forward from backward. */
+export const phaseRank = (phase: TicketPhase): number => PHASE_RANK[phase]
 /**
  * A ticket's phase; tickets stored before the P1 gate existed count as implementing, so an upgrade does not block work that
  * a person already authorized.

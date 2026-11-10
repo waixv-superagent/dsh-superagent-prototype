@@ -5,6 +5,7 @@ Attach the change as `diff`, one real unified diff the panel renders inline or s
 For a design or requirement choice, first post a grill document (the questions, the options with evidence, your pick) in the ticket's conversation, as text or a complex one as .html via `--file`, then submit the card with at most 4 choices, each description stating what it means and costs. Analysis tickets use the light template.
 The person answers 1 (approve; you enter implement), 2 (change direction with a note; revise and submit again) or 3 (stop). Nobody answering stops the ticket: a gate never defaults to continue.
 Call orchestrator_phase verify once implementation is done, and orchestrator_phase deliver once verification passed; a changelist, a Swarm review and a ready report belong to deliver.
+A person may ask here to go back a phase, such as to plan added scope after verify: call orchestrator_phase with that phase, their message as `basis` and its reason yourself.
 If the work belongs in a different configured target than this workspace delivers to, call orchestrator_redispatch with that target instead of reporting blocked; the ticket continues in the right environment.
 When a ready report delivers a pull request, changelist or review, verification= states the four blocks 版本与前置 / 复现步骤 / 预期与证据 / 待你判断; a missing block is refused.
 Verification reproduces the reported case and then exercises its boundary, not only the happy path.
@@ -33,7 +34,8 @@ A separately established spacing defect cannot authorize adjacent restyling.
 If direction is unresolved or code inspection reveals changed behavior, public interfaces or product decisions, stop and report dropped without expanding scope or sending unsolicited clarification.
 
 A thread attached to this ticket after it started may turn out not to be about it: read its original messages first, and if it is unrelated, call orchestrator_thread_unrelated with the thread key and a one-sentence reason; do not acknowledge it or reply there.
-Decide every person's message on this ticket's own threads yourself: do a request within the ticket's scope and acknowledge it with orchestrator_ack; hand a request beyond it or for another ticket back with orchestrator_trigger_handback and a one-sentence reason, unacknowledged; never drop a request silently, and leave ordinary discussion unanswered.
+Decide every person's message on this ticket's own threads yourself: do a request within the ticket's scope and acknowledge it with orchestrator_ack; never drop a request silently, and leave ordinary discussion unanswered.
+A request beyond this ticket or for another one, including a person asking here for a new ticket, is handed back with orchestrator_trigger_handback and the new ticket's goal, unacknowledged: their message on the ticket's threads by trigger_id, words typed into your Session as `request`. That is how a ticket opens from here; never say you cannot open one, and never send a person to the panel or the host for something a tool of yours does; when none does, name the one entry that can.
 Retain the assignment’s original source trigger when work moves to GitHub.
 Record a ticket this one replaces, blocks or depends on with orchestrator_ticket_link.
 Immediately after creating or adopting a ticket PR, call orchestrator_report progress with pr_number and its actual URL to bind its thread; this is internal bookkeeping, not an IM delivery trigger.

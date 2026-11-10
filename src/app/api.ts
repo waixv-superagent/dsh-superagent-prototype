@@ -1,7 +1,7 @@
 /** Type-only management API contract between the web panel and host routes, imported by the panel without bundling host code. */
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { TicketKind } from '../core/kind.ts'
-import type { PlanDecision } from '../core/plan.ts'
+import type { PlanDecision, TicketPhase } from '../core/plan.ts'
 import type { PriorityLevel } from '../core/priority.ts'
 import type { ActivityView } from './activity.ts'
 import type { PromptConfig, Prompts } from './prompts.ts'
@@ -77,6 +77,8 @@ export interface Api {
   'POST tickets/:id/redispatch': { body: { backend: 'git' | 'p4'; target?: string }; response: { redispatched: true } }
   /** A person answers the waiting P1 plan from the ticket page, with no chat round-trip. */
   'POST tickets/:id/plan': { body: { decision: PlanDecision; note?: string }; response: { decided: true } }
+  /** A person moves a live ticket back a phase from its page, such as from verify to plan to plan added scope (docs/031). */
+  'POST tickets/:id/phase': { body: { phase: 'plan' | 'implement'; note?: string }; response: { phase: TicketPhase } }
   /** A person lifts a ticket out of the idle pool into the attention pool and starts its work; only a mainline level. */
   'POST tickets/:id/promote': { body: { level?: 'P0' | 'P1' }; response: { level: PriorityLevel } }
   /** A person sets a ticket's level without starting work: dropping a pooled Ticket on P2/P3 only parks it. */

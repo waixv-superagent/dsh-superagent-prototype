@@ -1,8 +1,8 @@
 /** Shared view projections for triggers, tickets, threads, decisions, and channel links. */
 import { z } from 'zod'
-import { canRetry, currentReport, followupOwners, latestReport, liveTicket, ownPull, PRIORITY_LABELS, settled, threadKey, ticketKind, ticketPriority, ticketStage,
-  waitsForIdle, type ActorRef, type ChannelRef, type Decision, type DecisionKind, type Thread, type ThreadFacts, type Ticket, type TicketStage,
-  type Trigger } from '../../core/index.ts'
+import { canRetry, currentReport, followupOwners, latestReport, liveTicket, ownPull, phaseRank, PRIORITY_LABELS, settled, threadKey, ticketKind, ticketPhase,
+  ticketPriority, ticketStage, waitsForIdle, type ActorRef, type ChannelRef, type Decision, type DecisionKind, type Thread, type ThreadFacts, type Ticket,
+  type TicketStage, type Trigger } from '../../core/index.ts'
 import { allowedSender, listedBot } from '../../policy.ts'
 import type { ChannelLink, Localized } from '../../sources/kind.ts'
 import type { SourceRegistry } from '../../sources/registry.ts'
@@ -144,6 +144,7 @@ export function ticketSummary(ticket: Ticket) {
   // discretionary pool with these, and a person promotes a pooled ticket by raising its level.
   const level = ticketPriority(ticket), priority = PRIORITY_LABELS[level]
   return { id: ticket.id, title: ticket.title, state, ...stage, ...note ? { note } : {}, kind: kind.kind, kindSource: kind.source,
+    phase: ticketPhase(ticket), phaseBack: phaseBack(ticket),
     priority: { level, code: priority.code, word: priority.word, hint: priority.hint, source: ticket.priority?.source ?? 'default' },
     pool: waitsForIdle(level),
     // A live Ticket whose pipeline merged was resumed by a person's later message: that round is not pipeline work, so the
@@ -171,6 +172,13 @@ const canVerify = (ticket: Ticket) => ticket.verification?.state === 'pending'
   || (!liveTicket(ticket) && ticket.ended?.outcome === 'completed' && ticket.verification?.state !== 'passed' && delivered(ticket))
 /** Whether a person may send a ticket back to the worker from the verification gate. */
 const canRework = (ticket: Ticket) => liveTicket(ticket) && ticket.verification?.state === 'pending'
+/**
+ * The earlier phases a person may move a live ticket back to, earliest first: the panel offers them, and an ended ticket
+ * offers none (docs/031).
+ */
+const phaseBack = (ticket: Ticket): ('plan' | 'implement')[] => liveTicket(ticket)
+  ? (['plan', 'implement'] as const).filter(phase => phaseRank(phase) < phaseRank(ticketPhase(ticket)))
+  : []
 /** Whether a Ticket delivered work a person can run locally: a shelved changelist or a review. */
 export const delivered = (ticket: Ticket) => ticket.execution?.changelist !== undefined || !!ticket.execution?.review
 /**

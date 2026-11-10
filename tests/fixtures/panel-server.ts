@@ -41,6 +41,7 @@ type TicketFields = Omit<TicketRow, 'stage' | 'action'>
 const TICKET = {
   id: 't1', title: '修复回归', state: 'open', kind: 'bug', kindSource: 'rule', actions: { retry: false, stop: true, confirm: false, verify: false, rework: false }, strength: 'explicit', source: 'feishu', ended: undefined,
   attention: undefined, assignments: 1, inputs: 2, undelivered: 0, deliveryError: undefined, sessionId: 'worker-t1', directory: '/w/t1',
+  phase: 'implement', phaseBack: [],
   summary: 'working on it', createdAt: '2026-09-22T00:00:00Z', updatedAt: '2026-09-23T00:00:00Z',
   priority: { level: 'P1', code: 'P1', word: '主线', hint: '今天的主线工作', source: 'default' }, pool: false,
   request: '修复登录页回归',
@@ -287,6 +288,7 @@ const ticketDetail = (): TicketPageView => ({
     { source: 'github', url: 'https://github.com/acme/widgets/issues/42', label: { zh: 'GitHub #42', en: 'GitHub #42' } }],
   reply: undefined,
   plan: undefined,
+  phaseResets: [],
   relations: [{ ticket: { id: 't5', title: '补 i18n 文案', stage: 'working' }, kind: 'spawned', via: 'handback', outgoing: true,
     reason: '文案另开一单' }],
   assignments: [{ id: 'a1', state: 'running', createdAt: '2026-09-22T00:00:00Z',
@@ -498,6 +500,15 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET tickets/:id/activity': { answer: ({ params }) => server.activity(params.id) ?? {
     live: false, updatedAt: 0, tool: null, recent: [] } },
   'POST tickets/:id/plan': { body: true, answer: ({ params }) => ticketOf(params.id) ? { decided: true } : refuse(404, 'Ticket not found') },
+  'POST tickets/:id/phase': { body: true, answer: ({ params, body }) => {
+    // The ticket page reads the detail view, so its phases decide what the move may target.
+    const ticket = server.ticketDetails[params.id] ?? ticketOf(params.id)
+    if (!ticket) return refuse(404, 'Ticket not found')
+    if (!ticket.phaseBack.includes(body.phase as 'plan' | 'implement')) {
+      return refuse(400, 'The ticket cannot move back to that phase', { code: 'phaseOutOfOrder', values: { from: ticket.phase } })
+    }
+    return { phase: body.phase as 'plan' | 'implement' }
+  } },
   'POST tickets/:id/promote': { body: true, answer: ({ params }) => ticketOf(params.id) ? { level: 'P1' as const } : refuse(404, 'Ticket not found') },
   'POST tickets/:id/priority': { body: true, answer: ({ params }) => ticketOf(params.id) ? { level: 'P2' as const } : refuse(404, 'Ticket not found') },
   'POST tickets/:id/answer': { body: true, answer: ({ params }) => ticketOf(params.id) ? { answered: true } : refuse(404, 'Ticket not found') },

@@ -1,4 +1,4 @@
-/** The engine-side editor capture (docs/027): the MCP session, window selection, the PNG and its sidecar, and the failures. */
+/** The engine-side editor capture (docs/030): the MCP session, window selection, the PNG and its sidecar, and the failures. */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

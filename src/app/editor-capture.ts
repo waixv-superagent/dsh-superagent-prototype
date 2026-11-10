@@ -1,5 +1,5 @@
 /**
- * Editor-side screenshots for verification evidence (docs/027).
+ * Editor-side screenshots for verification evidence (docs/030).
  *
  * The pixels come from the editor's own Slate rendering through the engine's ModelContextProtocol server, never from
  * the desktop. A desktop capture comes back black while the Windows session is locked; the editor keeps rendering, so

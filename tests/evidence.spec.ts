@@ -1,5 +1,5 @@
 /**
- * Editor captures are host-local evidence (docs/027). The capture tool writes a timestamped PNG beside a JSON sidecar
+ * Editor captures are host-local evidence (docs/030). The capture tool writes a timestamped PNG beside a JSON sidecar
  * whose `editor.toolset` names the Slate inspector; either file inside the repository means someone copied internal
  * project content in, so the test fails and names the file instead of letting it land in a pull request.
  */
@@ -45,5 +45,5 @@ it('keeps editor captures out of the repository', () => {
     return (name.endsWith('.png') && CAPTURE_PNG.test(name)) || (path.endsWith('.json') && isCaptureSidecar(path))
   })
   expect(captures.map(path => relative(ROOT, path).replaceAll('\\', '/')), 'editor captures are host-local evidence '
-    + '(docs/027): keep the PNG and its sidecar under <stateDir>/evidence and never commit them to the repository').toEqual([])
+    + '(docs/030): keep the PNG and its sidecar under <stateDir>/evidence and never commit them to the repository').toEqual([])
 })

@@ -318,6 +318,16 @@ export class Engine {
    * @throws UserError when the ticket is unknown or ended, or the move skips a phase or goes back.
    */
   advancePhase(ticketId: string, phase: 'verify' | 'deliver'): Ticket { return this.repo.atomic(() => this.tickets.advancePhase(ticketId, phase)) }
+  /**
+   * A person moves an open ticket back to `plan` or `implement`, from the panel or through its worker on the person's own
+   * message (`basis`). The move never skips a gate forward; `plan` archives the plan round it leaves behind so the worker
+   * can submit a new one (docs/031).
+   * @throws UserError when the ticket is unknown or ended, the target is not backward, or a conversational move lacks the
+   * person's reason or message.
+   */
+  resetPhase(ticketId: string, phase: 'plan' | 'implement', via: 'panel' | 'conversation', reason = '', basis?: string): Ticket {
+    return this.repo.atomic(() => this.tickets.resetPhase(ticketId, phase, via, reason, basis))
+  }
 
   // The Executor
 
@@ -455,13 +465,13 @@ export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThre
 export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'>
 /** What people ask of the Engine, through the panel or the main Session. */
 export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'redispatchTicket' | 'confirmTicket' | 'verifyTicket' | 'recordPipeline' | 'resumePipeline'
-  | 'reworkTicket' | 'decidePlan' | 'decidePriority' | 'promoteTicket' | 'answerAttention' | 'answerAttentionText' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
+  | 'reworkTicket' | 'decidePlan' | 'decidePriority' | 'promoteTicket' | 'answerAttention' | 'answerAttentionText' | 'reevaluate' | 'unsubscribe' | 'dismiss' | 'resetPhase'>
 /** What Settings tells the Engine. */
 export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
   | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'reply'
-  | 'submitPlan' | 'advancePhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch' | 'startIdleAnalysis'
+  | 'submitPlan' | 'advancePhase' | 'resetPhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch' | 'startIdleAnalysis'
   | 'authorizeModelFromPerson' | 'dropUnstartedIdle'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>
