@@ -45,6 +45,9 @@ worker 写进 `sections` 或对话，协议要求的是别把长分析硬塞进�
   和目标。它们与主单共用同一个 Decision（所以重放仍然幂等），各建一张单、各自订阅源话题；
   只有主单发回执。后续同一话题的消息会同时到达各子单，各单 worker 判断是否属于自己的部分并交回不属的，
   这是拆单的已知代价，换来的是不再让一个 worker 把第二个目标整体退回。
+- 对话内开新单：人在本单话题上要另开一单，worker 对那条原始消息调 `orchestrator_trigger_handback`（`trigger_id`）；
+  人在 worker Session 里打的话没有 Trigger，就把原话作为 `request` 交回，宿主把它变成一个 Web Source 请求交主会话评估，
+  同一句话只成一个 Trigger。worker 不再让人去面板或找 host 开单（见 docs/031）。
 
 ## 4. S3 + S6：ready 前先证明交付还在
 

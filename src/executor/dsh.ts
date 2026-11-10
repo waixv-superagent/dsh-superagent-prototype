@@ -247,7 +247,7 @@ const RECOVERED = 'The host retried this ticket automatically after a passing mo
 /** What a worker reads when a person wrote in its Session and that resumed the ticket it works on. */
 const RESUMED_IN_SESSION = 'This ticket ended earlier and this person, writing in its Session, resumed it under the same mandate: '
   + 'its tools and reports work again. Continue with what they asked and report ready when it is done; if they ask for work '
-  + 'beyond this ticket\'s scope, report a question or a blocker instead of extending it.'
+  + 'beyond this ticket\'s scope, hand their words back with orchestrator_trigger_handback request= instead of extending it.'
 /** Formats a policy-change input for the worker; inputs recorded before `effect` existed fall back to a general notice. */
 function policyMessage(effect?: PolicyEffect): string {
   if (!effect) return 'Policy change: the access or admission rules changed. Check that the remaining work stays within the assignment.'

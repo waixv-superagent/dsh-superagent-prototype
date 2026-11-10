@@ -2,7 +2,8 @@
 import { z } from 'zod'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { LINKED_RELATION_KINDS, analysisRunning, liveTicket, missingVerifyLabels, modelRoute, PLAN_DIFF_LIMITS, TEAM_ROLE_CHARS, TEAM_ROLES_MAX,
-  TEAM_TASK_CHARS, ticketPhase, VERIFY_LABELS, type EngineForExecutor, type ModelGrant, type ModelRoute, type RoutedModel, type TeamRoute, type Ticket } from '../../core/index.ts'
+  TEAM_TASK_CHARS, ticketPhase, VERIFY_LABELS, type EngineForExecutor, type ModelGrant, type ModelRoute, type ReceiveResult, type RoutedModel, type TeamRoute,
+  type Ticket } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
 import { matchDeliveryTarget, deliveryTargets } from '../delivery-targets.ts'
 import { claimPull, readPull } from '../../sources/github-pull.ts'
@@ -20,8 +21,8 @@ import type { EditorScheduler } from '../editor-scheduler.ts'
 import type { EditorGatekeeper } from '../editor-gatekeeper.ts'
 
 export interface ExecutorToolsHost {
-  readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'submitPlan' | 'advancePhase' | 'redispatchTicket'
-    | 'recordPipeline' | 'rerunPipeline' | 'authorizeModelFromPerson'>
+  readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'submitPlan' | 'advancePhase'
+    | 'resetPhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'authorizeModelFromPerson'>
   readonly store: Pick<Store, 'tickets' | 'settings' | 'replyStatus' | 'atomic'>
   readonly sessions: Pick<Sessions, 'relay' | 'notify' | 'prompt'>
   readonly resources: ResourceHost
@@ -33,12 +34,18 @@ export interface ExecutorToolsHost {
   models(): Promise<ModelCatalog>
   /** Sends a submitted P1 plan to the person who decides it, and returns the card's message id when it went out. */
   notifyPlan(ticket: Ticket): Promise<string | undefined>
+  /**
+   * Hands back a request a person typed into this worker's Session, which has no Trigger: the host makes it a Web Source
+   * request, records this ticket's hand-back, and queues it for Eval. `queued` is false when the Policy filtered it, and
+   * `code` says why.
+   */
+  handbackRequest(ticketId: string, request: string, reason: string): { triggerId: string; queued: boolean; state: ReceiveResult; code?: string }
   sendReplies(): Promise<void>
   /** The shared editor's scheduler; absent on a host built without it. */
   readonly editor?: EditorScheduler
   /** The shared editor's gatekeeper, which owns the editor processes a lease started; absent on a host built without it. */
   readonly gatekeeper?: Pick<EditorGatekeeper, 'close'>
-  /** Captures one window from the editor's own rendering for the ticket's evidence (docs/027); absent without the capture module. */
+  /** Captures one window from the editor's own rendering for the ticket's evidence (docs/030); absent without the capture module. */
   readonly capture?: (request: { ticketId: string; window?: string; signal: AbortSignal }) => Promise<EditorCapture>
   /** The directory a ticket's worker runs in, which a host-run job builds or tests. */
   workspaceOf(ticket: Ticket): string
@@ -141,12 +148,19 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
     }),
     tool({
       name: 'orchestrator_trigger_handback',
-      description: 'Hand back a message that asks for work beyond this ticket or for another one, for a fresh assessment; once per message. queued is false while another ticket still decides it, and for a message that was never this ticket\'s to decide, such as a bot\'s, which is assessed without it.',
+      description: 'Hand back a message that asks for work beyond this ticket or for another one, as new work for the main Session to assess; this is how a person here opens a new ticket. Pass exactly one of `trigger_id`, a message on this ticket\'s Threads, and `request`, words a person typed into your Session, once each. `queued` is false while another ticket still decides it, or when the Policy filtered it (`code` says why).',
       schema: z.object({
-        trigger_id: z.string().min(1),
-        reason: z.string().trim().min(1).max(300).describe('One sentence on what it asks for beyond this ticket.'),
-      }).strict(),
-      execute: async args => ({ trigger_id: args.trigger_id, queued: host.engine.handback(ticketId, args.trigger_id, args.reason) }),
+        trigger_id: z.string().min(1).optional().describe('The person\'s message on one of this ticket\'s Threads.'),
+        request: z.string().trim().min(1).max(4000).optional().describe('The person\'s words from your Session, which carry no Trigger.'),
+        reason: z.string().trim().min(1).max(300).describe('One sentence on the new ticket\'s goal, beyond this ticket.'),
+      }).strict().refine(value => (value.trigger_id === undefined) !== (value.request === undefined),
+        { message: 'Name exactly one of trigger_id and request' }),
+      execute: async args => {
+        if (args.trigger_id !== undefined) return { trigger_id: args.trigger_id, queued: host.engine.handback(ticketId, args.trigger_id, args.reason) }
+        const handed = host.handbackRequest(ticketId, args.request!, args.reason)
+        return { trigger_id: handed.triggerId, queued: handed.queued, ...handed.state !== 'stored' ? { state: handed.state } : {},
+          ...handed.code ? { code: handed.code } : {} }
+      },
     }),
     tool({
       name: 'orchestrator_redispatch',
@@ -198,11 +212,16 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
     }),
     tool({
       name: 'orchestrator_phase',
-      description: 'Move this ticket one phase forward: verify once implementation is done, deliver once verification passed. A skipped or backward step is refused, and changelist, swarm_review and ready belong to deliver.',
+      description: 'Move this ticket one phase forward: verify once implementation is done, deliver once verification passed; a skipped step is refused. On a person\'s explicit request, `plan` (to plan added scope) or `implement` moves it back, with their message as `basis` and their `reason`. changelist, swarm_review and ready belong to deliver.',
       schema: z.object({
-        phase: z.enum(['verify', 'deliver']).describe('The phase to enter, exactly one step forward.'),
+        phase: z.enum(['plan', 'implement', 'verify', 'deliver']).describe('verify or deliver: one step forward; plan or implement: back, on a person\'s request.'),
+        reason: z.string().trim().max(500).optional().describe('Back-moves: the person\'s reason in one sentence.'),
+        basis: z.string().trim().max(300).optional()
+          .describe('Back-moves: the person\'s message that reached this ticket: its trigger id, or the read path of their session-resume Input.'),
       }).strict(),
-      execute: async args => ({ phase: ticketPhase(host.engine.advancePhase(ticketId, args.phase)) }),
+      execute: async args => args.phase === 'plan' || args.phase === 'implement'
+        ? { phase: ticketPhase(host.engine.resetPhase(ticketId, args.phase, 'conversation', args.reason ?? '', args.basis)) }
+        : { phase: ticketPhase(host.engine.advancePhase(ticketId, args.phase)) },
     }),
     tool({
       name: 'orchestrator_report',

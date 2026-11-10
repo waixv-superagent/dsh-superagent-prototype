@@ -13,7 +13,7 @@ import type {} from '@deepseek-ai/dsh-subprocess'
 import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { lockSync } from 'proper-lockfile'
-import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
+import { Engine, key, liveTicket, reasonText, UserError, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
 import { allowedSender, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
 import { Commands } from '../infra/commands.ts'
@@ -52,6 +52,7 @@ import { IdleScheduler } from './idle.ts'
 import { NightRepro } from './night-repro.ts'
 import { Billing, gatewayAccount, publishedPrices } from './billing.ts'
 import { feishuSettings } from '../sources/feishu.ts'
+import { webHandbackTrigger, webLabel } from '../sources/web.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
 import { Activity } from './activity.ts'
@@ -354,6 +355,7 @@ export class Runtime extends Service implements SourceHost {
         workspaceOf: ticket => this.executor.workspaceOf(ticket),
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
+        handbackRequest: (ticketId, request, reason) => runtime.handbackRequest(ticketId, request, reason),
         notifyPlan: ticket => sendPlanCard({ store, sources, commands, warn: message => ctx.logger.warn('dsh-superagent: %s', message) }, ticket),
         quietly: run => { this.quiet++; try { return run() } finally { this.quiet-- } } }
       this.ready = this.initialize()
@@ -385,6 +387,38 @@ export class Runtime extends Service implements SourceHost {
   }
   checkSetup(): void { this.setup.check() }
   receive(trigger: Trigger): ReceiveResult { return this.passes.receive(trigger) }
+  /**
+   * Hand back a request a person typed into a worker's Session: such a message reaches no Source and leaves no Trigger, so
+   * it becomes a Web Source Trigger whose Thread is derived from the ticket and the words, recorded as this ticket's
+   * hand-back, and the main Session assesses it like any request. Its replies go to the main Session, where that person
+   * reads, and handing the same request back twice is one Trigger rather than two tickets (docs/031). Only a ticket a
+   * person wrote into from its Session may hand back such a request, so a worker cannot make up work on its own; the Web
+   * Source's operator must be admissible, as for a request from the panel.
+   * @throws UserError when the ticket is unknown or has ended, or nobody wrote in its Session; Error when the Web Source's
+   * operator is not admitted.
+   */
+  handbackRequest(ticketId: string, text: string, reason: string): { triggerId: string; queued: boolean; state: ReceiveResult; code?: string } {
+    return this.store.atomic(() => {
+      const ticket = this.store.tickets.get(ticketId)
+      if (!ticket) throw new UserError('unknownTicket')
+      if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+      if (!ticket.inputs.some(input => input.kind === 'session-resume')) throw new UserError('noSessionRequest')
+      const at = now()
+      const trigger = webHandbackTrigger({ ticketId, text, at, session: this.masterId })
+      // The Thread derives from the ticket and the words, so handing the same request back twice is one Trigger: the second
+      // call records nothing new and answers with the request already queued.
+      if (this.store.triggers.get(trigger.id)) return { triggerId: trigger.id, queued: true, state: 'duplicate' as const }
+      if (!this.engine.admissible(trigger)) throw new Error('The request was not admitted: sync the Web panel Source in Settings → Policy so its operator is on the list')
+      const state = this.receive(trigger)
+      // Record the hand-back once the Trigger is stored, since receiving it writes its disposition afresh: the relation graph
+      // shows the new Ticket as spawned by this one, and a request the Source filtered still records what was tried and why.
+      const disposition = this.store.triggers.disposition(trigger.id) ?? { fanout: [], at }
+      this.store.triggers.saveDisposition(trigger.id, { ...disposition, handbacks: [...disposition.handbacks ?? [], { ticketId, reason, at }] })
+      const code = state === 'filtered' ? disposition.filtered?.code : undefined
+      if (state !== 'filtered') this.context({ kind: 'web', health: [] }).threads.describe(`web:${trigger.threads[0]!.id}`, { label: webLabel(text) })
+      return { triggerId: trigger.id, queued: state !== 'filtered', state, ...(code ? { code } : {}) }
+    })
+  }
   idle(): Promise<void> { return this.passes.idle() }
   pump(): Promise<void> { return this.passes.pump() }
   sendReplies(): Promise<void> { return this.outbox.sent() }

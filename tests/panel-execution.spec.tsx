@@ -71,7 +71,8 @@ it('shows a Ticket with its stage, its Mandate details with the Trigger and Deci
   // A Thread this Ticket follows reads as subscribed on its page, though no other Ticket follows it.
   expect(all('.dt-list .dt-ticket .dt-stage').map(stage => stage.textContent)).toContain(zh.threadSubscribed)
   expect(all('.dt-list .dt-ticket .dt-stage').map(stage => stage.textContent)).not.toContain(zh.threadUnsubscribed)
-  expect(all('.dt-status-line .dt-lv').map(item => item.textContent)).toEqual(['授权 明确', '发起 飞书 · Alice', expect.stringMatching(/^更新 /)])
+  expect(all('.dt-status-line .dt-lv').map(item => item.textContent)).toEqual(['授权 明确', '发起 飞书 · Alice', expect.stringMatching(/^更新 /),
+    '阶段 实现'])
   for (const expected of ['修复登录页回归', '点名方式@ 智能体', '名单里的人明确请求，由主 Session 接单', '未送达：等待派工运行',
     'Alice：顺便改标题']) expect(text()).toContain(expected)
   expect(all('.dt-chip').map(chip => chip.textContent)).toContain('飞书团队群')
@@ -500,3 +501,34 @@ it('sends one stop for a double click on Confirm', async () => {
 })
 
 
+
+it('shows the ticket\'s phase and moves it back from its status line, offering only earlier phases', async () => {
+  const t1 = server.ticketDetails.t1!
+  // An implementing ticket has only plan behind it.
+  server.ticketDetails.t1 = { ...t1, phase: 'implement', phaseBack: ['plan'] }
+  await mount()
+  await click('修复回归')
+  expect(text()).toContain(zh.ticketPhaseLabel)
+  expect(text()).toContain(zh['phase.implement'])
+  await click(zh.phaseBack)
+  expect(text()).toContain(zh.phaseBackHint)
+  expect(text()).toContain(zh.phaseBackPlan)
+  expect(text()).not.toContain(zh.phaseBackImplement)
+  await type(document.querySelector<HTMLTextAreaElement>('.dt-phase-back textarea')!, '追加 ANS 迁移，重新出方案')
+  await click(zh.phaseBackPlan)
+  expect(server.requests.filter(request => request.path === 'tickets/t1/phase').at(-1))
+    .toMatchObject({ method: 'POST', body: { phase: 'plan', note: '追加 ANS 迁移，重新出方案' } })
+  expect(text()).toContain(zh.phaseResetDone)
+})
+
+it('offers no back-move on a ticket in plan, and shows a reset in its execution history', async () => {
+  const t1 = server.ticketDetails.t1!
+  server.ticketDetails.t1 = { ...t1, phase: 'plan', phaseBack: [],
+    phaseResets: [{ at: '2026-09-22T00:30:00Z', from: 'verify', to: 'plan', via: 'conversation', reason: '把 ANS 迁移并进本单', basis: 'trg-2' }] }
+  await mount()
+  await click('修复回归')
+  expect(text()).toContain(zh['phase.plan'])
+  expect(all('button').some(button => button.textContent === zh.phaseBack)).toBe(false)
+  expect(text()).toContain(zh.timelinePhaseReset.replace('{from}', zh['phase.verify']).replace('{to}', zh['phase.plan']))
+  expect(text()).toContain('把 ANS 迁移并进本单')
+})

@@ -224,6 +224,8 @@ export function ticketDetail(host: ViewHost, id: string) {
     channels: ticket.channels.map(channel => channelLink(view, channel)),
     reply: answerLink(view, ticket, stage),
     plan: planView(ticket),
+    // The back-moves a person made, so the execution history says why a gate reopened (docs/031).
+    phaseResets: ticket.phaseResets ?? [],
     decision: decision ? decisionView(view, decision) : undefined,
     // Every started Assignment ran in the ticket's one worker Session. A running assignment whose worker reported a non-progress state has finished its turn unless a human response resumed the ticket.
     assignments: ticket.assignments.map(assignment => ({ ...assignment, ...assignment.startedAt ? { ref: workerSessionId(ticket.id) } : {},

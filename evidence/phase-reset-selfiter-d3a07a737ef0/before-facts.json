@@ -1,0 +1,22 @@
+{
+  "mode": "before",
+  "viewport": "1440x1600",
+  "theme": "dark",
+  "before": {
+    "title": "【示例】工单进入验证后回退方案阶段，补上新增范围",
+    "status": [
+      "授权 明确",
+      "发起 Web 面板 · Web panel",
+      "更新 3分钟前"
+    ],
+    "back": [],
+    "panel": false,
+    "hint": null,
+    "timeline": [
+      "创建工单",
+      "第 1 次派工",
+      "第 1 次派工结束"
+    ],
+    "body": "新会话\nCtrl\n+\nAlt\n+\nN\n插件\nSuperagent\n自动化任务\n更多\n工作区\nstate-after\n新会话\nstate-before\nWAI\nSuperagent\n发起工单\n打开主 Session\n概览\n来源\n触发\n评估\n执行\n设置\n执行\n【示例】工单进入验证后回退方案阶段，补上新增范围\n打开 Session\n等待新触发\n授权 明确\n发起 Web 面板 · Web panel\n更新 3分钟前\n执行过程\n3\n3分钟前\n创建工单\n3分钟前\n第 1 次派工\n开始执行\n2分钟前\n第 1 次派工结束\n人工追问，转入新一轮\n授权详情\n范围\n阶段回退与对话内开新单的演示工单\n点名方式\n私聊\n"
+  }
+}

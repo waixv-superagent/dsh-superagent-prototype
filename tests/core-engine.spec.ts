@@ -2534,6 +2534,89 @@ describe('P1 plan gate', () => {
   })
 })
 
+describe('phase rollback', () => {
+  it('moves a verify ticket back to plan on the person\'s message, archives the decided plan, and takes a new round', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.tick(1); h.engine.submitPlan(ticketId, PLAN)
+    h.tick(1); h.engine.receive(trigger('2', { text: '1' }))
+    h.engine.advancePhase(ticketId, 'verify')
+    // The person asks on the ticket's thread to add scope: that message reaches the ticket as an Input, which authorizes the move.
+    h.tick(1); h.engine.receive(trigger('3', { text: '本单回退到 plan，把 ANS 迁移也一起做' }))
+    const moved = h.engine.resetPhase(ticketId, 'plan', 'conversation', '把 ANS 迁移并进本单', '3')
+    expect(moved.phase).toBe('plan')
+    // The decided round is kept as history, so the new scope can be planned and the old decision stays readable.
+    expect(moved.plan).toBeUndefined()
+    expect(moved.planHistory).toEqual([expect.objectContaining({ text: PLAN, approved: expect.objectContaining({ at: expect.any(String) }) })])
+    expect(moved.phaseResets).toEqual([expect.objectContaining({ from: 'verify', to: 'plan', via: 'conversation',
+      reason: '把 ANS 迁移并进本单', basis: '3' })])
+    h.tick(1); h.engine.submitPlan(ticketId, PLAN)
+    expect(h.repo.tickets.get(ticketId)!.phase).toBe('plan')
+    expect(h.repo.tickets.get(ticketId)!.attention?.question).toContain('方案待确认')
+  })
+  it('refuses a conversational move without the person\'s message or reason, and records a panel move without one', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.engine.advancePhase(ticketId, 'verify')
+    // The origin message is not an Input of the ticket: a worker needs a person's message that reached it, and a reason.
+    expect(() => h.engine.resetPhase(ticketId, 'plan', 'conversation', '把范围并进来', '1'))
+      .toThrowError(expect.objectContaining({ code: 'phaseBasis' }))
+    h.tick(1); h.engine.receive(trigger('2', { text: '回退到实现阶段，先继续改' }))
+    expect(() => h.engine.resetPhase(ticketId, 'plan', 'conversation', '', '2'))
+      .toThrowError(expect.objectContaining({ code: 'phaseReason' }))
+    // The panel needs no message: the person clicked it themselves, and the worker is told through an Input.
+    const moved = h.engine.resetPhase(ticketId, 'implement', 'panel', '补充范围，先回到实现')
+    expect(moved.phase).toBe('implement')
+    expect(moved.phaseResets).toEqual([expect.objectContaining({ from: 'verify', to: 'implement', via: 'panel',
+      reason: '补充范围，先回到实现' })])
+    expect(h.repo.tickets.get(ticketId)!.inputs.at(-1)).toMatchObject({ kind: 'text', person: true, text: expect.stringContaining('面板') })
+    // A forward move is not a rollback: from plan the only target is plan itself, which is out of order.
+    h.tick(1); h.engine.submitPlan(ticketId, PLAN)
+    expect(() => h.engine.resetPhase(ticketId, 'plan', 'panel')).toThrowError(expect.objectContaining({ code: 'phaseOutOfOrder' }))
+  })
+  it('withdraws a pending local verification when a person reopens the work', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.engine.advancePhase(ticketId, 'verify')
+    const stored = h.repo.tickets.get(ticketId)!
+    h.repo.tickets.save({ ...stored, verification: { at: '2026-09-23T00:00:30.000Z', state: 'pending' } })
+    expect(h.engine.resetPhase(ticketId, 'plan', 'panel', '范围变了，重新做方案').verification).toBeUndefined()
+  })
+  it('makes the reopened round verify again before deliver, and starts the next round of a worker whose turn is over', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.engine.advancePhase(ticketId, 'verify')
+    const stored = h.repo.tickets.get(ticketId)!
+    // The worker reported verification of the old scope and ended its turn with a ready report.
+    stored.execution = { ...stored.execution!, verification: '版本与前置\n复现步骤\n预期与证据\n待你判断' }
+    stored.assignments.at(-1)!.state = 'running'
+    stored.assignments.at(-1)!.report = { state: 'ready', summary: '旧范围已验证', at: '2026-09-23T00:00:30.000Z' }
+    h.repo.tickets.save(stored)
+    const before = stored.assignments.length
+    const moved = h.engine.resetPhase(ticketId, 'implement', 'panel', '追加范围')
+    expect(moved.execution?.verification).toBeUndefined()
+    expect(moved.assignments).toHaveLength(before + 1)
+    expect(moved.assignments.at(-2)).toMatchObject({ state: 'ended', endedReason: 'phaseReset' })
+    expect(moved.undelivered).toContain(moved.inputs.at(-1)!.id)
+    // verify again is allowed, but deliver now needs the new round's own verification.
+    h.engine.advancePhase(ticketId, 'verify')
+    expect(() => h.engine.advancePhase(ticketId, 'deliver')).toThrowError(expect.objectContaining({ code: 'notDeliverable' }))
+  })
+  it('accepts a Session message as the basis by the read path the worker sees, and refuses a context-only or bot message', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.engine.advancePhase(ticketId, 'verify')
+    expect(h.engine.wroteInSession(ticketId, '本单状态回转到 plan 吧')).toBe(true)
+    const wrote = h.repo.tickets.get(ticketId)!.inputs.at(-1)!
+    expect(wrote.kind).toBe('session-resume')
+    h.tick(1); h.engine.receive(trigger('4', { text: 'CI 通过', human: false }))
+    expect(() => h.engine.resetPhase(ticketId, 'plan', 'conversation', '追加范围', '4'))
+      .toThrowError(expect.objectContaining({ code: 'phaseBasis' }))
+    const moved = h.engine.resetPhase(ticketId, 'plan', 'conversation', '追加范围', `ticket/${ticketId}/input/${key(wrote.id)}`)
+    expect(moved.phaseResets?.at(-1)).toMatchObject({ via: 'conversation', to: 'plan' })
+  })
+})
+
 describe('redispatch', () => {
   it('moves a stalled ticket into another delivery environment and starts a new assignment there', () => {
     const h = harness()

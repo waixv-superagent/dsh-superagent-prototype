@@ -506,8 +506,18 @@ export interface Ticket {
   pipeline?: TicketPipeline
   /** The P1 gate: the worker's plan and the person's decision on it (see `core/plan.ts`). */
   plan?: Plan
+  /**
+   * The plans a back-move to the plan phase replaced, oldest first: each round's text, decision and feedback stay readable
+   * after a person reopens the gate for added scope (see `Tickets.resetPhase` and docs/031).
+   */
+  planHistory?: Plan[]
   /** The phase the ticket is in, `plan` from its creation until a person approves its plan; absent on tickets stored before the gate. */
   phase?: TicketPhase
+  /**
+   * A person's back-moves of the ticket between phases, oldest first, kept as the audit trail the panel's execution history
+   * reads: who reopened which gate, when, and on whose message (docs/031).
+   */
+  phaseResets?: TicketPhaseReset[]
   /** The latest failed delivery of an Input to its worker, until a delivery succeeds. */
   delivery?: { error: string; at: string }
   /**
@@ -562,6 +572,20 @@ export interface TicketVerification {
   by?: 'person' | 'pipeline'
   /** The person's words when they returned the work or accepted it with a caveat. */
   note?: string
+}
+/**
+ * A person's move of a ticket back to an earlier phase: from the panel, or by its worker on the person's own message in the
+ * conversation (`via`). `basis` names that message when the worker made the move, so the record says what authorized it;
+ * `reason` is the person's one line on why the gate is reopened (docs/031).
+ */
+export interface TicketPhaseReset {
+  at: string
+  from: TicketPhase
+  to: TicketPhase
+  via: 'panel' | 'conversation'
+  reason?: string
+  /** The person's message that asked for the move: a Trigger id, or the id of an Input they typed into the worker's Session. */
+  basis?: string
 }
 /** What the follow-up stage observed about a delivered change. */
 export type PipelineState = 'running' | 'blocked' | 'merged'

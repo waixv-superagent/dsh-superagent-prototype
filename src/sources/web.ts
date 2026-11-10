@@ -55,6 +55,27 @@ export function webTrigger(request: WebRequest): Trigger {
 export const webLabel = (text: string): string => (text.split('\n')[0] ?? '').trim().slice(0, 100)
 
 /**
+ * Build the Trigger for a request a person typed into a worker's Session and the worker handed back: that message reached no
+ * Source and left no Trigger, so it enters as a Web request. The Thread is derived from the ticket and the words, so handing
+ * the same request back twice is one Trigger rather than two tickets; the host records the ticket's hand-back on it.
+ */
+export function webHandbackTrigger(request: { ticketId: string; text: string; at: string; session: string }): Trigger {
+  const thread = key('web', 'handback', request.ticketId, request.text)
+  return {
+    id: key('trigger', 'web', thread),
+    source: WEB_SOURCE,
+    threads: [{ source: WEB_SOURCE, id: thread }],
+    actor: { source: WEB_SOURCE, id: WEB_OPERATOR },
+    human: true,
+    addressed: 'direct',
+    at: request.at,
+    text: request.text,
+    channel: { source: WEB_SOURCE, thread: `${WEB_SOURCE}:${thread}`, address: { session: request.session } },
+    meta: { panel: true, handback: true },
+  }
+}
+
+/**
  * The Web Source kind. It listens to everything it produces (addressed requests only), and its Policy part keeps the
  * panel operator on the allowed list through `sync`: the panel always submits as that one identity, and the list is a
  * Policy record rather than a credential the form could choose.

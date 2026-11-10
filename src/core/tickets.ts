@@ -3,11 +3,11 @@ import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, latestReport, liveTicket, MODEL_APPROVAL_OPTIONS, modelRoute, personNamesRoute, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
 import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, LinkedRelationKind, Mandate, ModelGrant, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, TeamRoute, ThreadRef, Ticket, TicketEndBy,
-  TicketInput, TicketOutcome, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
+  TicketInput, TicketOutcome, TicketPhaseReset, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { classifyTicket } from './kind.ts'
-import { missingPlanLabels, pendingPlan, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planTemplate, ticketPhase, validPlanOptions, validQuestionSections,
+import { missingPlanLabels, pendingPlan, phaseRank, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planTemplate, ticketPhase, validPlanOptions, validQuestionSections,
   type PlanDecision, type PlanOption, type PlanTemplate, type PlanVia, type TicketPhase } from './plan.ts'
 import { parsePlanDiff, type PlanDiff } from './diff.ts'
 import { defaultPriority, priorityAskDeadline, PRIORITY_ASK_MINUTES, priorityAskOverdue, systemPriority, waitsForIdle, type PriorityLevel,
@@ -754,6 +754,73 @@ export class Tickets extends EnginePart {
     ticket.updatedAt = this.now()
     this.repo.tickets.save(ticket)
     return ticket
+  }
+  /**
+   * A person moves an open ticket back to an earlier phase, either from the panel or through its worker on the person's own
+   * message in the conversation (`basis` names that message; only a human message that reached the ticket authorizes it).
+   * Only backward moves exist here: `plan` reopens the P1 gate and archives the plan round the person left behind, so the
+   * worker submits the added scope as a new plan; `implement` reopens the implementation phase. A pending local
+   * verification and the worker's reported verification cannot outlive the work they checked, so both are withdrawn. A
+   * panel move reaches the worker as the person's Input, starting its next round when its turn is over; a conversational
+   * move is the worker's own call, made in the turn that read the message. The record goes in `phaseResets`
+   * (docs/031).
+   * @throws UserError when the ticket is unknown or ended, the move is not backward, or a conversational move has no
+   * reason or no person's message that reached the ticket.
+   */
+  resetPhase(ticketId: string, phase: 'plan' | 'implement', via: 'panel' | 'conversation', reason = '', basis?: string): Ticket {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    const from = ticketPhase(ticket)
+    if (phaseRank(phase) >= phaseRank(from)) throw new UserError('phaseOutOfOrder', { from })
+    const note = reason.trim().slice(0, 500)
+    if (via === 'conversation' && !note) throw new UserError('phaseReason')
+    if (via === 'conversation' && (!basis || !this.phaseBasis(ticket, basis))) throw new UserError('phaseBasis')
+    const at = this.now()
+    if (phase === 'plan' && ticket.plan) {
+      ticket.planHistory = [...ticket.planHistory ?? [], ticket.plan]
+      delete ticket.plan
+      if (ticket.attention?.question === PLAN_QUESTION) { this.replies.withdrawAttention(ticket.attention.id); delete ticket.attention }
+    }
+    if (ticket.verification?.state === 'pending') delete ticket.verification
+    // The verification the worker reported checked the work before the gate reopened: deliver must not accept it again, so
+    // the reopened round verifies anew before it can move forward (no forward skip, docs/012).
+    if (ticket.execution?.verification) { const { verification: _stale, ...execution } = ticket.execution; ticket.execution = execution }
+    const reset: TicketPhaseReset = { at, from, to: phase, via, ...(note ? { reason: note } : {}), ...(basis ? { basis } : {}) }
+    ticket.phaseResets = [...ticket.phaseResets ?? [], reset]
+    ticket.phase = phase
+    ticket.updatedAt = at
+    if (via === 'conversation') { this.repo.tickets.save(ticket); return this.require(ticketId) }
+    // A panel move is the person's own instruction to the worker, not context: like a returned verification it is a
+    // person's Input, and a worker whose turn is over, such as after its ready report, starts the next Assignment with it.
+    // A worker still in its turn takes it where it works.
+    const current = latestAssignment(ticket)
+    const midRound = current !== undefined && current.state === 'running' && !current.idleAt
+      && (current.report === undefined || current.report.state === 'progress' || current.report.state === 'waiting')
+    if (!midRound && current?.state === 'running') this.endAssignment(ticket, current, 'phaseReset')
+    // A queued Assignment that never started takes the Input with its launch; only a finished turn needs a new one.
+    const assignment = current && (midRound || current.state === 'pending') ? current : this.newAssignment(ticket)
+    const input: TicketInput = { id: key('input', ticketId, 'phase-reset', at), kind: 'text', at, person: true,
+      text: `人从面板把工单从 ${from} 退回 ${phase} 阶段${note ? `：${note}` : ''}。` + (phase === 'plan'
+        ? '现在只读定位，用 orchestrator_plan 交新方案，等人批准后再改；之前的方案已归档。'
+        : '现在按实现阶段的规则继续，改完后用 orchestrator_phase 重新进 verify，验证通过后再进 deliver。') }
+    ticket.inputs.push(input); ticket.undelivered.push(input.id)
+    this.repo.tickets.save(ticket)
+    if (midRound) this.options.executor.deliver(ticket, assignment)
+    else this.options.executor.start(ticket, assignment)
+    return this.require(ticketId)
+  }
+  /**
+   * Whether `basis` names a message of a person that reached the ticket: a Trigger, or an Input they typed into its Session,
+   * by its id or by the `read` path the ticket's inputs list for it (which is all a worker sees of a Session Input).
+   */
+  private phaseBasis(ticket: Ticket, basis: string): boolean {
+    const named = (item: TicketInput) => item.id === basis || key(item.id) === basis || basis.endsWith(`/input/${key(item.id)}`)
+      || (item.kind === 'trigger' && item.triggerId === basis)
+    const input = ticket.inputs.find(named)
+    if (!input) return false
+    if (input.kind === 'session-resume') return true
+    if (input.kind !== 'trigger' || !input.human || input.context) return false
+    return this.repo.triggers.get(input.triggerId)?.human === true
   }
   /**
    * Applies the idle default to every open ticket whose priority question nobody answered: the question expires, the level

@@ -7,6 +7,7 @@ import { KV } from '../src/kv.ts'
 import { RESOURCES } from '../src/app/resources.ts'
 import { CliError, Commands } from '../src/infra/commands.ts'
 import { IM_WORDS, NOTE_WORDS } from '../src/infra/text.ts'
+import { webKind } from '../src/sources/web.ts'
 import { CHAT, feishu, startRuntime, type Host } from './fixtures/host.ts'
 
 let h: Host
@@ -531,4 +532,61 @@ it('gives a worker the other messages of the request its ticket was accepted fro
   const page = await h.runTool(`worker-${ticket.id}`, 'orchestrator_read', { resource: `ticket/${ticket.id}` })
   expect(page).toMatchObject({ batch: [{ trigger_id: other, read: `trigger/${other}` }] })
   expect(await h.runTool(`worker-${ticket.id}`, 'orchestrator_read', { resource: `trigger/${other}` })).toMatchObject({ trigger_id: other })
+})
+
+it('moves a ticket back a phase on the person\'s message that reached it, and refuses one without it', async () => {
+  const { ticket, trigger, sessionId } = await h.acceptedTicket(feishu('1', '@bot 修一下回归'))
+  expect(await h.runTool(sessionId, 'orchestrator_phase', { phase: 'verify' })).toEqual({ phase: 'verify' })
+  // The origin message did not reach the ticket as an Input, so it cannot authorize a back-move, nor can a missing reason.
+  await expect(h.runTool(sessionId, 'orchestrator_phase', { phase: 'plan', reason: '追加范围', basis: trigger.id }))
+    .rejects.toMatchObject({ code: 'phaseBasis' })
+  const asked = feishu('2', '@bot 本单状态回转到 plan 吧，把 ANS 迁移也一起做', { root_id: 'om_1' })
+  h.runtime.receive(asked); await h.runtime.idle()
+  await expect(h.runTool(sessionId, 'orchestrator_phase', { phase: 'plan', basis: asked.id })).rejects.toMatchObject({ code: 'phaseReason' })
+  expect(await h.runTool(sessionId, 'orchestrator_phase', { phase: 'plan', reason: '把 ANS 迁移并进本单', basis: asked.id })).toEqual({ phase: 'plan' })
+  expect(h.runtime.store.tickets.get(ticket.id)!.phaseResets).toEqual([expect.objectContaining({ from: 'verify', to: 'plan', via: 'conversation',
+    reason: '把 ANS 迁移并进本单', basis: asked.id })])
+  // Forward moves still go one step at a time: from plan, verify is out of order.
+  await expect(h.runTool(sessionId, 'orchestrator_phase', { phase: 'verify' })).rejects.toMatchObject({ code: 'phaseOutOfOrder' })
+})
+
+it('moves a ticket back a phase from the panel, with the note in its history, and refuses a forward move', async () => {
+  const { ticket, sessionId } = await h.acceptedTicket(feishu('1', '@bot 修一下回归'))
+  await h.runTool(sessionId, 'orchestrator_phase', { phase: 'verify' })
+  const page = await h.api('GET', `tickets/${ticket.id}`)
+  expect(page.body).toMatchObject({ phase: 'verify', phaseBack: ['plan', 'implement'], phaseResets: [] })
+  expect((await h.api('POST', `tickets/${ticket.id}/phase`, { phase: 'implement', note: '补充范围' })).body).toEqual({ phase: 'implement' })
+  const moved = await h.api('GET', `tickets/${ticket.id}`)
+  expect(moved.body).toMatchObject({ phase: 'implement', phaseBack: ['plan'],
+    phaseResets: [expect.objectContaining({ from: 'verify', to: 'implement', via: 'panel', reason: '补充范围' })] })
+  // The worker is told in its own conversation, as the person's instruction.
+  expect(h.runtime.store.tickets.get(ticket.id)!.inputs.at(-1)).toMatchObject({ kind: 'text', person: true, text: expect.stringContaining('补充范围') })
+  expect((await h.api('POST', `tickets/${ticket.id}/phase`, { phase: 'implement' })).status).toBe(400)
+  expect((await h.api('POST', `tickets/${ticket.id}/phase`, { phase: 'deliver' })).status).toBe(400)
+})
+
+it('hands back a request typed into the worker\'s Session as one Web request the main Session assesses', async () => {
+  h.runtime.sources.register(webKind({ deliver: async () => 'sent' }))
+  await h.runtime.settings.sync('web')
+  const { ticket, sessionId } = await h.acceptedTicket(feishu('1', '@bot 修一下回归'))
+  const request = '本单开新单做：bInJumpAnimCurve 重命名并迁移到 UE Python'
+  // A worker may hand back Session words only when a person wrote in its Session; a made-up request is refused.
+  await expect(h.runTool(sessionId, 'orchestrator_trigger_handback', { request, reason: '新单：重命名与迁移' }))
+    .rejects.toMatchObject({ code: 'noSessionRequest' })
+  expect(h.runtime.engine.wroteInSession(ticket.id, request)).toBe(true)
+  await expect(h.runTool(sessionId, 'orchestrator_trigger_handback', { reason: '新单' })).rejects.toThrow()
+  const handed = await h.runTool(sessionId, 'orchestrator_trigger_handback', { request, reason: '新单：重命名与迁移' })
+  expect(handed).toEqual({ trigger_id: expect.any(String), queued: true })
+  await h.runtime.pump(); await h.runtime.idle()
+  expect(h.candidates()).toContain(handed.trigger_id)
+  // The candidate says which ticket handed it back, and the hand-back is recorded for the relation graph.
+  expect(relaysOf('candidate').at(-1)).toMatchObject({ handed_back: [{ trigger_id: handed.trigger_id, ticket_id: ticket.id }] })
+  // The same words handed back again are the same Trigger, not a second ticket.
+  expect(await h.runTool(sessionId, 'orchestrator_trigger_handback', { request, reason: '新单：重命名与迁移' }))
+    .toEqual({ trigger_id: handed.trigger_id, queued: true, state: 'duplicate' })
+  await h.runtime.pump(); await h.runtime.idle()
+  expect(h.candidates().filter(id => id === handed.trigger_id)).toHaveLength(1)
+  const accepted = await h.route({ kind: 'accept', trigger_id: handed.trigger_id, title: '重命名与迁移', worktree_name: 'rename-migrate',
+    acknowledgement: '收到，另开一单。' })
+  expect(accepted.ticket).toMatchObject({ ticket_id: expect.any(String) })
 })

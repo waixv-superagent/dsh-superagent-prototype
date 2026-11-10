@@ -70,6 +70,10 @@ function history(ticket: TicketPageView, t: T): HistoryEvent[] {
     else if (assignment.endedAt && assignment.endedReason) events.push({ key: `${assignment.id}-ended`, at: assignment.endedAt, state: 'idle',
       title: t('timelineRunEnded', { number }), sub: reasonLabel(t, assignment.endedReason) })
   })
+  // A person's back-move reopened a gate: the timeline says which one, why, and whether it came from the panel or a request.
+  for (const reset of ticket.phaseResets) events.push({ key: `phase-${reset.at}-${reset.to}`, at: reset.at, state: 'warning',
+    title: t('timelinePhaseReset', { from: valueLabel(t, 'phase', reset.from), to: valueLabel(t, 'phase', reset.to) }),
+    sub: reset.reason ?? (reset.via === 'panel' ? t('phaseVia.panel') : t('phaseVia.conversation')) })
   if (ticket.ended) events.push({ key: 'ended', at: ticket.ended.at,
     state: ticket.ended.outcome === 'merged' || ticket.ended.outcome === 'completed' ? 'done'
       : ticket.ended.outcome === 'closed' ? 'warning' : 'idle',
@@ -699,9 +703,44 @@ function AttentionAnswer({ ticket, onChanged }: { ticket: TicketPageView; onChan
   </div>
 }
 
+/**
+ * A person's move of a live ticket back one of its earlier phases, opened from the status line: the note says why, the
+ * chosen gate reopens, and the worker is told what changed. Only earlier phases are offered, so the gates keep their order
+ * and nothing moves forward without the worker proving the step (docs/031).
+ */
+function PhaseBack({ ticket, onChanged, onClose }: { ticket: TicketPageView; onChanged: () => Promise<void>; onClose: () => void }) {
+  const { t, call, notify } = usePanel()
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState<string>()
+  const [error, setError] = useState('')
+  const move = async (phase: 'plan' | 'implement') => {
+    setBusy(phase); setError('')
+    try {
+      await call('POST tickets/:id/phase', { id: ticket.id, body: { phase, ...note.trim() ? { note: note.trim() } : {} } })
+      setNote(''); onClose(); notify(t('phaseResetDone'))
+      await onChanged()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally { setBusy(undefined) }
+  }
+  return <section className="dt-banner dt-phase-back" aria-label={t('phaseBack')}>
+    <span className="dt-banner-label">{t('phaseBack')}</span>
+    <p className="dt-hint">{t('phaseBackHint')}</p>
+    <textarea className="dt-textarea" rows={2} value={note} placeholder={t('phaseBackNote')} disabled={busy !== undefined}
+      onChange={event => setNote(event.target.value)} />
+    <div className="dt-banner-actions">
+      {ticket.phaseBack.map(phase => <Button key={phase} variant="outline" size="sm" disabled={busy !== undefined}
+        onClick={() => { void move(phase) }}>{phase === 'plan' ? t('phaseBackPlan') : t('phaseBackImplement')}</Button>)}
+      <Button variant="ghost" size="sm" onClick={onClose}>{t('cancel')}</Button>
+    </div>
+    {error && <p className="dt-error" role="alert">{error}</p>}
+  </section>
+}
+
 export function TicketPage({ id }: { id: string }) {
   const { t, call, notify } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET tickets/:id', { id }), [id])
+  const [phaseBack, setPhaseBack] = useState(false)
   const after = async (request: Promise<unknown>) => { await request; await reload() }
   if (!data) return <><PageHead
     title={t('term.ticket')} />{error instanceof ApiError && error.missing ? <Hint>{t('ticketNotFound')}</Hint> : <LoadState
@@ -737,7 +776,10 @@ export function TicketPage({ id }: { id: string }) {
       <LabelValue label={t('ticketMandateLabel')} value={valueLabel(t, 'strength', data.mandate.strength)} />
       <LabelValue label={t('ticketActorLabel')} value={`${valueLabel(t, 'source', data.mandate.actor.source)} · ${actor}`} />
       <LabelValue label={t('ticketUpdatedLabel')} value={when(data.updatedAt, t('lang'))} />
+      <LabelValue label={t('ticketPhaseLabel')} value={valueLabel(t, 'phase', data.phase)} />
+      {data.phaseBack.length > 0 && <Button variant="ghost" size="sm" onClick={() => setPhaseBack(value => !value)}>{t('phaseBack')}</Button>}
     </div>
+    {phaseBack && data.phaseBack.length > 0 && <PhaseBack ticket={data} onChanged={reload} onClose={() => setPhaseBack(false)} />}
     {ended && <Hint>{ended}</Hint>}
     {/* The P1 gate: the decision is taken here, and the evidence opens in place instead of sending the person to Feishu. */}
     {data.plan?.waiting && <PlanGate plan={data.plan} onDecide={async (decision, note) => {
