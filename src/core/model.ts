@@ -297,8 +297,13 @@ export type TicketOutcome = 'completed' | 'merged' | 'closed' | 'dropped' | 'sto
 export interface QuestionSection { label: string; text: string; fold?: boolean }
 /** One exact provider/model route, as DeepSeek Harness names a child Session's model. */
 export interface ModelRoute { provider: string; model: string }
-/** A person's recorded authorization for one route on a ticket, and the question it answered; `role` is the team role it was approved for. */
-export interface ModelGrant extends ModelRoute { at: string; attentionId: string; role?: string }
+/**
+ * A person's recorded authorization for one route on a ticket; `role` is the team role it was approved for. A click on the
+ * card records `attentionId`; a message the person wrote on the ticket that named the route records `inputId` instead.
+ */
+export interface ModelGrant extends ModelRoute { at: string; attentionId?: string; inputId?: string; role?: string }
+/** One model as the deployment's catalog names it, for judging whether a person's own message named a route. */
+export interface RoutedModel extends ModelRoute { name: string }
 /** One member of a worker's proposed agent team: the role and job a person sees before allowing its route, and that route. */
 export interface TeamRoute extends ModelRoute { role: string; task: string }
 /** The limits of one team request: how many teammates it may name, and the length of a role and of its one-line job. */
@@ -309,6 +314,57 @@ export const TEAM_TASK_CHARS = 200
 export const MODEL_APPROVAL_OPTIONS = ['允许', '不允许'] as const
 /** A ticket's subagent model route, as people and models write it. */
 export const modelRoute = (route: ModelRoute): string => `${route.provider}/${route.model}`
+/** The words in a message that ask to use a model, rather than merely mention it. */
+const MODEL_REQUEST = ['用', '让', '给', '拿', '跑', '交给', '改用', '换成']
+const MODEL_REQUEST_EN = ['use', 'using', 'run', 'with', 'let']
+/** The words next to a model name that refuse it: a refusal never authorizes the route. */
+const MODEL_REFUSAL = ['不', '别', '勿', '无需', '不用', '不要', '不必']
+/** A version-like word, such as `v4`, names no model on its own. */
+const MODEL_VERSION = /^v\d+$/
+/** The lower-case words in `text`, split on anything that is not a letter or a digit. */
+const modelWords = (text: string): string[] => text.toLowerCase().match(/[a-z0-9]+/g) ?? []
+/** Whether `haystack` contains `word` as a whole word, not as part of a longer one; used for Latin words. */
+const hasWord = (haystack: string, word: string): boolean => new RegExp(`(?:^|[^a-z0-9])${word}(?![a-z0-9])`, 'i').test(haystack)
+/**
+ * The names a person may write for `route`: its exact id, the catalog's display name, and the words only that route
+ * answers to. A word another route also answers to (the maker's name, or a version both share) cannot name one of them,
+ * so it is dropped; an ambiguous message still asks on a card.
+ */
+function modelAliases(route: ModelRoute, catalog: readonly RoutedModel[]): { names: string[]; words: string[] } {
+  const entry = catalog.find(item => item.provider === route.provider && item.model === route.model)
+  const names = [route.model, ...entry?.name ? [entry.name] : []].map(name => name.trim().toLowerCase()).filter(Boolean)
+  const words = new Set<string>()
+  for (const name of names) for (const word of modelWords(name)) {
+    if (word.length < 3 || !/[a-z]/.test(word) || MODEL_VERSION.test(word)) continue
+    const shared = catalog.some(item => (item.provider !== route.provider || item.model !== route.model)
+      && modelWords(`${item.model} ${item.name}`).includes(word))
+    if (!shared) words.add(word)
+  }
+  return { names, words: [...words] }
+}
+/**
+ * Whether `text`, a message a person wrote on the ticket, names `route` and asks to use it. A mention that is refused
+ * ("不要用 opus") or only mentioned ("opus 太慢") authorizes nothing, so the worker still asks on a card then.
+ */
+export function personNamesRoute(text: string, route: ModelRoute, catalog: readonly RoutedModel[]): boolean {
+  const lower = text.toLowerCase()
+  const { names, words } = modelAliases(route, catalog)
+  for (const needle of [...names, ...words]) {
+    for (let from = lower.indexOf(needle); from >= 0; from = lower.indexOf(needle, from + 1)) {
+      // A Latin model name counts only as a whole word: `opus` inside `opuscule` names no route.
+      if (from > 0 && /[a-z0-9]/.test(lower.charAt(from - 1))) continue
+      if (/[a-z0-9]/.test(lower.charAt(from + needle.length))) continue
+      // The words nearest to the name decide whether it is a request ("让 opus 出方案") or a refusal ("opus 不要用").
+      const before = lower.slice(Math.max(0, from - 12), from)
+      const after = lower.slice(from + needle.length, from + needle.length + 8)
+      if (MODEL_REFUSAL.some(word => before.includes(word) || after.includes(word))) continue
+      const requested = MODEL_REQUEST.some(word => before.includes(word) || after.includes(word))
+        || MODEL_REQUEST_EN.some(word => hasWord(before, word) || hasWord(after, word))
+      if (requested) return true
+    }
+  }
+  return false
+}
 /** A question for a person; `triggerId` is the human message that raised it, whose conversation it goes back to. */
 export interface Attention { id: string; question: string; /** The worker's choices, when it offers any; a card shows them and a click answers. */ options?: string[]; /** The context the worker adds, in its own order; absent keeps the card's default layout. */ sections?: QuestionSection[]; triggerId?: string
   /** The subagent model route this question asks the person to allow; absent on an ordinary question. */

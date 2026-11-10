@@ -92,10 +92,11 @@ const SUBAGENT_TOOL = 'subagent'
 const MODEL_POLICY_EVENT = 'subagent/model-selection-policy'
 /** What a worker is told when it selects a model route no person allowed on its ticket. */
 const MODEL_NOT_APPROVED = (route: ModelRoute): string => `The subagent model route "${modelRoute(route)}" is not approved for this ticket. `
-  + 'Ask the person with orchestrator_report: state progress, human_action (the question) and '
-  + 'subagent_model {provider, model} for one route, or subagent_team for an agent team, one role and job per route. '
-  + 'The host puts 允许 and 不允许 on the card, and only 允许 records the routes; '
-  + 'list_subagent_models lists the routes this deployment provides.'
+  + 'If a person\'s own message on this ticket already named that route, record it with orchestrator_report: state progress and '
+  + 'subagent_model {provider, model}, without human_action, and the host records their message as the grant. Otherwise ask the '
+  + 'person with orchestrator_report: state progress, human_action (the question) and subagent_model {provider, model} for one '
+  + 'route, or subagent_team for an agent team, one role and job per route. The host puts 允许 and 不允许 on the card, and only '
+  + '允许 records the routes; list_subagent_models lists the routes this deployment provides.'
 /** The model route a subagent call selects explicitly, when it passes both ids together; an inherited call selects none. */
 function selectedModel(execution?: { name: string; arguments: unknown }): ModelRoute | undefined {
   if (execution?.name !== SUBAGENT_TOOL) return undefined

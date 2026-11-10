@@ -1254,6 +1254,54 @@ describe('worker reports', () => {
     expect(denied.execution?.modelGrants).toHaveLength(1)
     expect(denied.inputs.at(-1)).toMatchObject({ text: '人不允许模型 p/n；本工单不要用它。' })
   })
+  it('records a person\'s own message that named a subagent model route as its authorization', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.tick(1)
+    const catalog = [{ provider: 'p', model: 'm', name: 'Opus 5.5' }]
+    // No message named the route yet: the host has nothing to record, so the worker still asks on a card.
+    expect(h.engine.authorizeModelFromPerson(ticketId, { provider: 'p', model: 'm' }, catalog)).toBeUndefined()
+    expect(h.repo.tickets.get(ticketId)!.execution?.modelGrants).toBeUndefined()
+    // A person's own message on the ticket names the route and asks to use it: that Input becomes the grant, so no card is
+    // needed. The record keeps both the route and the message it came from.
+    h.engine.receive(trigger('2', { text: '模板方案让 opus 出方案' }))
+    const granted = h.engine.authorizeModelFromPerson(ticketId, { provider: 'p', model: 'm' }, catalog)
+    expect(granted).toMatchObject({ provider: 'p', model: 'm' })
+    expect(granted!.attentionId).toBeUndefined()
+    const recorded = h.repo.tickets.get(ticketId)!
+    expect(recorded.inputs.find(input => input.id === granted!.inputId)).toMatchObject({ kind: 'trigger', triggerId: '2' })
+    expect(recorded.execution?.modelGrants).toEqual([granted])
+    // Idempotent: a second request for the same route returns the record instead of adding another.
+    expect(h.engine.authorizeModelFromPerson(ticketId, { provider: 'p', model: 'm' }, catalog)).toEqual(granted)
+    expect(h.repo.tickets.get(ticketId)!.execution?.modelGrants).toHaveLength(1)
+    // A person who wrote it in the worker Session authorizes it the same way; that input carries the words itself.
+    const session = harness()
+    const sessionTicket = accepted(session).ticketId!
+    expect(session.engine.wroteInSession(sessionTicket, '模板方案让 opus 出方案')).toBe(true)
+    const fromSession = session.engine.authorizeModelFromPerson(sessionTicket, { provider: 'p', model: 'm' }, catalog)
+    expect(fromSession).toMatchObject({ provider: 'p', model: 'm' })
+    expect(session.repo.tickets.get(sessionTicket)!.inputs.find(input => input.id === fromSession!.inputId))
+      .toMatchObject({ kind: 'session-resume', text: '模板方案让 opus 出方案' })
+    // A refusal is not an authorization, and neither is a bot's message that names the route.
+    const refused = harness()
+    const refusedTicket = accepted(refused).ticketId!
+    refused.engine.receive(trigger('2', { text: '不要用 opus，先走 deepseek' }))
+    expect(refused.engine.authorizeModelFromPerson(refusedTicket, { provider: 'p', model: 'm' }, catalog)).toBeUndefined()
+    refused.engine.receive(trigger('3', { human: false, text: '让 opus 跑一下' }))
+    expect(refused.engine.authorizeModelFromPerson(refusedTicket, { provider: 'p', model: 'm' }, catalog)).toBeUndefined()
+    refused.engine.receive(trigger('4', { text: 'opus 不要用' }))
+    expect(refused.engine.authorizeModelFromPerson(refusedTicket, { provider: 'p', model: 'm' }, catalog)).toBeUndefined()
+    // A word two routes both answer to names neither on its own; the version-specific name still names one.
+    const two = [{ provider: 'p', model: 'm', name: 'Opus 5.5' }, { provider: 'p', model: 'n', name: 'Opus 4.5' }]
+    const ambiguous = harness()
+    const ambiguousTicket = accepted(ambiguous).ticketId!
+    ambiguous.engine.receive(trigger('2', { text: '用 opus 出方案' }))
+    expect(ambiguous.engine.authorizeModelFromPerson(ambiguousTicket, { provider: 'p', model: 'm' }, two)).toBeUndefined()
+    expect(ambiguous.engine.authorizeModelFromPerson(ambiguousTicket, { provider: 'p', model: 'n' }, two)).toBeUndefined()
+    ambiguous.engine.receive(trigger('3', { text: '让 opus 5.5 出方案' }))
+    expect(ambiguous.engine.authorizeModelFromPerson(ambiguousTicket, { provider: 'p', model: 'm' }, two))
+      .toMatchObject({ provider: 'p', model: 'm' })
+  })
   it('asks a person to allow a whole agent team on one card and records each role\'s route only on 允许', () => {
     const h = harness()
     const ticketId = accepted(h).ticketId!

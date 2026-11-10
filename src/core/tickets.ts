@@ -1,8 +1,8 @@
 /** Tickets: their lifecycle from an accept to their end, their Subscriptions and their Inputs. */
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
-import { latestAssignment, latestReport, liveTicket, MODEL_APPROVAL_OPTIONS, modelRoute, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
-import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, LinkedRelationKind, Mandate, ModelGrant, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, TeamRoute, ThreadRef, Ticket, TicketEndBy,
+import { latestAssignment, latestReport, liveTicket, MODEL_APPROVAL_OPTIONS, modelRoute, personNamesRoute, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
+import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, LinkedRelationKind, Mandate, ModelGrant, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, TeamRoute, ThreadRef, Ticket, TicketEndBy,
   TicketInput, TicketOutcome, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
@@ -704,6 +704,38 @@ export class Tickets extends EnginePart {
       const grant = this.grantModel(ticket, attention, at, { provider: item.provider, model: item.model, role: item.role })
       return grant ? [grant] : []
     })
+  }
+  /**
+   * A person's own message named `route` on the ticket: that is an authorization too, beside a click on the card's 允许
+   * (docs/003), and recording it here lets the worker select the route without asking again. Only a person's own message
+   * counts: a bot's, a note, or a Thread the ticket follows only for context never authorizes a model. The grant names the
+   * Input it came from, so the authorization stays next to the message that gave it.
+   * @returns the route's grant, existing or recorded now; undefined when no person message on the ticket names it.
+   */
+  authorizeModelFromPerson(ticketId: string, route: ModelRoute, catalog: readonly RoutedModel[]): ModelGrant | undefined {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) return undefined
+    const execution = ticket.execution ?? { name: '', directory: '', assignment: '' }
+    const existing = execution.modelGrants?.find(item => item.provider === route.provider && item.model === route.model)
+    if (existing) return existing
+    const message = this.personMessages(ticket).findLast(item => personNamesRoute(item.text, route, catalog))
+    if (!message) return undefined
+    const grant: ModelGrant = { provider: route.provider, model: route.model, at: message.at, inputId: message.id }
+    ticket.execution = { ...execution, modelGrants: [...execution.modelGrants ?? [], grant] }
+    this.repo.tickets.save(ticket)
+    return grant
+  }
+  /** The messages a person wrote to the ticket, oldest first: a Trigger they sent or the words they wrote in its Session. */
+  private personMessages(ticket: Ticket): { id: string; at: string; text: string }[] {
+    const messages: { id: string; at: string; text: string }[] = []
+    for (const input of ticket.inputs) {
+      if (input.kind === 'session-resume') messages.push({ id: input.id, at: input.at, text: input.text })
+      else if (input.kind === 'trigger' && input.human && !input.context) {
+        const trigger = this.repo.triggers.get(input.triggerId)
+        if (trigger) messages.push({ id: input.id, at: input.at, text: trigger.text })
+      } else if (input.kind === 'text' && input.person) messages.push({ id: input.id, at: input.at, text: input.text })
+    }
+    return messages
   }
   /**
    * A worker moves its ticket one phase forward: implement (only through a person's plan approval) → verify → deliver, the

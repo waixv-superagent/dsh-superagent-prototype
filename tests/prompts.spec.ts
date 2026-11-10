@@ -81,6 +81,13 @@ it('tells a worker leading an agent team to ask for the roster and verify its te
   expect(worker).toContain('Teammates never push')
 })
 
+it('tells a worker a route a person already named needs no card', () => {
+  // docs/003: a person's own message that names a route authorizes it; the worker records it instead of asking again.
+  const worker = composePrompt(defaultPrompts(), 'worker')
+  expect(worker).toContain('A route a person\'s own message already named needs no card')
+  expect(worker).toContain('`subagent_model` and no `human_action`')
+})
+
 it('reads a prompt file whatever its line ends and blank lines, and names a missing or empty one', () => {
   const dir = mkdtempSync(join(tmpdir(), 'prompt-file-'))
   // An absolute name reads that file; a bare name resolves under prompts/.

@@ -59,7 +59,9 @@ interface Skill { name: string; description: string; content: string }
 // 53,187, so the budget grew to 53,400.
 // The agent-team roster adds the `subagent_team` schema and the leader's briefing, partitioning, steering and self-verification
 // rules (docs/003); the combined worker surface measures 55,223, so the budget grows to 55,400.
-const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 55_400 }
+// A person's own message that names a route authorizes it without a card; the worker prompt line says so (docs/003).
+// The worker surface measured 55,704, so the budget grows to 55,800.
+const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 55_800 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

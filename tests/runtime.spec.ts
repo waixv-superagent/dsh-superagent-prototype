@@ -1993,6 +1993,43 @@ it('releases the deployment\'s subagent models on a worker Session and lets a pe
   expect(select('ai-gateway', 'claude-sonnet-5')).toMatch('not approved')
 })
 
+it('takes a person\'s own message naming the route as the model grant, so the card is not sent again', async () => {
+  const catalog = {
+    default: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' },
+    groups: [{ id: 'ai-gateway', name: 'kurogames', models: [
+      { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
+      { id: 'claude-opus-5.5', name: 'Opus 5.5' },
+      { id: 'claude-sonnet-5', name: 'Sonnet 5' }] }],
+    failures: [],
+  }
+  Object.assign(controller, { modelCatalog: vi.fn(async () => catalog) })
+  const seeded = runtime.store.settings()
+  runtime.store.saveSettings({ ...seeded, executor: { ...seeded.executor, model: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' } } })
+  const { ticket, sessionId } = await acceptedTicket()
+  const guard = guards.get(sessionId)!
+  const select = (provider: string, model: string) => guard({ name: 'subagent', arguments: { provider, model, prompt: 'look' } })
+  // The person already said it in the worker Session; that message is an authorization, not something to ask about again.
+  const ctx = (runtime as unknown as { ctx: Context }).ctx
+  ctx.emit('session/event', { id: sessionId } as never, { type: 'user/message',
+    data: { source: { kind: 'user' }, content: [{ type: 'text', text: '模板方案让opus出方案' }] } } as never)
+  const reported = await runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'Opus 5.5 出模板方案',
+    subagent_model: { provider: 'ai-gateway', model: 'claude-opus-5.5' } }) as
+    { attention?: unknown; authorized?: { provider: string; model: string; inputId?: string } }
+  // No card: the report records the person's Input as the grant and tells the worker it may select the route.
+  expect(reported.attention).toBeUndefined()
+  expect(reported.authorized).toMatchObject({ provider: 'ai-gateway', model: 'claude-opus-5.5' })
+  expect(runtime.store.tickets.get(ticket.id)!.execution?.modelGrants).toEqual([
+    expect.objectContaining({ provider: 'ai-gateway', model: 'claude-opus-5.5', inputId: expect.any(String) })])
+  expect(select('ai-gateway', 'claude-opus-5.5')).toBeUndefined()
+  // A refusal is not an authorization: the host asks on the fixed card and the route stays refused until 允许.
+  ctx.emit('session/event', { id: sessionId } as never, { type: 'user/message',
+    data: { source: { kind: 'user' }, content: [{ type: 'text', text: '先不要用 sonnet' }] } } as never)
+  const asked = await runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'Sonnet?', human_action: '想用 Sonnet 5 对比',
+    subagent_model: { provider: 'ai-gateway', model: 'claude-sonnet-5' } }) as { attention?: { options: string[] } }
+  expect(asked.attention?.options).toEqual(['允许', '不允许'])
+  expect(select('ai-gateway', 'claude-sonnet-5')).toMatch('not approved')
+})
+
 it('offers one card for an agent team and lets a person authorize every role\'s route', async () => {
   const catalog = {
     default: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' },
