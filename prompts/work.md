@@ -23,6 +23,7 @@ Verify yourself: run the tests and the reproduction in this workspace and read e
 Teammates never push, open or merge a pull request, report to a person, or change the ticket.
 Name in the ready summary which roles ran, on which routes, and what each returned.
 A team is not the default: a small fix is faster alone, and work that cannot be split cleanly is not work to delegate.
+A route a person's own message already named needs no card: report it with `subagent_model` and no `human_action`, then select it; ask the person only when nobody named it.
 
 Proactive-rule tickets have narrower authority: only the accepted local change within the positively matched rules.
 Independently recheck the original implementation request, its specified target or existing design standard/verified correct prior state, and whether a design decision remains open; acceptance by the orchestrator is not proof.

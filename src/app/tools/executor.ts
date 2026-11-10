@@ -2,7 +2,7 @@
 import { z } from 'zod'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { LINKED_RELATION_KINDS, analysisRunning, liveTicket, missingVerifyLabels, modelRoute, PLAN_DIFF_LIMITS, TEAM_ROLE_CHARS, TEAM_ROLES_MAX,
-  TEAM_TASK_CHARS, ticketPhase, VERIFY_LABELS, type EngineForExecutor, type ModelRoute, type TeamRoute, type Ticket } from '../../core/index.ts'
+  TEAM_TASK_CHARS, ticketPhase, VERIFY_LABELS, type EngineForExecutor, type ModelGrant, type ModelRoute, type RoutedModel, type TeamRoute, type Ticket } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
 import { matchDeliveryTarget, deliveryTargets } from '../delivery-targets.ts'
 import { claimPull, readPull } from '../../sources/github-pull.ts'
@@ -20,7 +20,7 @@ import type { EditorGatekeeper } from '../editor-gatekeeper.ts'
 
 export interface ExecutorToolsHost {
   readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'submitPlan' | 'advancePhase' | 'redispatchTicket'
-    | 'recordPipeline' | 'rerunPipeline'>
+    | 'recordPipeline' | 'rerunPipeline' | 'authorizeModelFromPerson'>
   readonly store: Pick<Store, 'tickets' | 'settings' | 'replyStatus' | 'atomic'>
   readonly sessions: Pick<Sessions, 'relay' | 'notify' | 'prompt'>
   readonly resources: ResourceHost
@@ -66,9 +66,12 @@ function editorStatusFor(scheduler: EditorScheduler, ticketId: string) {
 }
 
 /** The model catalog's display name for an exact route, or undefined when the deployment does not route it. */
-async function routedModel(host: ExecutorToolsHost, provider: string, model: string): Promise<string | undefined> {
-  const catalog = await host.models()
+function routedModel(catalog: ModelCatalog, provider: string, model: string): string | undefined {
   return catalog.groups.find(group => group.id === provider)?.models.find(item => item.id === model)?.name || undefined
+}
+/** The routes the deployment serves, as the host compares them with the routes a person's own message names. */
+function routableModels(catalog: ModelCatalog): RoutedModel[] {
+  return catalog.groups.flatMap(group => group.models.map(model => ({ provider: group.id, model: model.id, name: model.name })))
 }
 /** A model-approval question that names the route and its display name, followed by the worker's own question. */
 function modelQuestion(model: ModelRoute, name: string, question: string): string {
@@ -211,7 +214,9 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
         subagent_model: z.object({
           provider: z.string().trim().min(1).max(100),
           model: z.string().trim().min(1).max(200),
-        }).strict().optional().describe('With human_action: ask the person to allow this subagent model route; the host asks 允许/不允许. Call list_subagent_models for the ids.'),
+        }).strict().optional().describe('With human_action: ask the person to allow this subagent model route; the host asks 允许/不允许. '
+          + 'Without human_action, only when a person\'s own message on the ticket already named the route: the host records that message as the grant and sends no card. '
+          + 'Call list_subagent_models for the ids.'),
         subagent_team: z.array(z.object({
           role: z.string().trim().min(1).max(TEAM_ROLE_CHARS).describe('What this teammate does in the team, such as 实现 or 复核; unique in one team request.'),
           task: z.string().trim().min(1).max(TEAM_TASK_CHARS).describe('The one-line job this teammate is given, as the person will read it before allowing its route.'),
@@ -232,26 +237,37 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
       execute: async (args, signal) => {
         const current = host.store.tickets.get(ticketId)
         if (!current || !liveTicket(current)) throw new Error('Ticket ended (PR was closed or work finished); do not resume it')
-        // A subagent model or team request is a permission card: the host words the question with the routes and fixes the
-        // choices, so a person's click is the only thing that can authorize them, and the worker cannot offer "允许" itself.
+        // A subagent model or team request is a permission card, except for a route a person already named in a message:
+        // the host words the question with the routes and fixes the choices, so a person's click or that message authorizes
+        // them, and the worker cannot offer "允许" itself.
         let humanAction = args.human_action
         let subagentModel: ModelRoute | undefined
         let subagentTeam: TeamRoute[] | undefined
+        let authorized: ModelGrant | undefined
         if (args.subagent_model && args.subagent_team) {
           throw new Error('Ask for one subagent_model or one subagent_team, not both: a team request already approves its routes by role')
         }
         if (args.subagent_model) {
           if (analysisRunning(current)) throw new Error('This assignment is the ticket\'s read-only idle analysis; it cannot request a subagent model approval')
-          if (humanAction == null || !humanAction.trim()) throw new Error('A subagent model request needs human_action: the question for the person')
           if (args.options?.length) throw new Error('A subagent model request has fixed choices (允许/不允许); omit options')
           const { provider, model: id } = args.subagent_model
-          const name = await routedModel(host, provider, id)
+          const catalog = await host.models()
+          const name = routedModel(catalog, provider, id)
           if (!name) throw new Error(`Unknown model route "${provider}/${id}". list_subagent_models lists the routes this deployment provides; use its provider and model ids`)
           if (current.execution?.modelGrants?.some(grant => grant.provider === provider && grant.model === id)) {
             throw new Error(`The person already approved ${provider}/${id} for this ticket; pass it to subagent instead of asking again`)
           }
-          subagentModel = { provider, model: id }
-          humanAction = modelQuestion(subagentModel, name, humanAction.trim())
+          // A person who already named this route in a message on the ticket has authorized it: record that message as the
+          // grant and send no card. The card is for a route nobody named yet, which the worker asks the person to allow.
+          authorized = host.engine.authorizeModelFromPerson(ticketId, { provider, model: id }, routableModels(catalog))
+          if (authorized) humanAction = undefined
+          else {
+            if (humanAction == null || !humanAction.trim()) {
+              throw new Error('A subagent model request needs human_action: the question for the person, unless a person\'s own message already named the route')
+            }
+            subagentModel = { provider, model: id }
+            humanAction = modelQuestion(subagentModel, name, humanAction.trim())
+          }
         }
         if (args.subagent_team) {
           if (analysisRunning(current)) throw new Error('This assignment is the ticket\'s read-only idle analysis; it cannot request an agent team')
@@ -318,16 +334,18 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           const delivery = { ...(args.changelist != null ? { changelist: args.changelist } : {}),
             ...(args.swarm_review ? { review: args.swarm_review } : {}), ...(args.verification ? { verification: args.verification } : {}) }
           const report = { state: args.state, summary: args.summary, ...(humanAction !== undefined ? { question: humanAction } : {}),
-            ...(args.options ? { options: args.options } : {}), ...(args.sections ? { sections: args.sections } : {}),
+            ...(args.options ? { options: args.options } : {}), ...(args.sections && !authorized ? { sections: args.sections } : {}),
             ...(subagentModel ? { model: subagentModel } : {}), ...(subagentTeam ? { team: subagentTeam } : {}),
-            ...(args.question_for_trigger_id ? { askedBy: args.question_for_trigger_id } : {}),
+            ...(args.question_for_trigger_id && !authorized ? { askedBy: args.question_for_trigger_id } : {}),
             ...(args.reply_to_trigger_id ? { answers: args.reply_to_trigger_id } : {}),
             ...(Object.keys(delivery).length ? { delivery } : {}) }
           const updated = host.engine.report(ticketId, report)
           const relay = analyzing ? undefined : reportRelay(updated, report)
           if (relay) host.sessions.relay(relay.id, relay.text)
           const notification = relay ? 'orchestrator' : 'internal_only'
-          return { reported: true, notification, ...(updated.attention ? { attention: updated.attention } : {}) }
+          return { reported: true, notification, ...(updated.attention ? { attention: updated.attention } : {}),
+            ...(authorized ? { authorized: { provider: authorized.provider, model: authorized.model, inputId: authorized.inputId, at: authorized.at,
+              note: `人已经在本工单的消息里点名 ${authorized.provider}/${authorized.model}，授权已记录；不用再问，直接用 subagent 的 provider/model 指定它。` } } : {}) }
         })
         // The question is raised where the work is, not only on the board: a person reading this Session answers it here or in
         // the ticket's channel, and both reach the ticket as that person's message. It is injected without waking the worker,

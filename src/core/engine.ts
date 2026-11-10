@@ -1,7 +1,7 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
 import { isoTime, liveTicket } from './model.ts'
-import type { Backend, ChannelRef, Decision, LinkedRelationKind, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketPipeline, TicketRepair, Trigger } from './model.ts'
+import type { Backend, ChannelRef, Decision, LinkedRelationKind, ModelGrant, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, ThreadRef, Ticket, TicketPipeline, TicketRepair, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
 import type { PlanDecision, PlanOption, PlanTemplate, PlanVia } from './plan.ts'
@@ -400,6 +400,14 @@ export class Engine {
    */
   report(ticketId: string, report: WorkerReport): Ticket { return this.repo.atomic(() => this.assignments.report(ticketId, report)) }
   /**
+   * A person's own message on the ticket named a subagent model route: record that as its authorization, so the worker's
+   * tool guard lets it select the route without a card (docs/003; see `Tickets.authorizeModelFromPerson`). A route with a
+   * grant already recorded is returned unchanged, and a route no person message names returns undefined.
+   */
+  authorizeModelFromPerson(ticketId: string, route: ModelRoute, catalog: readonly RoutedModel[]): ModelGrant | undefined {
+    return this.repo.atomic(() => this.tickets.authorizeModelFromPerson(ticketId, route, catalog))
+  }
+  /**
    * A person wrote in a ticket's worker Session: an ended ticket resumes, one whose worker's turn is over starts its next
    * Assignment, and one still working takes the message. DSH delivers the message into the Session itself, so no Source saw
    * it and there is no Trigger; the person's act is the authorization, under the ticket's unchanged Mandate, and no Decision
@@ -454,7 +462,7 @@ export type EngineForSettings = Pick<Engine, 'policyChanged'>
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
   | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'reply'
   | 'submitPlan' | 'advancePhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch' | 'startIdleAnalysis'
-  | 'dropUnstartedIdle'>
+  | 'authorizeModelFromPerson' | 'dropUnstartedIdle'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>
 /** What the host's watchdog tells the Engine: it recovers a ticket its worker stopped on a passing failure. */
