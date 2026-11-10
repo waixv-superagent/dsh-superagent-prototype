@@ -65,6 +65,7 @@ import { sourceContextOf, sourceState, type SourceContextDeps } from './source-c
 import type { ResourceHost } from './resources.ts'
 import { mainTools, type MainToolsHost } from './tools/main.ts'
 import { executorTools, type ExecutorToolsHost } from './tools/executor.ts'
+import { captureEditor } from './editor-capture.ts'
 
 // Source plugins interact with dsh-superagent exclusively through the `SourceHost` service interface.
 declare module '@deepseek-ai/cordis' { interface Context { orchestrator: SourceHost } }
@@ -348,6 +349,8 @@ export class Runtime extends Service implements SourceHost {
         get repository() { return setup.deployment.repository },
         models: () => ctx.sessionController.modelCatalog(),
         pipeline: this.pipeline, editor: this.editorScheduler, gatekeeper: this.editorGatekeeper,
+        capture: request => captureEditor({ ticketId: request.ticketId, outDir: join(machine.stateDir, 'evidence', request.ticketId),
+          ...(request.window === undefined ? {} : { window: request.window }), signal: request.signal }),
         workspaceOf: ticket => this.executor.workspaceOf(ticket),
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
@@ -478,6 +481,3 @@ export class Runtime extends Service implements SourceHost {
     }
   }
 }
-
-
-
