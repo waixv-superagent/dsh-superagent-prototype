@@ -2,6 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
 import type { Trigger } from '../core/index.ts'
+import { threadKey } from '../core/index.ts'
 import type { Localized, SourceKind } from './kind.ts'
 import { health, sourceContext, type Health, type SourceContext } from './host.ts'
 import { pause } from './poll.ts'
@@ -235,7 +236,12 @@ export function isoOf(value: string): string {
   return new Date(`${wall.replace(' ', 'T')}+08:00`).toISOString()
 }
 
-/** Reads every page once, ingesting one Trigger per bug that is the person's to see, and returns how many Triggers were new. */
+/**
+ * Reads every page once, ingesting one Trigger per bug that is the person's to see, and returns how many Triggers were new.
+ * A `modified` bump that leaves the bug's visible text and status unchanged — a comment, a priority tweak — carries no new
+ * information: the newest Trigger on the same bug Thread already says the same thing, so no worker is woken again for it. A
+ * changed text or status (reopened, resolved) still becomes a new Trigger, because the previous Trigger then differs.
+ */
 export async function pollRound(ctx: SourceContext, config: TapdConfig, fetchText?: (url: string, authorization?: string) => Promise<string>,
   now = Date.now()): Promise<number> {
   const authorization = credentials().authorization
@@ -243,7 +249,11 @@ export async function pollRound(ctx: SourceContext, config: TapdConfig, fetchTex
   let stored = 0
   for (const bug of bugs) {
     if (!received(bug, config, now)) continue
-    if (await ctx.receive(triggerOf(bug, config)) === 'stored') stored += 1
+    const trigger = triggerOf(bug, config)
+    const thread = trigger.threads[0]
+    const previous = thread ? ctx.triggers.latest(threadKey(thread)) : undefined
+    if (previous?.text === trigger.text && previous.meta.status === trigger.meta.status) continue
+    if (await ctx.receive(trigger) === 'stored') stored += 1
   }
   return stored
 }

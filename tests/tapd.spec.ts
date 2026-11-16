@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Trigger } from '../src/core/index.ts'
+import { threadKey } from '../src/core/index.ts'
 import type { SourceContext } from '../src/sources/host.ts'
 import { bugUrl, credentials, isoOf, listBugs, parseBugs, people, plainText, pollRound, readStatuses, received, statusesOf, tapdKind,
   triggerOf, type TapdConfig } from '../src/sources/tapd.ts'
@@ -11,10 +12,12 @@ const config = (overrides: Partial<TapdConfig> = {}): TapdConfig => ({ workspace
 const row = (bug: Record<string, unknown>) => ({ Bug: { workspace_id: '12345678', ...bug } })
 const page = (bugs: unknown[]) => JSON.stringify({ status: 1, info: 'success', data: bugs })
 
-/** A Source context that only records the Triggers the Source ingests; the polling loop is exercised directly. */
+/** A Source context that only records the Triggers the Source ingests and answers thread lookups from them; the polling loop is exercised directly. */
 function context(received: Trigger[], answers: ('stored' | 'duplicate')[] = []) {
   let index = 0
-  return { receive: async (trigger: Trigger) => { received.push(trigger); return answers[index++] ?? 'stored' } } as unknown as SourceContext
+  return { receive: async (trigger: Trigger) => { received.push(trigger); return answers[index++] ?? 'stored' },
+    triggers: { latest: (thread: string) => [...received].reverse().find(trigger => threadKey(trigger.threads[0]!) === thread) },
+  } as unknown as SourceContext
 }
 
 beforeAll(() => { process.env.DSH_SUPERAGENT_TAPD_ACCESS_TOKEN = 'test-token' })
@@ -164,6 +167,25 @@ describe('TAPD triggers', () => {
     ]), now)
     expect(received.map(trigger => trigger.id.replace(/:\d+$/, ''))).toEqual(['tapd:1', 'tapd:2'])
     expect(stored).toBe(1)
+  })
+  it('does not wake a worker again when a modified bump leaves the bug text and status unchanged', async () => {
+    const received: Trigger[] = []
+    const now = Date.parse('2026-11-02T08:00:00.000Z')
+    const view = (modified: string, status = 'new', description = 'Repro steps') => async () => page([
+      row({ id: '1', title: 'Strafe drift', status, description, modified }) ])
+    const ctx = context(received)
+    await pollRound(ctx, config(), view('2026-11-02 09:00:00'), now)
+    expect(received).toHaveLength(1)
+    // A comment or a field tweak bumps `modified` but says the same thing: no second Trigger, no second wake.
+    await pollRound(ctx, config(), view('2026-11-02 10:00:00'), now)
+    expect(received).toHaveLength(1)
+    // A status change is new information even when the text is the same: 修复中 must still reach the worker.
+    await pollRound(ctx, config(), view('2026-11-02 10:30:00', 'in_progress'), now)
+    expect(received).toHaveLength(2)
+    // A changed description is new information too.
+    await pollRound(ctx, config(), view('2026-11-02 11:00:00', 'in_progress', 'Repro steps v2'), now)
+    expect(received).toHaveLength(3)
+    expect(received[2]!.text).toBe('Strafe drift\n\nRepro steps v2')
   })
 })
 

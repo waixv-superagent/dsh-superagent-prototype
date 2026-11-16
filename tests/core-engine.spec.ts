@@ -2532,6 +2532,30 @@ describe('P1 plan gate', () => {
     const ticketId = accepted(h).ticketId!
     expect(h.engine.report(ticketId, { state: 'ready', summary: 'done' }).ended).toMatchObject({ outcome: 'completed' })
   })
+  it('ends an analysis plan on a ready report without a changelist or the deliver phase', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    const analysis = `问题：翻页为什么会闪
+结论：复用控件时先清了纹理
+依据：AvatarList.cpp:42 的日志
+建议：复用前重设纹理并补一例测试`
+    h.tick(1); h.engine.submitPlan(ticketId, analysis, undefined, undefined, undefined, 'analysis')
+    h.tick(1); h.engine.receive(trigger('2', { text: '1' }))
+    // The approved plan promised a document, not a change: ready needs no changelist and no deliver step (docs/003).
+    expect(h.engine.report(ticketId, { state: 'ready', summary: '结论已交付到原话题' }).ended)
+      .toMatchObject({ outcome: 'completed' })
+  })
+  it('keeps the deliver gate for a fix plan whose ready report carries nothing', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.tick(1); h.engine.submitPlan(ticketId, PLAN)
+    h.tick(1); h.engine.receive(trigger('2', { text: '1' }))
+    const stored = h.repo.tickets.get(ticketId)!
+    h.repo.tickets.save({ ...stored, execution: { name: 'w', directory: '/w', assignment: 'a' } })
+    // A fix plan promised a change: ready without delivering it is refused, as before.
+    expect(() => h.engine.report(ticketId, { state: 'ready', summary: 'done' }))
+      .toThrowError(expect.objectContaining({ code: 'notDeliverable' }))
+  })
 })
 
 describe('phase rollback', () => {
