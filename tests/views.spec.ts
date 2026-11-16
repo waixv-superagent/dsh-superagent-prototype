@@ -289,6 +289,44 @@ it('splits the machine lane from the idle pool, and keeps P3 parked until a pers
   expect(page.pool[0]!.pool).toBe(true)
 })
 
+it('orders the recently-active band by the newest real event, not by when the host last saved the Ticket', () => {
+  const host = views()
+  const now = Date.now()
+  const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString()
+  live('old')
+  store.tickets.save({ ...store.tickets.get('old')!, title: '五天前回过',
+    inputs: [{ id: 'i1', kind: 'text', at: ago(5 * 24 * 60), text: '人回复了', person: true }] })
+  // The pipeline watcher refreshes `updatedAt` on every poll; that is housekeeping, not activity.
+  live('churn')
+  store.tickets.save({ ...store.tickets.get('churn')!, title: '只是主机在刷新', updatedAt: ago(1),
+    pipeline: { state: 'running', at: ago(1), check: '' } })
+  live('fresh')
+  store.tickets.save({ ...store.tickets.get('fresh')!, title: '刚回答过', updatedAt: ago(60 * 24),
+    inputs: [{ id: 'i2', kind: 'text', at: ago(30), text: '人回复了', person: true }] })
+  live('stale')
+  store.tickets.save({ ...store.tickets.get('stale')!, title: '八天前回过',
+    inputs: [{ id: 'i3', kind: 'text', at: ago(8 * 24 * 60), text: '人回复了', person: true }] })
+  // Discretionary work waiting for an idle window stays in the pool dock, not in the band's shortcut.
+  live('pooled')
+  store.tickets.save({ ...store.tickets.get('pooled')!, title: '闲时池里的',
+    priority: { level: 'P2', source: 'default', at: ago(4 * 24 * 60) }, assignments: [{ id: 'a1', state: 'pending', createdAt: ago(10) }] })
+  const page = overview(host, {}, 'v1', load)
+  expect(page.active.map(ticket => [ticket.title, ticket.activeAt]))
+    .toEqual([['刚回答过', ago(30)], ['五天前回过', ago(5 * 24 * 60)]])
+})
+
+it('keeps the recently-active band to the six newest events', () => {
+  const host = views()
+  const now = Date.now()
+  for (let index = 0; index < 7; index++) {
+    live(`r${index}`)
+    store.tickets.save({ ...store.tickets.get(`r${index}`)!, title: `最近 ${index}`,
+      inputs: [{ id: `i${index}`, kind: 'text', at: new Date(now - (index + 1) * 60_000).toISOString(), text: 't' }] })
+  }
+  const page = overview(host, {}, 'v1', load)
+  expect(page.active.map(ticket => ticket.title)).toEqual(['最近 0', '最近 1', '最近 2', '最近 3', '最近 4', '最近 5'])
+})
+
 it('archives completed Tickets from the board after seven days but keeps them in search', () => {
   const host = views()
   live('t1')

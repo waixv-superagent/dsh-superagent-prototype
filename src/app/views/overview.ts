@@ -1,5 +1,5 @@
 /** Overview view: active system problems, tickets awaiting human action, executor load, and 24-hour trigger flow. */
-import { completedArchived, reasonText, ticketPriority, ticketStage, waitsForIdle, type Decision, type PriorityLevel, type Thread,
+import { completedArchived, lastActivityAt, reasonText, ticketPriority, ticketStage, waitsForIdle, type Decision, type PriorityLevel, type Thread,
   type Ticket } from '../../core/index.ts'
 import type { Health } from '../../sources/host.ts'
 import type { SetupProblem } from '../../setup.ts'
@@ -20,6 +20,23 @@ const byLevel = (left: Ticket, right: Ticket): number =>
 /** Pool rows lead with the level, then with the work that has waited longest, so nothing starves unseen. */
 const oldestFirst = (left: Ticket, right: Ticket): number =>
   LEVEL_RANK[ticketPriority(left)] - LEVEL_RANK[ticketPriority(right)] || left.createdAt.localeCompare(right.createdAt)
+/** How many recently active Tickets the board's leading band shows; it is a shortcut into the lanes, not another list. */
+const ACTIVE_LIMIT = 6
+/** How far back a Ticket's newest event still counts as active; older work stays in its lane. */
+const ACTIVE_WINDOW_MS = 7 * 24 * 3_600_000
+/** The newest real event on any open Ticket, newest first, for the board's recently-active band. */
+function recentlyActive(open: Ticket[], now: string): { ticket: Ticket; activeAt: string }[] {
+  const since = Date.parse(now) - ACTIVE_WINDOW_MS
+  return open.flatMap(ticket => {
+    // Discretionary work waiting for an idle window stays behind the pool dock, out of the band's shortcut too.
+    if (waitsForIdle(ticketPriority(ticket))) {
+      const stage = ticketStage(ticket)
+      if (stage.stage === 'idle' || (stage.stage === 'working' && stage.action === 'queued')) return []
+    }
+    const activeAt = lastActivityAt(ticket)
+    return activeAt && Date.parse(activeAt) >= since ? [{ ticket, activeAt }] : []
+  }).sort((left, right) => right.activeAt.localeCompare(left.activeAt) || newestFirst(left.ticket, right.ticket)).slice(0, ACTIVE_LIMIT)
+}
 /** Threads whose latest decision since `since` is an undismissed `unavailable` eval and that are neither evaluating nor queued. */
 function unjudged(store: Store, since: string): { thread: Thread; decision: Decision }[] {
   const seen = new Set<string>()
@@ -113,6 +130,9 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
     .sort((left, right) => Number(right.pipeline?.state === 'blocked') - Number(left.pipeline?.state === 'blocked')
       || (left.pipeline?.at ?? '').localeCompare(right.pipeline?.at ?? ''))
   const ended = all.filter(ticket => ticket.ended && !awaitingIds.has(ticket.id) && !completedArchived(ticket, now)).sort(newestFirst).slice(0, 6)
+  // The band above the lanes answers "what have I been working on lately" without a person scanning all five lanes:
+  // the same Tickets, ordered by their newest real event, and only their compact rows rather than a second card stack.
+  const active = recentlyActive(open, now).map(({ ticket, activeAt }) => ({ ...ticketRow(view, ticket), activeAt }))
   const endedStats = { completed: completed.length, verified: completed.filter(ticket => ticket.verification?.state === 'passed').length,
     pending: awaiting.length,
     agent: completed.filter(ticket => ticket.execution?.verification).length,
@@ -124,6 +144,7 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
   const judgement = store.read.flow(since)
   return {
     problems,
+    active,
     person: open.filter(ticket => {
       const stage = ticketStage(ticket)
       return stage.stage === 'person' && stage.action !== 'verify'

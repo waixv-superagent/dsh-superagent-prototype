@@ -1,6 +1,6 @@
 /** Overview: the duty desk. One verdict, decision cards for Tickets waiting on a person, a running lane, and recently ended work. */
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { usePoll, type BillingView, type EditorRow, type Problem, type TicketRow, type TicketSearchView } from './api.ts'
+import { usePoll, type BillingView, type EditorRow, type Problem, type RecentActiveRow, type TicketRow, type TicketSearchView } from './api.ts'
 import type { PriorityLevel } from '../core/priority.ts'
 import { verifyLines } from '../core/verification.ts'
 import { Button, Icon, Input, Tag } from './controls.tsx'
@@ -9,7 +9,7 @@ import { pipelineTrack, pipelineProgressText, pipelineSmokeFailed, pipelineStage
 import { useAction, usePanel, usePanelData } from './provider.tsx'
 import { KindTag, ThreadChip } from './rows.tsx'
 import { setupPage, settingsRoute, type BoardFocus, type Route } from './route.ts'
-import { errorText, healthText, localized, reasonLabel, valueLabel, readableMarkers, type T } from './text.ts'
+import { errorText, fullTime, healthText, localized, reasonLabel, valueLabel, readableMarkers, type T } from './text.ts'
 import { CheckSetupButton, ConfirmButton, LoadState, SetupMessage, VerificationChecks, When, clientHref, linkTarget } from './widgets.tsx'
 
 /** "22:30" in the viewer's own clock; the row says since when, not a relative age that needs mental arithmetic. */
@@ -213,6 +213,43 @@ function staleLabel(t: T, at: string): string {
   const hours = Math.round(minutes / 60)
   if (hours < 48) return t('boardNoUpdateHours', { hours })
   return t('boardNoUpdateDays', { days: Math.round(hours / 24) })
+}
+/** How long ago a Ticket's newest activity was, in the largest unit that still reads precisely. */
+function activeAgo(t: T, at: string): string {
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(at)) / 60_000))
+  if (minutes < 1) return t('boardActiveNow')
+  if (minutes < 60) return t('boardActiveMinutes', { minutes })
+  const hours = Math.round(minutes / 60)
+  if (hours < 48) return t('boardActiveHours', { hours })
+  return t('boardActiveDays', { days: Math.round(hours / 24) })
+}
+/**
+ * The band above the lanes: the open Tickets whose newest real event is the most recent, whatever stage each one is in,
+ * so the work a person has been driving lately reads in one place instead of being spread across five lanes. It is a
+ * shortcut into the Tickets, not a sixth lane: every row opens the Ticket and the lanes below keep their own order.
+ */
+function RecentActive({ tickets }: { tickets: RecentActiveRow[] }) {
+  const { t, navigate } = usePanel()
+  if (!tickets.length) return null
+  return <section className="dt-active" aria-labelledby="dt-active-title">
+    <header className="dt-active-head">
+      <h2 id="dt-active-title" className="dt-active-title">{t('boardActiveTitle')}</h2>
+      <p className="dt-active-sub">{t('boardActiveSub')}</p>
+    </header>
+    <ol className="dt-active-list">
+      {tickets.map(ticket => {
+        const mark = ticketMark(t, ticket)
+        return <li key={ticket.id} className="dt-active-row" data-tone={mark.tone}>
+          <span className="dt-active-dot" aria-hidden="true" />
+          <button type="button" className="dt-active-name" onClick={() => navigate(ticketRoute(ticket.id))}>{ticket.title}</button>
+          <span className="dt-active-stage">{mark.label}</span>
+          <time className="dt-active-age" dateTime={ticket.activeAt} title={fullTime(ticket.activeAt, t('lang'))}>
+            {activeAgo(t, ticket.activeAt)}
+          </time>
+        </li>
+      })}
+    </ol>
+  </section>
 }
 const ticketRoute = (id: string): Route => ({ page: 'execution', id })
 
@@ -827,6 +864,8 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
     {data.billing && <BillingStrip billing={data.billing} />}
 
     <IdleDock pool={pool} parked={parked} onChanged={reload} />
+
+    <RecentActive tickets={data.active ?? []} />
 
     <div className="dt-board-scroll" ref={boardScroll} data-more={boardMore} onScroll={measureBoard}>
       <section className="dt-board" aria-label={t('boardNeedsTitle')}>
