@@ -6,7 +6,7 @@ import type { Assignment, ModelRoute, QuestionSection, ReportState, TeamRoute, T
 import { analysisAdviceFromSections, ANALYSIS_ADVICE_LABELS } from './analysis.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { REPAIR_LIMIT } from './invariants.ts'
-import { pendingPlan, validCardOptions, validQuestionSections, ticketPhase } from './plan.ts'
+import { pendingPlan, planTemplate, validCardOptions, validQuestionSections, ticketPhase } from './plan.ts'
 import type { Replies } from './replies.ts'
 import { automatic, type Tickets } from './tickets.ts'
 
@@ -193,9 +193,16 @@ export class Assignments extends EnginePart {
     // The P4 delivery facts belong to the deliver phase once a ticket went through the P1 gate: a plan not approved yet
     // refuses them, and so does an approved plan whose worker has not verified and entered deliver. Tickets that never had a
     // plan (the GitHub path) keep reporting as before.
+    //
+    // A plan that declared analysis or design work promises a document, not a changelist: its ready report ends the ticket
+    // without the deliver phase, as docs/003 and docs/012 §3.1 say for analysis work with nothing to run locally. A `fix`
+    // plan, and any report that carries delivery facts, must still pass the deliver gate, so a code ticket cannot claim
+    // ready without its change. A ready report while the plan still waits is always refused.
     const phase = ticketPhase(ticket)
     const gated = ticket.plan !== undefined
-    if (!analyzing && (delivered || report.state === 'ready') && (phase === 'plan' || gated && phase !== 'deliver')) throw new UserError('notDeliverable')
+    const needsDeliver = report.state === 'ready' && planTemplate(ticket.plan) === 'fix'
+    if (!analyzing && (delivered || report.state === 'ready')
+      && (phase === 'plan' || gated && phase !== 'deliver' && (delivered || needsDeliver))) throw new UserError('notDeliverable')
     if (report.question && (report.state === 'ready' || report.answers)) throw new UserError('questionWithResult')
     if (report.askedBy && !report.question) throw new UserError('askerWithoutQuestion')
     const options = report.options?.map(label => label.trim())
