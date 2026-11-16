@@ -48,6 +48,28 @@ it('leads with a verdict and a five-lane board, keeping the idle pool behind one
   expect(all('.dt-verify-card')[1]!.querySelectorAll('.dt-verify-foot button').length).toBe(2)
 })
 
+it('leads the board with the recently active Tickets, newest first, and opens the one clicked', async () => {
+  await mount()
+  await openOverview()
+  expect(document.querySelector('.dt-active-title')?.textContent).toBe(zh.boardActiveTitle)
+  expect(document.querySelector('.dt-active-sub')?.textContent).toBe(zh.boardActiveSub)
+  expect(all('.dt-active-name').map(item => item.textContent)).toEqual(['升级依赖', '修复移动普攻后接 Q 技能无法起飞'])
+  expect(all('.dt-active-stage').map(item => item.textContent)).toEqual([zh['stage.working'], zh['stage.verify']])
+  expect(all('.dt-active-age').map(item => item.textContent)).toEqual(['4 分钟前', '30 分钟前'])
+  // It is a shortcut into the lanes, not a replacement for them: clicking a row opens that Ticket.
+  await click(all('.dt-active-name')[1]!)
+  expect(tab(zh['tab.execution']).getAttribute('aria-selected')).toBe('true')
+})
+
+it('hides the recently-active band when no open Ticket has recent activity', async () => {
+  server.active = []
+  await mount()
+  await openOverview()
+  expect(document.querySelector('.dt-active')).toBeNull()
+  // The lanes stay exactly where they were, directly under the idle dock.
+  expect(document.querySelector('.dt-idle-dock')?.nextElementSibling?.classList.contains('dt-board-scroll')).toBe(true)
+})
+
 it('shows the charging provider, the consumed tokens and the public-price estimate directly above the board', async () => {
   await mount()
   await openOverview()
@@ -65,9 +87,10 @@ it('shows the charging provider, the consumed tokens and the public-price estima
   expect(strip?.querySelectorAll('.dt-billing-bar')).toHaveLength(60)
   expect(strip?.querySelector('.dt-billing-more')?.textContent).toBe('另 1 个模型')
   expect(all('.dt-billing-now .dt-tag').map(tag => tag.textContent)).toEqual(['执行走 DeepSeek Account'])
-  // The strip sits directly above the idle dock and the board, not as a detached banner somewhere in the page.
+  // The strip sits directly above the idle dock, the recently-active band and the board, not as a detached banner somewhere in the page.
   expect(strip?.nextElementSibling?.classList.contains('dt-idle-dock')).toBe(true)
-  expect(strip?.nextElementSibling?.nextElementSibling?.classList.contains('dt-board-scroll')).toBe(true)
+  expect(strip?.nextElementSibling?.nextElementSibling?.classList.contains('dt-active')).toBe(true)
+  expect(strip?.nextElementSibling?.nextElementSibling?.nextElementSibling?.classList.contains('dt-board-scroll')).toBe(true)
 })
 
 it('keeps an unpriced route visible by its tokens instead of inventing a money figure', async () => {

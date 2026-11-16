@@ -123,6 +123,8 @@ export type Settings = { [B in keyof SettingsView['blocks']]: SettingsView['bloc
 export type SourceView = SettingsView['sources'][number]
 export type SourceStatusRow = ApiResponse<'GET sources'>[number]
 export type TicketRow = ApiResponse<'GET tickets'>['items'][number]
+/** One row of the board's recently-active band: a Ticket plus when its newest real event happened. */
+export type RecentActiveRow = ApiResponse<'GET overview'>['active'][number]
 export type TicketPageView = ApiResponse<'GET tickets/:id'>
 export type ActivityView = ApiResponse<'GET tickets/:id/activity'>
 export type ThreadRow = ApiResponse<'GET threads'>['items'][number]

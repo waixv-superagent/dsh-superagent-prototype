@@ -12,6 +12,7 @@ import { SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, builtInPart, buil
 import type { DroppedReply, HistoryView, Problem, PromptsView, SetupView, SourceStatusRow, SourceView, StateView, ThreadPageView,
   ThreadRow, TicketPageView,
   ActivityView,
+  RecentActiveRow,
   TicketRow, TicketStage,
   TriggerRow } from '../../src/client/api.ts'
 import { editorUse, shortTitle } from '../../src/app/views/editor.ts'
@@ -119,6 +120,8 @@ export interface PanelServer {
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; verification: TicketRow[]; working: TicketRow[]; idle: TicketRow[]; pipeline: TicketRow[]; ended: TicketRow[]
+  /** The board's recently-active band: open Tickets with their newest real event, newest first. */
+  active: RecentActiveRow[]
   /** The idle pool the board offers a person: P2 rows to pick, and the P3 rows it keeps collapsed. */
   pool: TicketRow[]; parked: TicketRow[]
   /** Answers `GET tickets/search`; the Overview finder lets a test provide ranked hits. */
@@ -259,6 +262,7 @@ const overviewView = (): ApiResponse<'GET overview'> => {
       ...Object.values(server.settings.policy.sources).some(part => part.allowed.length) ? [] : [{ kind: 'no-allowed' as const }],
       ...server.failing.map(outgoing => ({ kind: 'outgoing' as const, outgoing }))],
     person: server.person, verification: server.verification, working: server.working, idle: server.idle,
+    active: server.active,
     pool: server.pool, parked: server.parked,
     pipeline: server.pipeline, ended: server.ended, editor: server.editor, billing: server.billing,
     endedStats: { completed: 1, verified: 0, pending: 1, agent: 1, none: 0, changelist: 1, archived: 0 },
@@ -392,6 +396,12 @@ function initial(): PanelServer {
     graph: graphView(),
     working: [ticketSummary({ id: 't5', title: '补 i18n 文案', summary: '第 12 步 · 修改 zh-CN.json' }),
       ticketSummary({ id: 't6', title: '升级依赖', summary: '后台 job · 60 秒无输出', updatedAt: '2026-09-22T23:30:00Z' })],
+    active: [
+      { ...ticketSummary({ id: 't6', title: '升级依赖', summary: '后台 job · 60 秒无输出', updatedAt: '2026-09-22T23:30:00Z' }),
+        activeAt: new Date(Date.now() - 4 * 60_000).toISOString() },
+      { ...ticketSummary({ id: 't8', title: '修复移动普攻后接 Q 技能无法起飞' }, { stage: 'person', action: 'verify' }),
+        activeAt: new Date(Date.now() - 30 * 60_000).toISOString() },
+    ],
     idle: [], pipeline: [], ended: [ended],
     pool: [ticketSummary({ id: 't2', title: '【战斗】巡逻时偶现步态滑步', priority: { level: 'P2', code: 'P2', word: '闲时', hint: '闲时处理 / 排期', source: 'default' },
       pool: true, request: '【战斗】【怪物】巡逻时偶现步态滑步，复现条件不明。', createdAt: '2026-09-21T02:00:00Z', summary: '' }, { stage: 'idle' })],
