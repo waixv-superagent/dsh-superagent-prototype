@@ -1,0 +1,33 @@
+{
+  "capturedAt": "2026-11-16T11:02:56.180Z",
+  "scenario": "child subagent Session of a ticket worker, conversation header, dark theme, 1440x1120 CSS px at DPR 2",
+  "viewport": {
+    "width": 1440,
+    "height": 1120,
+    "dpr": 2
+  },
+  "clip": {
+    "x": 280,
+    "y": 0,
+    "width": 1160,
+    "height": 76
+  },
+  "before": {
+    "clientFileSha256": "8769292a54d5cc0112c30a0d1257b81340d0d324c950535d1fdbc72cab143785",
+    "clientTextSha256": "7339d21e7f3839f7e4d51f3e429f82d6bbfcc32d6f8ca32bd8ad62a02943f703",
+    "servedModuleSha256": "7339d21e7f3839f7e4d51f3e429f82d6bbfcc32d6f8ca32bd8ad62a02943f703",
+    "chip": null,
+    "actions": "标准模式"
+  },
+  "after": {
+    "clientFileSha256": "f7e0b457a4ebd2373d5840d21429694bc054cb7e2fdb1f8ca705a3ffc968f51d",
+    "clientTextSha256": "8c84bcc405dcbaf763d07510bcb030314f6e6d1c979e57ff4e4a7561ae5d8581",
+    "chip": {
+      "route": "ai-gateway/claude-opus-5.5",
+      "text": "模型\nai-gateway/claude-opus-5.5",
+      "hint": "这个子 agent 本次运行使用的模型路由（provider/model）"
+    },
+    "actions": "标准模式 模型 ai-gateway/claude-opus-5.5"
+  },
+  "childLabel": "Opus review of BlendStack change"
+}
