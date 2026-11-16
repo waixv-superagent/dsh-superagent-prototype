@@ -4,6 +4,7 @@
  * process table, a clock or a database; `EditorScheduler` persists the result and runs the side effects.
  */
 import type { EditorView } from './editor.ts'
+import type { Presence } from './editor-presence.ts'
 
 /** What a Ticket needs the editor for; the overview shows it, and `build` requests are the ones a job batches. */
 export const EDITOR_PURPOSES = ['build', 'restart', 'test', 'use'] as const
@@ -86,7 +87,7 @@ export interface EditorJob {
 }
 
 export type EditorEventKind = 'queued' | 'granted' | 'released' | 'expired' | 'ended' | 'preempted' | 'claimed' | 'yielded'
-  | 'cancelled' | 'front' | 'job' | 'bypass' | 'reclaimed' | 'kept'
+  | 'returned' | 'cancelled' | 'front' | 'job' | 'bypass' | 'reclaimed' | 'kept'
 export interface EditorEvent {
   at: string
   kind: EditorEventKind
@@ -104,9 +105,10 @@ export interface EditorSchedule {
   events: EditorEvent[]
   /**
    * Interactive editors a person said agents may use: the editor stays open, but its process no longer reads as a
-   * person holding it. Dropped once none of these processes is running.
+   * person holding it. Dropped once none of these processes is running. An `auto` yield is the host's own: it ends when
+   * the person touches the machine again, while a person's own yield stays until the editor closes.
    */
-  yielded?: { at: string; pids: number[] }
+  yielded?: { at: string; pids: number[]; auto?: { at: string; idleMs: number } }
   /** Interactive editors that started under an agent's lease, which are therefore not a person's. */
   agentPids: number[]
 }
@@ -120,6 +122,16 @@ export interface ScheduleContext {
   /** Whether a Ticket is still open; an ended Ticket's lease and waits go. */
   live: (ticketId: string) => boolean
   id: () => string
+  /**
+   * Whether a person is at the machine, when the host can tell. `away` lets agents use an editor or claim the person left
+   * behind; `present` takes an auto yield back; absent or `unknown` changes nothing (docs/021).
+   */
+  presence?: Presence
+  /**
+   * Why an away person's editor must not be yielded right now, such as a dialog nobody can answer or a compile-and-launch
+   * the person started. The reason is for the log only; a blocked decision is never an error.
+   */
+  autoYieldBlock?: string
 }
 
 const iso = (ms: number) => new Date(ms).toISOString()
@@ -259,14 +271,54 @@ function endLease(schedule: EditorSchedule, kind: 'released' | 'expired' | 'ende
 }
 
 /**
- * Brings the schedule up to date: drops the waits and leases of ended Tickets, lapses an expired lease, forgets editors
- * that are gone, records an editor that started under an agent's lease as the agent's, and grants the head of the queue
- * when nothing holds the editor and no person is using it.
+ * Reads the person's presence into the schedule (docs/021). When a person has not touched the machine for the away
+ * threshold, a claim they left behind or an interactive editor they left open would hold every agent at the queue forever;
+ * this applies the same result as their "让 agent 用" button, recording that the host did it and why. An agent or job
+ * holding the lease is left alone: the queue is waiting for it, not for the person. When the person comes back, only an
+ * auto yield ends, so their own choice to let agents use an editor stays until that editor closes.
+ */
+function settlePresence(schedule: EditorSchedule, context: ScheduleContext): void {
+  const presence = context.presence
+  if (!presence || presence.state === 'unknown') return
+  const at = iso(context.now)
+  if (presence.state === 'present') {
+    if (!schedule.yielded?.auto) return
+    delete schedule.yielded
+    event(schedule, { at, kind: 'returned', by: 'host', detail: 'keyboard or mouse input returned; the editor is the person\'s again' })
+    return
+  }
+  // Away. A reason from the host means the editor is already busy with something a person must see or started, so the
+  // queue waits for that rather than for a person who is simply not there.
+  if (context.autoYieldBlock) return
+  // Nothing to gain while no live agent or job waits: an editor is expensive to reload, and the person still owns it until
+  // somebody needs it. The next acquire or submit calls advance again with the request already queued.
+  if (!schedule.queue.some(request => !request.person && request.ticketIds.some(context.live))) return
+  const claimed = schedule.lease?.holder.kind === 'person'
+  const personWait = schedule.queue.some(request => request.person)
+  const open = !schedule.lease && personBlock(schedule, context.editor) === 'editor'
+  if (!claimed && !personWait && !open) return
+  const pids = interactivePids(context.editor).filter(pid => !schedule.agentPids.includes(pid))
+  if (claimed) endLease(schedule, 'released', 'host', at, 'auto: the person has been away from the machine')
+  schedule.queue = schedule.queue.filter(request => !request.person)
+  if (pids.length) schedule.yielded = { at, pids, auto: { at, idleMs: presence.idleMs ?? 0 } }
+  const idle = Math.max(0, Math.floor((presence.idleMs ?? 0) / 60_000))
+  const parts = [`no keyboard or mouse input for ${idle} min`]
+  if (pids.length) parts.push(`the open editor is available to agents (pid ${pids.join(', ')})`)
+  if (claimed) parts.push('the person claim was released')
+  else if (personWait) parts.push('the queued person claim was dropped')
+  event(schedule, { at, kind: 'yielded', by: 'host', detail: parts.join('; ').slice(0, 300) })
+}
+
+/**
+ * Brings the schedule up to date: ends a person's unattended claim or yields the editor they left open, drops the waits and
+ * leases of ended Tickets, lapses an expired lease, forgets editors that are gone, records an editor that started under an
+ * agent's lease as the agent's, and grants the head of the queue when nothing holds the editor and no person is using it.
  * @returns The schedule and the lease it granted, if any, so the caller can tell the worker or start the job.
  */
 export function advance(input: EditorSchedule, context: ScheduleContext): { schedule: EditorSchedule; granted?: EditorLease } {
   const schedule = clone(input)
   const at = iso(context.now)
+  settlePresence(schedule, context)
   const running = new Set(context.editor?.editors?.map(process => process.pid) ?? (context.editor?.pid ? [context.editor.pid] : []))
   const lease = schedule.lease
   if (lease?.holder.kind === 'agent' && !context.live(lease.holder.ticketId)) endLease(schedule, 'ended', 'host', at)

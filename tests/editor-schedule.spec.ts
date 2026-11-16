@@ -7,6 +7,7 @@ import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { EditorView } from '../src/app/editor.ts'
 import { engineSummary, parseEngineSnapshot, readEngineState } from '../src/app/editor-mcp.ts'
+import type { Presence } from '../src/app/editor-presence.ts'
 import { acquire, advance, emptySchedule, heartbeat, ordered, personAct, personBlock, recordBypass, release, standing, submitJob,
   updateJob, type EditorSchedule, type ScheduleContext } from '../src/app/editor-schedule.ts'
 import { EditorScheduler, SAFE_FILTER, fillCommand, jobSummary } from '../src/app/editor-scheduler.ts'
@@ -369,6 +370,143 @@ describe('EditorScheduler review fixes', () => {
       detail: 'started the shared editor without the lease: stopped unrealeditor (pid 42)' })
     expect(recordBypass(after, { ticketId: 'c', detail: 'tried to stop pid 1' }, context()).events.at(-1))
       .toMatchObject({ kind: 'bypass', ticketIds: ['c'] })
+    scheduler.dispose()
+  })
+})
+
+describe('a person who left the machine', () => {
+  const at = new Date(T0).toISOString()
+  const away = (idleMs = 12 * 60_000): Presence => ({ state: 'away', idleMs, at })
+  const present: Presence = { state: 'present', idleMs: 2_000, at }
+  const unknown: Presence = { state: 'unknown', idleMs: null, at, detail: 'the operating system would not report the last input' }
+
+  it('yields the editor a person left open and grants the agent waiting behind it', () => {
+    const editor = personEditor()
+    const queued = acquire(emptySchedule(), { ticketId: 'a', purpose: 'build' }, context({ editor })).schedule
+    expect(queued.lease).toBeNull()
+    const result = advance(queued, context({ editor, presence: away() }))
+    expect(result.granted?.holder).toEqual({ kind: 'agent', ticketId: 'a' })
+    expect(result.schedule.yielded).toMatchObject({ pids: [50], auto: { idleMs: 12 * 60_000 } })
+    expect(result.schedule.events).toContainEqual(expect.objectContaining({ kind: 'yielded', by: 'host',
+      detail: expect.stringContaining('no keyboard or mouse input for 12 min') }))
+    expect(result.schedule.events).toContainEqual(expect.objectContaining({ kind: 'yielded',
+      detail: expect.stringContaining('pid 50') }))
+  })
+
+  it('releases a claim the person left behind, so the agent behind it is granted', () => {
+    const claim = personAct(emptySchedule(), { kind: 'claim' }, context({ editor: free })).schedule
+    expect(claim.lease?.holder).toEqual({ kind: 'person' })
+    const queued = acquire(claim, { ticketId: 'b', purpose: 'test' }, context({ editor: free })).schedule
+    expect(standing(queued, 'b').state).toBe('queued')
+    const result = advance(queued, context({ editor: free, presence: away() }))
+    expect(result.schedule.lease?.holder).toEqual({ kind: 'agent', ticketId: 'b' })
+    expect(result.schedule.events).toContainEqual(expect.objectContaining({ kind: 'yielded', by: 'host',
+      detail: expect.stringContaining('claim was released') }))
+  })
+
+  it('drops a claim still waiting behind an agent once the person has left', () => {
+    let schedule = acquire(emptySchedule(), { ticketId: 'a', purpose: 'test' }, context()).schedule
+    schedule = personAct(schedule, { kind: 'claim' }, context()).schedule
+    schedule = acquire(schedule, { ticketId: 'b', purpose: 'build' }, context()).schedule
+    expect(ordered(schedule.queue).map(request => request.person ? 'person' : request.ticketIds[0])).toEqual(['person', 'b'])
+    const result = advance(schedule, context({ presence: away() }))
+    expect(result.schedule.queue.some(request => request.person)).toBe(false)
+    expect(result.schedule.events).toContainEqual(expect.objectContaining({ kind: 'yielded',
+      detail: expect.stringContaining('queued person claim was dropped') }))
+  })
+
+  it('leaves the editor alone while no agent or job waits for it', () => {
+    const editor = personEditor()
+    const queued = acquire(emptySchedule(), { ticketId: 'a', purpose: 'build' }, context({ editor })).schedule
+    const nobody = release(queued, 'a', context({ editor }))
+    const result = advance(nobody, context({ editor, presence: away() }))
+    expect(result.schedule.lease).toBeNull()
+    expect(result.schedule.yielded).toBeUndefined()
+    expect(result.schedule.events.some(item => item.kind === 'yielded')).toBe(false)
+  })
+
+  it('takes an auto yield back when the person comes back, and leaves their own yield alone', () => {
+    const editor = personEditor()
+    const queued = acquire(emptySchedule(), { ticketId: 'a', purpose: 'build' }, context({ editor })).schedule
+    const auto = advance(queued, context({ editor, presence: away() })).schedule
+    expect(auto.yielded?.auto).toBeTruthy()
+    const back = advance(release(auto, 'a', context({ editor })), context({ editor, presence: present })).schedule
+    expect(back.yielded).toBeUndefined()
+    expect(back.events).toContainEqual(expect.objectContaining({ kind: 'returned', by: 'host' }))
+    // The person's editor blocks the next agent again.
+    expect(acquire(back, { ticketId: 'c', purpose: 'use' }, context({ editor })).result.state).toBe('queued')
+    const manual = personAct(queued, { kind: 'yield' }, context({ editor })).schedule
+    expect(advance(manual, context({ editor, presence: present })).schedule.yielded?.pids).toEqual([50])
+  })
+
+  it('does not yield while the host says the editor must not be taken, or while the reading is unknown', () => {
+    const editor = personEditor()
+    const queued = acquire(emptySchedule(), { ticketId: 'a', purpose: 'build' }, context({ editor })).schedule
+    const blocked = advance(queued, context({ editor, presence: away(), autoYieldBlock: 'a dialog is waiting' }))
+    expect(blocked.granted).toBeUndefined()
+    expect(blocked.schedule.yielded).toBeUndefined()
+    const unreadable = advance(queued, context({ editor, presence: unknown }))
+    expect(unreadable.granted).toBeUndefined()
+    expect(unreadable.schedule.yielded).toBeUndefined()
+    expect(unreadable.schedule.events.some(item => item.kind === 'yielded')).toBe(false)
+  })
+
+  it('leaves an agent or job holding the lease alone, even with a person\'s own editor open beside it', () => {
+    const held = acquire(emptySchedule(), { ticketId: 'a', purpose: 'test' }, context()).schedule
+    const second = acquire(held, { ticketId: 'b', purpose: 'build' }, context()).schedule
+    const editor = personEditor(77)
+    const result = advance(second, context({ editor, presence: away() }))
+    expect(result.schedule.lease?.holder).toEqual({ kind: 'agent', ticketId: 'a' })
+    expect(result.schedule.yielded).toBeUndefined()
+    expect(result.schedule.events.some(item => item.kind === 'yielded')).toBe(false)
+  })
+})
+
+describe('EditorScheduler presence', () => {
+  const memory = () => {
+    const values = new Map<string, unknown>()
+    return { get: <V>(key: string) => values.get(key) as V | undefined, set: (key: string, value: unknown) => { values.set(key, structuredClone(value)) },
+      atomic: <T>(operation: () => T) => operation() }
+  }
+  const editor = personEditor()
+  const commands = () => ({ project: '', build: '', restart: '', test: '' })
+  /** The ue-mcp reading of an editor parked on a dialog a person has to answer. */
+  const dialog = { source: 'status.json' as const, phase: 'ready', pid: 50, ticking: true, stalledSeconds: 0, slowTask: null,
+    modal: { title: 'Save changes?', message: '', buttons: ['Save'], blocking: true }, compiling: null, handler: null,
+    writtenAt: new Date(T0).toISOString(), stale: false, bridges: [] }
+
+  it('yields on its tick and tells the Ticket it was granted', async () => {
+    const store = memory()
+    store.set(KV.editor.schedule, acquire(emptySchedule(), { ticketId: 'a', purpose: 'build' }, context({ editor })).schedule)
+    const notices: [string, string][] = []
+    const scheduler = new EditorScheduler({ store, now: () => T0 + 1, live: () => true, editor: () => editor, logDir: tmpdir(), warn: () => {},
+      presence: () => ({ state: 'away', idleMs: 12 * 60_000, at: new Date(T0).toISOString() }), commands,
+      notify: async (ticketId, _id, text) => { notices.push([ticketId, text]) } })
+    expect(scheduler.tick().lease?.holder).toEqual({ kind: 'agent', ticketId: 'a' })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(notices.some(([ticketId, text]) => ticketId === 'a' && text.includes('The shared editor is yours'))).toBe(true)
+    scheduler.dispose()
+  })
+
+  it('holds back while a compile-and-launch the person started is running', () => {
+    const store = memory()
+    store.set(KV.editor.schedule, acquire(emptySchedule(), { ticketId: 'a', purpose: 'build' }, context({ editor })).schedule)
+    const scheduler = new EditorScheduler({ store, now: () => T0 + 1, live: () => true, editor: () => editor, logDir: tmpdir(), warn: () => {},
+      presence: () => ({ state: 'away', idleMs: 12 * 60_000, at: new Date(T0).toISOString() }), personRun: () => true, commands,
+      notify: async () => {} })
+    expect(scheduler.tick().lease).toBeNull()
+    expect(scheduler.read().queue).toHaveLength(1)
+    scheduler.dispose()
+  })
+
+  it('holds back while the editor is parked on a dialog a person must answer', () => {
+    const store = memory()
+    store.set(KV.editor.schedule, acquire(emptySchedule(), { ticketId: 'a', purpose: 'build' }, context({ editor })).schedule)
+    const scheduler = new EditorScheduler({ store, now: () => T0 + 1, live: () => true, editor: () => editor, logDir: tmpdir(), warn: () => {},
+      presence: () => ({ state: 'away', idleMs: 12 * 60_000, at: new Date(T0).toISOString() }),
+      commands: () => ({ ...commands(), project: 'C:/project/SunGame.uproject' }), engine: () => dialog, notify: async () => {} })
+    expect(scheduler.tick().lease).toBeNull()
+    expect(scheduler.read().queue).toHaveLength(1)
     scheduler.dispose()
   })
 })
