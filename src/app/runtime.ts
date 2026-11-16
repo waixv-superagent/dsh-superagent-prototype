@@ -39,6 +39,7 @@ import { Outbox } from './outbox.ts'
 import { Passes } from './passes.ts'
 import { Setup } from './setup.ts'
 import { Editor } from './editor.ts'
+import { EditorPresence } from './editor-presence.ts'
 import { EditorScheduler, killTree } from './editor-scheduler.ts'
 import { EditorGuard } from './editor-guard.ts'
 import { EditorGatekeeper } from './editor-gatekeeper.ts'
@@ -91,6 +92,8 @@ export class Runtime extends Service implements SourceHost {
   readonly executor: DshExecutor
   readonly activity: Activity
   readonly editor: Editor
+  /** The person's last keyboard or mouse input, so the scheduler can yield an editor they left open (docs/021). */
+  readonly presence: EditorPresence
   readonly editorScheduler: EditorScheduler
   /** Owns the editor processes a lease starts and reclaims them when the lease lapses (docs/021). */
   readonly editorGatekeeper: EditorGatekeeper
@@ -179,10 +182,14 @@ export class Runtime extends Service implements SourceHost {
         repliedTo: trigger => repliedTo({ store, sources }, trigger) })
       this.activity = new Activity(ctx)
       this.editor = new Editor({ warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
+      this.presence = new EditorPresence({ warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       // The shared editor's lease and queue live in the ticket database; a grant or a job's end reaches the worker as a
-      // steering message, and a Ticket that ended loses its place (docs/021).
+      // steering message, and a Ticket that ended loses its place (docs/021). An editor or claim a person left behind is
+      // yielded to the queue once their keyboard and mouse have been idle past the away threshold.
       this.editorScheduler = new EditorScheduler({ store, live: id => { const value = store.tickets.get(id); return !!value && !value.ended },
-        editor: () => this.editor.read(), commands: () => store.settings().executor.editor, logDir: join(machine.stateDir, 'editor-jobs'),
+        editor: () => this.editor.read(), presence: () => this.presence.read(),
+        personRun: () => (store.get(KV.build.runs)?.runs ?? []).some(run => run.state === 'running'),
+        commands: () => store.settings().executor.editor, logDir: join(machine.stateDir, 'editor-jobs'),
         notify: (ticketId, id, text) => sessions.prompt(workerSessionId(ticketId), id, text, 'steer'),
         warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       // The gatekeeper owns the editor's operating-system processes: a lapsed lease stops its build tools but hands an
@@ -494,6 +501,7 @@ export class Runtime extends Service implements SourceHost {
       this.sessions.dispose()
       this.activity.dispose()
       this.editorGuard.dispose()
+      this.presence.dispose()
       this.editor.dispose()
       this.editorScheduler.dispose()
       this.repro.dispose()

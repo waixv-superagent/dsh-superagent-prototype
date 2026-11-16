@@ -16,9 +16,9 @@ All state is one record, `KV.editor.schedule` (`src/app/editor-schedule.ts`), ch
 | `queue` | Waits in grant order: a person's claim first, then waits a person moved to the front, then first come first served. A wait is a worker's own request or a host job's. |
 | `jobs` | Builds, restarts and tests the host runs, with their Tickets, state, exit code, one-line summary and log path. |
 | `events` | The last 200 grants, releases, expiries, preemptions, claims and job ends; the overview's timeline draws lease and wait spans from them. |
-| `agentPids` / `yielded` | Interactive editors an agent started under its lease, and those a person said agents may use. Any other interactive `UnrealEditor` reads as a person using it. An editor counts as the agent's only when the lease was taken to open one (`restart` or `use`, or a restart job) and it is the only editor that started since the grant. When two appear, either may be a person's, so neither counts. |
+| `agentPids` / `yielded` | Interactive editors an agent started under its lease, and those a person said agents may use. Any other interactive `UnrealEditor` reads as a person using it. An editor counts as the agent's only when the lease was taken to open one (`restart` or `use`, or a restart job) and it is the only editor that started since the grant. When two appear, either may be a person's, so neither counts. A yield the host made because the person left carries an `auto` marker; the person's own yield does not. |
 
-`advance` runs on every change, on the overview's poll and on a 15-second timer. It drops the leases and waits of ended Tickets, expires a lease without a heartbeat, forgets editors that have exited, and grants the head of the queue once nothing holds the editor and no person is using it.
+`advance` runs on every change, on the overview's poll and on a 15-second timer. It settles the person's presence (below), drops the leases and waits of ended Tickets, expires a lease without a heartbeat, forgets editors that have exited, and grants the head of the queue once nothing holds the editor and no person is using it.
 
 ## Priority
 
@@ -32,6 +32,25 @@ All state is one record, `KV.editor.schedule` (`src/app/editor-schedule.ts`), ch
 3. **Everyone else**, first come first served.
 
 Nothing of a person's is killed. A preempted agent gets a steering message and releases. Its heartbeats cannot push the lease past the five-minute grace, and once the grace runs out the lease lapses. A host job the person preempts or stops is killed, because the host owns that process. Its lease stays until the process has exited, so the next build never starts over a compile still writing, and it reports `cancelled`, never its exit code.
+
+## A person who leaves the machine
+
+A person who opens the editor and walks away used to hold every agent at the queue: their interactive editor and their claim both read as "a person is using it", and nothing told an absent person from a present one. The host now reads the interactive session's last keyboard or mouse input (`GetLastInputInfo`, cached for 30 s) and applies the person's own **让 agent 用** result once no input has arrived for 10 minutes (`AWAY_AFTER_MS` in `src/app/editor-presence.ts`):
+
+- only while an agent or host job waits, so an editor nobody needs stays the person's;
+- only while the queue is blocked by the person — their claim, or an interactive editor no agent started — never while an agent or job holds the lease;
+- the claim is released, a claim waiting in the queue dropped, and the open interactive editors marked `yielded` with an `auto` marker; the schedule records a `yielded` event by `host` with the idle minutes and the pids, and a released claim keeps its own `released` event;
+- nothing is stopped or closed: an editor stays open for whoever comes next, so "nothing of a person's is killed" still holds.
+
+Some states look like an absent person but are not idle for the queue's purpose, so nothing is yielded while:
+
+- the reading is unknown — another platform, a failed probe, or before the first reading;
+- the engine reports a blocking modal dialog, a bridge request in flight, or a phase other than `ready`;
+- a compile-and-launch the person started is still running (`KV.build.runs`).
+
+The limit: a PIE the person started leaves the editor `ready` and writes no bridge request, so the files cannot tell it from an idle editor. The yield neither ends nor stops the PIE, but an agent granted the slot may use the editor while it runs. A build granted this way also still compiles while the person's editor is open — the yield never closes it, exactly like the person's own **让 agent 用** — so a compile that the editor's loaded binaries would block can fail; closing that editor stays a person's action.
+
+When the person touches keyboard or mouse again, an `auto` yield ends with a `returned` event and their editor blocks agents again. A yield they made themselves carries no `auto` marker and stays until the editor closes, so the host never takes back a choice a person made. There is no setting for the threshold yet; a deployment that wants a different one changes the constant.
 
 ## Worker tool
 

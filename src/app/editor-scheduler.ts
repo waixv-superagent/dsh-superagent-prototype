@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { KV } from '../kv.ts'
 import type { EditorView } from './editor.ts'
 import { readEngineState, type EditorEngineState } from './editor-mcp.ts'
+import type { Presence } from './editor-presence.ts'
 import { acquire, advance, emptySchedule, heartbeat, keepEditor, personAct, personBlock, reclaim, recordBypass, release,
   standing, submitJob, updateJob, type AcquireRequest, type AcquireResult, type EditorJob, type EditorJobKind,
   type EditorLease, type EditorSchedule, type PersonAction, type ScheduleContext } from './editor-schedule.ts'
@@ -29,6 +30,10 @@ export interface EditorSchedulerHost {
   live(ticketId: string): boolean
   /** The probe's cached row; reading it refreshes the cache in the background. */
   editor(): EditorView | null
+  /** Whether a person is at the machine; reading it refreshes the cached input reading in the background. */
+  presence?: () => Presence | null
+  /** Whether a host process of the person's own is using the slot now, such as a compile-and-launch (docs/021). */
+  personRun?: () => boolean
   commands(): EditorCommands
   /** Where job logs go. */
   readonly logDir: string
@@ -92,7 +97,33 @@ export class EditorScheduler {
 
   private now(): number { return (this.host.now ?? Date.now)() }
   private context(): ScheduleContext {
-    return { now: this.now(), editor: this.host.editor(), live: id => this.host.live(id), id: () => randomUUID().slice(0, 12) }
+    const editor = this.host.editor()
+    return { now: this.now(), editor, live: id => this.host.live(id), id: () => randomUUID().slice(0, 12),
+      ...this.presence(editor, this.read()) }
+  }
+  /**
+   * The person's presence, and why it may not yield yet: an editor parked on a dialog, one still loading, a bridge request
+   * in flight, or a host run the person started all mean the queue is waiting for work, not for an absent person. The input
+   * session is read only while a person actually holds something an agent cannot pass, so a host nobody contends for pays
+   * no probe at all.
+   */
+  private presence(editor: EditorView | null, schedule: EditorSchedule): Pick<ScheduleContext, 'presence' | 'autoYieldBlock'> {
+    const person = schedule.lease?.holder.kind === 'person' || !!schedule.yielded?.auto
+      || schedule.queue.some(request => request.person) || personBlock(schedule, editor) === 'editor'
+    if (!person) return {}
+    const presence = this.host.presence?.()
+    if (!presence) return {}
+    const block = this.autoYieldBlock()
+    return { presence, ...block ? { autoYieldBlock: block } : {} }
+  }
+  private autoYieldBlock(): string | undefined {
+    const engine = this.engine()
+    if (engine && !engine.stale) {
+      if (engine.modal?.blocking) return `the editor is waiting on a dialog (${engine.modal.title || engine.modal.message})`
+      if (engine.handler) return `the editor is running ${engine.handler.method}`
+      if (engine.phase && engine.phase !== 'ready') return `the editor is ${engine.phase}`
+    }
+    return this.host.personRun?.() ? 'a compile-and-launch the person started is still running' : undefined
   }
   read(): EditorSchedule { return { ...emptySchedule(), ...this.host.store.get(EDITOR_SCHEDULE) ?? {} } }
   private write(schedule: EditorSchedule): void { this.host.store.set(EDITOR_SCHEDULE, schedule) }
