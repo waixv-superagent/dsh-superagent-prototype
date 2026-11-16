@@ -60,6 +60,8 @@ const TEXT = {
   openSession: ['打开 Session', 'Open Session'],
   copySession: ['复制 Session ID', 'Copy Session ID'],
   copySessionFailed: ['复制失败', 'Copy failed'],
+  subagentModel: ['模型', 'Model'],
+  subagentModelHint: ['这个子 agent 本次运行使用的模型路由（provider/model）', 'The model route this subagent ran on (provider/model)'],
   stop: ['停止', 'Stop'],
   policyVersion: ['策略版本', 'Policy version'],
   mediaMarker: ['[媒体]', '[Media]'],

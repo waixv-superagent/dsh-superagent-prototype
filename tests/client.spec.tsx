@@ -49,15 +49,17 @@ const serve = () => vi.stubGlobal('fetch', vi.fn(async (url: string) => {
 }))
 afterEach(() => { vi.unstubAllGlobals() })
 
-it('registers a localized main panel, sidebar entry, worker-Session ticket link and Session-id copy action, the update badge, and Plugin Manager row page, and no settings section', () => {
+it('registers a localized main panel, sidebar entry, worker-Session ticket link and Session-id copy action, the child-Session model chip, the update badge, and Plugin Manager row page, and no settings section', () => {
   const { entries, dictionaries, main, nav } = fixture([])
   expect(entries.map(entry => entry.options.name)).toEqual(['main', 'sidebar.panellist', 'sidebar.session.row.leading',
-    'conversation.session.header.actions', 'conversation.session.header.actions', 'sidebar.footer.action', 'plugins.row.config'])
+    'conversation.session.header.actions', 'conversation.session.header.actions', 'conversation.session.header.actions',
+    'sidebar.footer.action', 'plugins.row.config'])
   expect(entries[2]!.options).toMatchObject({ id: 'dsh-superagent:ticket', order: 40, locale: 'dshSuperagent' })
   expect(entries[3]!.options).toMatchObject({ id: 'dsh-superagent:ticket', order: 40, locale: 'dshSuperagent' })
   expect(entries[4]!.options).toMatchObject({ id: 'dsh-superagent:copy-session', order: 41, locale: 'dshSuperagent' })
-  expect(entries[5]!.options).toMatchObject({ id: 'dsh-superagent:upgrade', order: 10, locale: 'dshSuperagent' })
-  expect(entries[6]!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
+  expect(entries[5]!.options).toMatchObject({ id: 'dsh-superagent:model', order: -5, locale: 'dshSuperagent' })
+  expect(entries[6]!.options).toMatchObject({ id: 'dsh-superagent:upgrade', order: 10, locale: 'dshSuperagent' })
+  expect(entries[7]!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
   expect(Object.keys(dictionaries)).toEqual(['dshSuperagent'])
   expect(main.options).toMatchObject({ key: 'dsh-superagent', locale: 'dshSuperagent' })
   expect(nav.options).toMatchObject({ id: 'dsh-superagent', order: 10, locale: 'dshSuperagent' })
@@ -80,6 +82,44 @@ it('copies a worker Session id from the Session header beside the Ticket link', 
   expect(writes).toEqual(['worker-t1'])
   expect(worker.container.textContent).toContain(zh.copied)
   worker.dispose()
+})
+
+it('names the model route on an addressed child Session header, and renders nothing for a root Session', async () => {
+  const { entries } = fixture([])
+  const model = entries.find(entry => entry.options.id === 'dsh-superagent:model')!
+  const useSessions = (selector: (state: Record<string, unknown>) => unknown) => selector({
+    byId: {
+      child: { origin: 'subagent' },
+      root: {},
+      pending: { origin: 'subagent' },
+      account: { origin: 'subagent' },
+    },
+    projectionsBySession: {
+      child: { values: { modelSelection: { lastUsed: { provider: 'ai-gateway', model: 'claude-opus-5.5', reasoningEffort: 'high' }, next: null } } },
+      pending: { values: { modelSelection: { lastUsed: { provider: 'ai-gateway', model: 'claude-opus-5.5' }, next: { provider: 'deepseek-account', model: 'deepseek-v4-pro' } } } },
+    },
+  })
+  const child = await render(model, { sessionId: 'child', t, useSessions })
+  expect(child.container.textContent).toContain('ai-gateway/claude-opus-5.5')
+  expect(child.container.querySelector('.dt-header-model')?.getAttribute('data-model-route')).toBe('ai-gateway/claude-opus-5.5')
+  child.dispose()
+  // A pending switch is the route the next step runs, so it wins over the last used one.
+  const pending = await render(model, { sessionId: 'pending', t, useSessions })
+  expect(pending.container.querySelector('.dt-header-model')?.getAttribute('data-model-route')).toBe('deepseek-account/deepseek-v4-pro')
+  pending.dispose()
+  const root = await render(model, { sessionId: 'root', t, useSessions })
+  expect(root.container.innerHTML).toBe('')
+  root.dispose()
+  // The list summary names a child Session's route before its conversation is opened.
+  const account = await render(model, { sessionId: 'account', t, useSessions: (selector: (state: Record<string, unknown>) => unknown) => selector({
+    byId: { account: { origin: 'subagent', projectionValues: { modelSelection: { lastUsed: { provider: 'deepseek-account', model: 'deepseek-flash' }, next: null } } } },
+    projectionsBySession: {},
+  }) })
+  expect(account.container.textContent).toContain('deepseek-account/deepseek-flash')
+  account.dispose()
+  const missing = await render(model, { sessionId: 'missing', t, useSessions })
+  expect(missing.container.innerHTML).toBe('')
+  missing.dispose()
 })
 
 it('opens a listed Session through the workspace from the main panel', async () => {

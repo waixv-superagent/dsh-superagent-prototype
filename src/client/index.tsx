@@ -15,6 +15,7 @@ import { App } from './app.tsx'
 import { Icon } from './controls.tsx'
 import { PluginConfig, usePageForm } from './deployment.tsx'
 import { en, zh } from './locales.ts'
+import { SessionModel, type SessionModelProps } from './session-model.tsx'
 import type { T } from './text.ts'
 import TICKET_LINK_STYLES from './ticket-link.css?raw'
 import { UpgradeBadge } from './upgrade.tsx'
@@ -143,6 +144,11 @@ export function apply(ctx: ClientContext): void {
   slots.inject('conversation.session.header.actions', () => slots.register({
     name: 'conversation.session.header.actions', id: `${ENTRY}:copy-session`, order: 41, locale: NS,
   }, (props: { sessionId: SessionId; t: T }) => <CopySessionId sessionId={props.sessionId} t={props.t} />))
+  // The model route of a child Session is static session context, so it takes the header's leading band. DSH's own
+  // model seat cannot show it: an addressed subagent Session has no switchable seat (see session-model.tsx).
+  slots.inject('conversation.session.header.actions', () => slots.register({
+    name: 'conversation.session.header.actions', id: `${ENTRY}:model`, order: -5, locale: NS,
+  }, ((props: SessionModelProps) => <SessionModel {...props} />) as never))
   // The update badge sits at the sidebar foot beside Settings; it renders nothing until an update is available.
   slots.inject('sidebar.footer.action', () => slots.register({ name: 'sidebar.footer.action', id: `${ENTRY}:upgrade`, order: 10, locale: NS },
     ((props: { wide: boolean; t: T }) => <UpgradeBadge t={props.t} wide={props.wide} />) as never))
