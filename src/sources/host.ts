@@ -106,6 +106,12 @@ export interface SourceContext {
    */
   mayDecidePriority(ticketId: string, actor: string): boolean
   /**
+   * Whether a person may act on a ticket's Feishu card — its P1 plan or a question — through this Source: a ticket this
+   * Source started is decided by its own actor, and a ticket another Source started (the panel, GitHub or TAPD have no
+   * Feishu actor) by a person the Policy allows on this Source, since the Source opens that ticket's Feishu conversation.
+   */
+  mayActOnCard(ticketId: string, actor: string): boolean
+  /**
    * A person's click on a pipeline card: add the reviewers they chose to the Swarm review, rerun its failing checks, or
    * close a submitted change. Returns what was done (the added accounts, the rerun checks).
    * @throws when the ticket or its review is unknown, or Swarm refused; the message says why.

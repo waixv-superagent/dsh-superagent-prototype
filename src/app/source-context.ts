@@ -110,6 +110,16 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
       const allowed = store.settings().policy.sources[kind.kind]?.allowed ?? []
       return allowed.some(entry => sameName(entry.id, actor))
     },
+    mayActOnCard: (id, actor) => {
+      const ticket = store.tickets.get(id)
+      if (!ticket) return false
+      // Only the actor of a ticket this Source started may decide it, however the Policy lists other people: its plan card
+      // approves work under that person's Mandate. A ticket from another Source has no actor here, and the Source opens a
+      // Feishu conversation for it too, so a person the Policy allows on this Source answers its cards.
+      if (ticket.mandate.actor.source === kind.kind) return sameName(ticket.mandate.actor.id, actor)
+      const allowed = store.settings().policy.sources[kind.kind]?.allowed ?? []
+      return allowed.some(entry => sameName(entry.id, actor))
+    },
     report: (entry, value) => {
       if (!kind.health.includes(entry)) throw new Error(`The ${kind.kind} Source has no health entry ${entry}`)
       health.get(entry)?.set(value)

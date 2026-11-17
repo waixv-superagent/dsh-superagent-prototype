@@ -9,7 +9,7 @@ const ticket = (overrides: Partial<Ticket> = {}) => ({ id: 't1', title: 'Fix', m
 type CardRef = { ticketId: string; planAt?: string; attentionId?: string; at?: string; askAt?: string }
 const ASKED = { id: 'att-1', question: '先上 A 还是先上 B？', options: ['先上 A', '先上 B'] }
 
-function harness(plan: Ticket = ticket()) {
+function harness(plan: Ticket = ticket(), allowed: string[] = ['ou_1']) {
   const cards: Record<string, CardRef> = { om_1: { ticketId: 't1', planAt: PLAN_AT } }
   const asked: Record<string, CardRef> = { om_2: { ticketId: 't1', attentionId: 'att-1', at: PLAN_AT } }
   const priority: Record<string, CardRef> = { om_3: { ticketId: 't1', askAt: PLAN_AT } }
@@ -17,6 +17,9 @@ function harness(plan: Ticket = ticket()) {
   const answerAttention = vi.fn(() => plan)
   const decidePriority = vi.fn(() => plan)
   const mayDecidePriority = vi.fn((_id: string, actor: string) => actor === 'ou_1')
+  // The real rule: a Feishu ticket's own actor, else a person the Policy allows on Feishu (see source-context).
+  const mayActOnCard = vi.fn((_id: string, actor: string) =>
+    plan.mandate.actor.source === 'feishu' ? actor === plan.mandate.actor.id : allowed.includes(actor))
   const lark = vi.fn(async (_args: string[]) => '{}')
   const families: Record<string, unknown> = { 'feishu-plan-cards': cards, 'feishu-attention-cards': asked, 'feishu-priority-cards': priority }
   const ctx = {
@@ -29,9 +32,10 @@ function harness(plan: Ticket = ticket()) {
         Object.assign(target, value)
       },
     },
-    tickets: { get: (id: string) => id === 't1' ? plan : undefined }, decidePlan, answerAttention, decidePriority, mayDecidePriority, commands: { lark },
+    tickets: { get: (id: string) => id === 't1' ? plan : undefined }, decidePlan, answerAttention, decidePriority, mayDecidePriority, mayActOnCard,
+    commands: { lark },
   } as unknown as SourceContext
-  return { ctx, cards, asked, priority, decidePlan, answerAttention, decidePriority, mayDecidePriority, lark }
+  return { ctx, cards, asked, priority, decidePlan, answerAttention, decidePriority, mayDecidePriority, mayActOnCard, lark }
 }
 const action = (overrides: Partial<CardAction> = {}): CardAction => ({ event_id: 'e1', operator_id: 'ou_1', message_id: 'om_1',
   token: 'tok', action_tag: 'button', action_value: JSON.stringify({ v: 1, decision: 'approve' }), ...overrides })
@@ -115,10 +119,22 @@ describe('handling a card action', () => {
     expect(JSON.stringify(data.card)).toContain('已处理')
   })
   it('ignores a click from someone other than the ticket actor', async () => {
-    const { ctx, decidePlan, lark } = harness()
+    const { ctx, decidePlan, mayActOnCard, lark } = harness()
     await handleCardAction(ctx, action({ operator_id: 'ou_2' }))
+    expect(mayActOnCard).toHaveBeenCalledWith('t1', 'ou_2')
     expect(decidePlan).not.toHaveBeenCalled()
     expect(lark).not.toHaveBeenCalled()
+  })
+  it('lets a person the Policy allows decide a plan card for a ticket another Source started', async () => {
+    // The panel, GitHub and TAPD have no Feishu actor, so the Source opens the ticket a topic and there the Policy's
+    // allowed people decide its cards.
+    const web = ticket({ mandate: { strength: 'explicit', basis: { via: 'listed' }, actor: { source: 'web', id: 'operator' } } as Ticket['mandate'] })
+    const { ctx, cards, decidePlan, mayActOnCard, lark } = harness(web, ['ou_2'])
+    await handleCardAction(ctx, action({ operator_id: 'ou_2' }))
+    expect(mayActOnCard).toHaveBeenCalledWith('t1', 'ou_2')
+    expect(decidePlan).toHaveBeenCalledWith('t1', 'approve', '', 'feishu', '')
+    expect(cards.om_1).toBeUndefined()
+    expect(lark).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -167,5 +183,14 @@ describe('handling a question card action', () => {
     await handleCardAction(ctx, attentionAction({ operator_id: 'ou_2' }))
     expect(answerAttention).not.toHaveBeenCalled()
     expect(lark).not.toHaveBeenCalled()
+  })
+  it('lets a person the Policy allows answer a question card for a ticket another Source started', async () => {
+    const web = ticket({ mandate: { strength: 'explicit', basis: { via: 'listed' }, actor: { source: 'tapd', id: '王怀扬' } } as Ticket['mandate'],
+      attention: ASKED })
+    const { ctx, asked, answerAttention, mayActOnCard } = harness(web, ['ou_2'])
+    await handleCardAction(ctx, attentionAction({ operator_id: 'ou_2' }))
+    expect(mayActOnCard).toHaveBeenCalledWith('t1', 'ou_2')
+    expect(answerAttention).toHaveBeenCalledWith('t1', 'att-1', '先上 A')
+    expect(asked.om_2).toBeUndefined()
   })
 })

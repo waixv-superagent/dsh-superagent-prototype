@@ -71,8 +71,9 @@ export function formNote(value: string | undefined): string {
 /**
  * Applies one card callback. A question card's click answers the worker's `human_action`; a plan click on 改一下 replaces
  * the card with a form first; a revise choice that carries a note decides directly. Every step is idempotent: a card whose
- * plan or question no longer waits is answered with the "already handled" card and changes nothing. Only the ticket's own
- * actor may decide it.
+ * plan or question no longer waits is answered with the "already handled" card and changes nothing. Only a person the
+ * Source lets act on the ticket may decide it: its own Feishu actor, or for a ticket another Source started, a person the
+ * Policy allows on Feishu.
  */
 export async function handleCardAction(ctx: SourceContext, action: CardAction): Promise<void> {
   if ((ctx.state.get(KV.feishu.pipelineCards) ?? {})[action.message_id]) { await handlePipelineAction(ctx, action); return }
@@ -84,7 +85,7 @@ export async function handleCardAction(ctx: SourceContext, action: CardAction): 
   if (!ref) return
   const ticket = ctx.tickets.get(ref.ticketId)
   if (!ticket) return
-  if (ticket.mandate.actor.source !== 'feishu' || ticket.mandate.actor.id !== action.operator_id) return
+  if (!ctx.mayActOnCard(ticket.id, action.operator_id)) return
   const replace = async (message: CardMessage): Promise<void> => {
     if (!action.token) return
     // The decision is already recorded when this runs; a stale token must not fail the callback.
@@ -225,6 +226,8 @@ async function handlePriorityAction(ctx: SourceContext, action: CardAction, leve
 /**
  * Applies a click on a worker's question card: the choice becomes the person's answer to the worker, and the mapping goes.
  * A question that was answered, replaced, or already gone answers with the "already handled" card and changes nothing.
+ * Only a person the Source lets act on the ticket may answer: its own Feishu actor, or for a ticket another Source
+ * started, a person the Policy allows on Feishu.
  */
 async function handleAttentionAction(ctx: SourceContext, action: CardAction,
   value: { attentionId: string; choice: number }): Promise<void> {
@@ -233,7 +236,7 @@ async function handleAttentionAction(ctx: SourceContext, action: CardAction,
   if (!ref) return
   const ticket = ctx.tickets.get(ref.ticketId)
   if (!ticket) return
-  if (ticket.mandate.actor.source !== 'feishu' || ticket.mandate.actor.id !== action.operator_id) return
+  if (!ctx.mayActOnCard(ticket.id, action.operator_id)) return
   const replace = async (message: CardMessage): Promise<void> => {
     if (!action.token) return
     try { await updateCard({ commands: ctx.commands }, action.token, message) } catch { /* the card stays as it was */ }
