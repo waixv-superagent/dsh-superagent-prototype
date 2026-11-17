@@ -1,6 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import { bindScopeParent } from '@deepseek-ai/dsh-scope'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { delimiter, join } from 'node:path'
@@ -1630,6 +1630,35 @@ it('refuses the main Session a bash command that runs sleep and a long job wait,
   expect(guards.get(sessionId)!(bash('sleep 60'))).toBeUndefined()
   // The main Session's role says so.
   expect(masterPrompt).toContain('Worker reports, follow_up notices, new candidates and a background job\'s end, with its output, arrive by themselves as messages')
+})
+
+it('lets the plan gate hold only the workspace: a read-only analysis artifact may be written under the ticket evidence directory', async () => {
+  const { ticket, sessionId } = await acceptedTicket()
+  // The p4 pipeline starts a ticket in the plan phase; this drives the same guard directly, whatever opened the ticket.
+  runtime.store.atomic(() => {
+    const current = runtime.store.tickets.get(ticket.id)!
+    current.phase = 'plan'
+    runtime.store.tickets.save(current)
+  })
+  const guard = guards.get(sessionId)!
+  const evidence = join(directory, 'evidence', ticket.id)
+  const artifact = join(evidence, 'impact.html')
+  // An absolute path under the evidence directory is an artifact write, even before the directory exists.
+  expect(guard({ name: 'write', arguments: { file_path: artifact, content: '<html>impact</html>' } })).toBeUndefined()
+  expect(guard({ name: 'edit', arguments: { file_path: artifact, old_string: 'a', new_string: 'b' } })).toBeUndefined()
+  expect(existsSync(evidence)).toBe(true)
+  // The workspace, a relative path (which the tool resolves inside the workspace) and a traversal stay refused.
+  const refused = 'read-only analysis artifacts may be written under'
+  expect(guard({ name: 'write', arguments: { file_path: join(ticket.execution!.directory, 'Source', 'x.ts'), content: 'x' } })).toContain(refused)
+  expect(guard({ name: 'write', arguments: { file_path: 'impact.html', content: 'x' } })).toContain(refused)
+  expect(guard({ name: 'edit', arguments: { file_path: join(evidence, '..', '..', 'x.txt'), old_string: '', new_string: 'x' } })).toContain(refused)
+  // Shell commands that change the workspace are still refused, while reading and uploading from evidence are not.
+  expect(guard({ name: shell, arguments: { command: 'git add Source/x.ts' } })).toContain('would change the workspace')
+  expect(guard({ name: shell, arguments: { command: `lark-cli im +messages-reply --message-id om_1 --file "${artifact}"` } })).toBeUndefined()
+  expect(guard({ name: shell, arguments: { command: 'git status --short' } })).toBeUndefined()
+  // The worker is told where that directory is, so it can write there and upload from it.
+  expect(runtime.ticketEnvironment(ticket)).toEqual(expect.arrayContaining([
+    expect.objectContaining({ key: 'DSH_SUPERAGENT_EVIDENCE', value: evidence })]))
 })
 
 it('reads the main Session\'s preset from a registry with or without presetForSession, and takes standard\'s caps when it cannot', async () => {

@@ -11,6 +11,7 @@ export const EXECUTOR_VARIABLES: readonly (VariableSpec & { ticket?: true })[] =
   { key: 'DSH_SUPERAGENT_DIR', ticket: true, description: { zh: '这个工单的执行目录；执行器 Session 在其中工作', en: 'This ticket\'s directory; the executor Session works in it' } },
   { key: 'DSH_SUPERAGENT_NAME', ticket: true, description: { zh: '工单的短名，也是执行目录的名字', en: 'The ticket\'s short name, also its directory\'s name' } },
   { key: 'DSH_SUPERAGENT_TICKET', ticket: true, description: { zh: '工单 id', en: 'The ticket id' } },
+  { key: 'DSH_SUPERAGENT_EVIDENCE', ticket: true, description: { zh: '这个工单的只读分析产物目录（在所有工作区之外）；P1 方案门禁允许在其中写文件并从那里上传', en: 'This ticket\'s read-only analysis artifact directory, outside every workspace; the P1 plan gate allows writing files there and uploading them from it' } },
   { key: 'DSH_SUPERAGENT_BLOCKED_COMMANDS', description: { zh: '这个执行环境禁止调用的命令，以空格分隔；不要运行它们', en: 'Commands blocked in this execution environment, separated by spaces; never run them' } },
   { key: 'DSH_SUPERAGENT_BACKEND', description: { zh: '交付后端：git（GitHub 拉取请求）或 p4（Perforce CL + Swarm review）', en: 'Delivery backend: git (GitHub pull request) or p4 (Perforce changelist shelved for a Swarm review)' } },
   { key: 'DSH_SUPERAGENT_P4_CLIENT', ticket: true, description: { zh: '这个工单的 Perforce 工作区名；p4 后端下由准备命令创建', en: 'This ticket\'s Perforce workspace name, created by the prepare command under the p4 backend' } },
@@ -72,9 +73,9 @@ export function declaredVariables(sources: SourceRegistry, settings?: Settings):
     ...sources.declarations().map(({ kind, variables }) => ({ owner: kind, enabled: on.has(kind), variables }))]
 }
 
-export function environmentOf(input: { deployment: Deployment; sources: SourceRegistry; settings: Settings;
+export function environmentOf(input: { deployment: Deployment; sources: SourceRegistry; settings: Settings; stateDir?: string;
   ticket?: { id: string; name: string; directory: string; workspace?: string; lease?: string[]; backend?: Backend }; trigger?: Trigger }): Variable[] {
-  const { deployment, sources, settings, ticket, trigger } = input
+  const { deployment, sources, settings, stateDir, ticket, trigger } = input
   const { backend: configured, p4 } = settings.executor
   // A ticket records the delivery environment its work belongs in; without one the deployment's configured backend applies.
   const backend = ticket?.backend ?? configured
@@ -90,6 +91,7 @@ export function environmentOf(input: { deployment: Deployment; sources: SourceRe
     DSH_SUPERAGENT_P4_CL: '',
     DSH_SUPERAGENT_SWARM_REVIEW: '',
     ...ticket ? { DSH_SUPERAGENT_DIR: ticket.directory, DSH_SUPERAGENT_NAME: ticket.name, DSH_SUPERAGENT_TICKET: ticket.id,
+      DSH_SUPERAGENT_EVIDENCE: stateDir ? join(stateDir, 'evidence', ticket.id) : '',
       DSH_SUPERAGENT_P4_CLIENT: p4Client(p4.clientTemplate, ticket.name),
       DSH_SUPERAGENT_LEASE: (ticket.lease ?? []).join(' ') } : {},
   }
@@ -102,7 +104,7 @@ export function environmentOf(input: { deployment: Deployment; sources: SourceRe
 }
 
 /** Combines a ticket's fixed directory, name, and origin trigger with the deployment's current settings. */
-export function ticketEnvironment(input: { deployment: Deployment; sources: SourceRegistry; settings: Settings; ticket: Ticket; trigger?: Trigger }) {
+export function ticketEnvironment(input: { deployment: Deployment; sources: SourceRegistry; settings: Settings; stateDir?: string; ticket: Ticket; trigger?: Trigger }) {
   const { ticket, trigger, ...rest } = input
   const values = { id: ticket.id, name: ticket.execution?.name ?? '', directory: ticket.execution?.directory ?? '',
     workspace: ticket.execution?.workspace, lease: ticket.execution?.lease, backend: ticket.execution?.backend }
