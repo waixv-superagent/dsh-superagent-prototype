@@ -17,5 +17,6 @@
 .dt-upgrade-badge:hover, .dt-upgrade-badge:focus-visible { background: var(--dsw-alias-fill-l1); color: var(--dsw-alias-label-primary); }
 .dt-upgrade-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-state-error-primary); }
 .dt-upgrade-badge[data-tone='running'] .dt-upgrade-dot { background: var(--dsw-alias-state-business-primary); animation: dt-upgrade-pulse 1.2s ease-in-out infinite; }
+.dt-upgrade-badge[data-tone='ready'] .dt-upgrade-dot { background: var(--dsw-alias-state-success-primary); }
 .dt-upgrade-badge[data-tone='problem'] .dt-upgrade-dot { background: var(--dsw-alias-state-warn-primary); }
 @keyframes dt-upgrade-pulse { 50% { opacity: 0.35; } }

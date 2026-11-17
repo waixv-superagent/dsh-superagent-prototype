@@ -1,7 +1,8 @@
 /**
- * One-click update of dsh-superagent from its fork: notices when the configured branch moved past the installed build, builds
- * the new commit in a separate worktree, waits until no worker is mid-turn, then hands the switch to an external process
- * (`scripts/upgrade-switch.mjs`) that replaces the installed package, restarts the service and rolls back on failure.
+ * One-click update of dsh-superagent from its fork, in two explicit phases. Prepare notices when the configured branch moved
+ * past the installed build and builds the new commit in a separate worktree while the running service stays untouched. The
+ * restart then waits until no worker is mid-turn and hands off to an external process (`scripts/upgrade-switch.mjs`) that
+ * replaces the installed package, restarts the service and rolls back on failure.
  */
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs'
@@ -28,10 +29,11 @@ export type UpgradeStepName = typeof UPGRADE_STEPS[number]
 export interface UpgradeStep { name: UpgradeStepName; state: 'running' | 'done' | 'failed' | 'skipped'; detail: string; at: string }
 export interface UpgradeCommit { sha: string; subject: string; author: string; at: string }
 /**
- * The update an update action is running, or the last one's outcome. `done`, `rolledBack` and `down` come from the switch
- * process: the host that started an update is gone by then, and its successor reads them from the status file.
+ * How far the update got: `preparing` builds and `prepared` means a person may start the restart at a time that suits them;
+ * the restart then runs through `waiting` and `switching`. `done`, `rolledBack` and `down` come from the switch process: the
+ * host that started an update is gone by then, and its successor reads them from the status file.
  */
-export type UpgradeState = 'idle' | 'preparing' | 'waiting' | 'switching' | 'done' | 'failed' | 'rolledBack' | 'down' | 'cancelled'
+export type UpgradeState = 'idle' | 'preparing' | 'prepared' | 'waiting' | 'switching' | 'done' | 'failed' | 'rolledBack' | 'down' | 'cancelled'
 export interface UpgradeRun {
   state: UpgradeState
   sha: string
@@ -56,6 +58,11 @@ export interface UpgradeView {
   /** Why an update cannot start now, such as a dependency change the switch cannot install. */
   blocked: string | null
   run: UpgradeRun | null
+  /**
+   * The commit the prepare phase built and left on disk, when the restart is waiting for a person. Null while preparing,
+   * before preparing, and when the prepared worktree is gone, in which case the panel offers preparing again.
+   */
+  prepared: { sha: string } | null
   running: number
 }
 
@@ -168,8 +175,9 @@ export function onlyVersionFields(before: string, after: string): boolean {
 }
 
 /**
- * Checks for and runs updates of this installation. Runs on its own timer, never inside a pass; an update holds processing
- * paused from the moment it waits for workers until the switch resumes it, and keeps an existing pause in place.
+ * Checks for and runs updates of this installation in two explicit phases. Runs on its own timer, never inside a pass.
+ * Preparing builds in a separate worktree and never touches the running service; only the restart pauses dispatch, from the
+ * moment it waits for workers until the switch resumes it, and it keeps an existing pause in place.
  */
 export class Upgrade {
   private readonly config: UpgradeConfig
@@ -198,6 +206,8 @@ export class Upgrade {
   get enabled(): boolean { return this.config.checkout !== '' }
   private get dir(): string { return join(this.host.stateDir, 'upgrade') }
   private get statusFile(): string { return join(this.dir, 'status.json') }
+  /** Where the prepare phase builds the target commit: a detached worktree of the configured checkout. */
+  private get worktree(): string { return join(this.dir, 'build') }
   private iso(): string { return new Date(this.now()).toISOString() }
   /** The last switch outcome its process wrote, which survives the restart that ended the host that started it. */
   private readLast(): UpgradeRun | null {
@@ -233,9 +243,11 @@ export class Upgrade {
     }
     const installed = installedCommit(this.run.read, this.install)
     const busy = !!this.current && ['preparing', 'waiting', 'switching'].includes(this.current.state)
+    // The prepared build waits for a person until the restart uses it; a worktree removed by hand turns back into an offer to prepare.
+    const prepared = this.current?.state === 'prepared' && this.run.exists(this.worktree) ? { sha: this.current.sha } : null
     return { enabled: this.enabled, installed, remote: this.remote, behind: this.behind, more: this.more,
       available: this.enabled && !!this.remote.sha && this.remote.sha !== installed && !busy,
-      blocked: this.blocked, run: this.current, running: this.host.activeCount() }
+      blocked: this.blocked, run: this.current, prepared, running: this.host.activeCount() }
   }
 
   /** Fetch the branch and list what the installed build lacks; concurrent calls share one fetch. */
@@ -273,10 +285,10 @@ export class Upgrade {
   }
 
   /**
-   * Start an update to the remote commit last checked. Returns at once; the panel polls `view()` for its steps.
-   * @param force - skip waiting for running workers; they restart with a recovery note.
+   * Prepare the remote commit last checked: build it in a separate worktree, without pausing dispatch or touching this host.
+   * Returns at once; the panel polls `view()` for its steps and offers the restart once `view().prepared` names a commit.
    */
-  begin(force = false): UpgradeRun {
+  prepare(): UpgradeRun {
     if (!this.enabled) throw new UpgradeRefused('disabled')
     if (this.current && ['preparing', 'waiting', 'switching'].includes(this.current.state)) throw new UpgradeRefused('running')
     const sha = this.remote.sha
@@ -284,25 +296,52 @@ export class Upgrade {
     if (this.blocked) throw new UpgradeRefused(this.blocked)
     const from = installedCommit(this.run.read, this.install)
     if (sha === from) throw new UpgradeRefused('current')
+    // The same build is already waiting; the restart it needs is not another prepare. A later remote commit may replace it.
+    if (this.current?.state === 'prepared' && this.current.sha === sha && this.run.exists(this.worktree)) throw new UpgradeRefused('prepared')
     this.cancelled = false
     const run: UpgradeRun = this.current = { state: 'preparing', sha, from, startedAt: this.iso(), steps: [], error: null }
-    void this.prepareAndSwitch(run, force).catch(error => {
+    void this.prepareBuild(run).catch(error => {
       this.host.warn(`dsh-superagent update failed: ${String(error)}`)
       this.fail(run, String((error as Error).message ?? error))
     })
     return run
   }
-  /** Give up an update that has not reached the switch; a pause it set is lifted again. */
+  /**
+   * Restart into the prepared build: pause dispatch, wait for running workers, then hand the switch this host and stop.
+   * Returns at once; `force` skips waiting for running workers, which restart with a recovery note.
+   */
+  apply(force = false): UpgradeRun {
+    if (!this.enabled) throw new UpgradeRefused('disabled')
+    const run = this.current
+    if (!run || run.state !== 'prepared') throw new UpgradeRefused('not-prepared')
+    if (!this.run.exists(this.worktree)) throw new UpgradeRefused('missing-build')
+    this.cancelled = false
+    run.state = 'waiting'
+    void this.switchToPrepared(run, force).catch(error => {
+      this.host.warn(`dsh-superagent update restart failed: ${String(error)}`)
+      this.retryPrepared(run, String((error as Error).message ?? error))
+    })
+    return run
+  }
+  /** Give up a run that has not reached the switch: a prepared build is dropped and a pause it set is lifted again. */
   async cancel(): Promise<boolean> {
     const run = this.current
-    if (!run || !['preparing', 'waiting'].includes(run.state)) return false
+    if (!run || !['preparing', 'waiting', 'prepared'].includes(run.state)) return false
     this.cancelled = true
     run.state = 'cancelled'
     run.endedAt = this.iso()
+    this.persist(run)
     if (this.pausedByUs) { this.pausedByUs = false; await this.host.pause(false).catch(() => {}) }
     return true
   }
   private pausedByUs = false
+  /**
+   * Record the run for the host that starts next. A prepared build outlives a restart so the restart stays the person's
+   * choice; a switch reads the steps and outcome its predecessor and it wrote.
+   */
+  private persist(run: UpgradeRun): void {
+    try { this.run.write(this.statusFile, JSON.stringify(run, null, 2) + '\n') } catch { /* The panel still shows the in-memory run. */ }
+  }
   private step(run: UpgradeRun, name: UpgradeStepName, state: UpgradeStep['state'], detail = ''): void {
     const found = run.steps.find(step => step.name === name)
     if (found) Object.assign(found, { state, detail, at: this.iso() })
@@ -313,6 +352,20 @@ export class Upgrade {
     run.state = 'failed'; run.error = error; run.endedAt = this.iso()
     const last = run.steps.at(-1)
     if (last?.state === 'running') Object.assign(last, { state: 'failed', detail: error })
+    this.persist(run)
+    if (this.pausedByUs) { this.pausedByUs = false; void this.host.pause(false).catch(() => {}) }
+  }
+  /**
+   * A restart that never reached the switch leaves the build it was going to install untouched, so the run goes back to
+   * `prepared` with the reason shown and the person may try the restart again without rebuilding.
+   */
+  private retryPrepared(run: UpgradeRun, error: string): void {
+    if (run.state === 'cancelled' || run.state === 'switching') { this.fail(run, error); return }
+    run.state = 'prepared'; run.error = error
+    delete run.endedAt
+    const last = run.steps.at(-1)
+    if (last?.state === 'running') Object.assign(last, { state: 'failed', detail: error })
+    this.persist(run)
     if (this.pausedByUs) { this.pausedByUs = false; void this.host.pause(false).catch(() => {}) }
   }
   private async stage(run: UpgradeRun, name: UpgradeStepName, work: () => Promise<string | void>): Promise<void> {
@@ -321,8 +374,9 @@ export class Upgrade {
     const detail = await work()
     this.step(run, name, 'done', detail ?? '')
   }
-  private async prepareAndSwitch(run: UpgradeRun, force: boolean): Promise<void> {
-    const worktree = join(this.dir, 'build')
+  /** Phase one: fetch, check out, install, check, test and build the target commit; nothing here touches the running service. */
+  private async prepareBuild(run: UpgradeRun): Promise<void> {
+    const worktree = this.worktree
     const pnpm = (args: string[]) => this.run.command(this.config.pnpm, args, { cwd: worktree, timeoutMs: STEP_TIMEOUT_MS,
       shell: process.platform === 'win32' })
     try {
@@ -343,7 +397,12 @@ export class Upgrade {
       return
     }
     if (this.cancelled) return
-    run.state = 'waiting'
+    run.state = 'prepared'
+    this.persist(run)
+  }
+  /** Phase two: pause dispatch, wait for running workers, then write the plan and hand off to the switch process. */
+  private async switchToPrepared(run: UpgradeRun, force: boolean): Promise<void> {
+    const worktree = this.worktree
     const wasPaused = this.host.paused()
     this.step(run, 'pause', 'running')
     if (!wasPaused) { await this.host.pause(true); this.pausedByUs = true }
@@ -352,14 +411,14 @@ export class Upgrade {
     const deadline = this.now() + this.config.idleTimeoutMin * 60_000
     while (!force && this.host.activeCount() > 0) {
       if (this.cancelled || this.stopped) return
-      if (this.now() > deadline) { this.fail(run, `${this.host.activeCount()} workers were still running after ${this.config.idleTimeoutMin} minutes`); return }
+      if (this.now() > deadline) { this.retryPrepared(run, `${this.host.activeCount()} workers were still running after ${this.config.idleTimeoutMin} minutes`); return }
       this.step(run, 'idle', 'running', String(this.host.activeCount()))
       await new Promise(done => setTimeout(done, 2_000))
     }
     if (this.cancelled) return
     this.step(run, 'idle', 'done', force ? 'forced' : '')
     const url = this.host.url()
-    if (!url) { this.fail(run, 'The management API has no loopback address the switch could check'); return }
+    if (!url) { this.retryPrepared(run, 'The management API has no loopback address the switch could check'); return }
     const plan = { sha: run.sha, from: run.from, source: worktree, install: this.install, stateDir: this.host.stateDir,
       backup: join(this.dir, 'backup'), statusFile: this.statusFile, log: join(this.dir, 'switch.log'), url, pid: process.pid, wasPaused,
       holdFile: this.config.holdFile, start: this.startCommand(), startedAt: run.startedAt, steps: run.steps }
@@ -367,7 +426,7 @@ export class Upgrade {
     this.run.write(planFile, JSON.stringify(plan, null, 2) + '\n')
     run.state = 'switching'
     this.step(run, 'stop', 'running')
-    this.run.write(this.statusFile, JSON.stringify(run, null, 2) + '\n')
+    this.persist(run)
     // Hand off: the switch runs from the new build's own script, so an update can fix the switch too.
     this.run.detach(process.execPath, [join(worktree, 'scripts', 'upgrade-switch.mjs'), planFile], { cwd: this.dir, log: plan.log })
     this.pausedByUs = false

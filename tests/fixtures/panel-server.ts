@@ -93,7 +93,7 @@ export const MACHINE = { stateDir: '/srv/dsh-superagent', promptMaxChars: 100000
 type Settings = ReturnType<typeof SettingsSchema.parse>
 /** A host whose update checks are off: no checkout configured. */
 export const NO_UPDATE: UpgradeView = { enabled: false, installed: null, remote: { ref: 'origin/main', sha: null, checkedAt: null, error: null },
-  behind: [], more: false, available: false, blocked: null, run: null, running: 0 }
+  behind: [], more: false, available: false, blocked: null, run: null, prepared: null, running: 0 }
 export interface PanelServer {
   upgrade?: UpgradeView
   joined?: Record<string, string>; joining?: Record<string, string>
@@ -591,7 +591,8 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'POST setup/check': { answer: () => ({ restarting: true }) },
   'GET upgrade': { answer: () => server.upgrade ?? NO_UPDATE },
   'POST upgrade/check': { answer: () => server.upgrade ?? NO_UPDATE },
-  'POST upgrade': { body: true, answer: () => server.upgrade?.run ?? refuse(409, 'Update refused: unchecked', { upgrade: 'unchecked' }) },
+  'POST upgrade/prepare': { answer: () => server.upgrade?.run ?? refuse(409, 'Update refused: unchecked', { upgrade: 'unchecked' }) },
+  'POST upgrade/apply': { body: true, answer: () => server.upgrade?.run ?? refuse(409, 'Update refused: not-prepared', { upgrade: 'not-prepared' }) },
   'POST upgrade/cancel': { answer: () => ({ cancelled: false }) },
   'GET models': { answer: () => ({ default: { provider: 'host', model: 'default' }, routableProviders: [], failures: [],
     groups: [{ id: 'worker-provider', name: 'Worker provider', models: [{ id: 'worker-model', name: 'Worker model',

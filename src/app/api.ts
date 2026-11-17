@@ -106,8 +106,10 @@ export interface Api {
   'GET upgrade': { response: UpgradeView }
   /** Fetch the branch now instead of at the next interval. */
   'POST upgrade/check': { response: UpgradeView }
-  /** Start the one-click update; `force` does not wait for running workers. */
-  'POST upgrade': { body: { force?: boolean }; response: UpgradeRun }
+  /** Prepare the update: build the remote commit in a separate worktree without pausing dispatch or touching the running host. */
+  'POST upgrade/prepare': { response: UpgradeRun }
+  /** Restart from the prepared build; `force` does not wait for running workers. */
+  'POST upgrade/apply': { body: { force?: boolean }; response: UpgradeRun }
   /** Give up an update that has not reached the switch. */
   'POST upgrade/cancel': { response: { cancelled: boolean } }
   'GET models': { response: ModelCatalog }
