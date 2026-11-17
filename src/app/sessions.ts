@@ -4,7 +4,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { MessageId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { dirname } from 'node:path'
+import { mkdirSync } from 'node:fs'
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import { key, analysisRunning, analysisSection, liveTicket, modelRoute, ticketPhase, type ModelRoute, type Ticket } from '../core/index.ts'
 import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
@@ -36,6 +37,8 @@ export interface SessionsHost {
   /** The `worker-tools` health entry: whether the last worker Session resolved the tools a worker needs. */
   readonly toolsHealth: HealthEntry
   readonly masterId: string
+  /** The deployment's state directory, under which each ticket's evidence directory lives. */
+  readonly stateDir: string
   readonly lifetime: AbortSignal
   closing(): boolean
   /** A person wrote in a ticket's worker Session: it resumes, takes the message, or starts its next Assignment; returns whether it did. */
@@ -80,6 +83,22 @@ const MASTER_TOOLS = ['skill', 'read', 'read_image', 'job_output', 'job_list', '
 const PLAN_BLOCKED = ['write', 'edit']
 /** The plan gate's refusal, worded so a model submits the plan instead of retrying the tool. */
 const PLAN_CLOSED = 'The P1 plan gate is closed: submit the plan with orchestrator_plan and wait for a person to answer 1 before changing files'
+/**
+ * The one directory the plan gate lets a worker write, `<stateDir>/evidence/<ticketId>`, the same evidence directory editor
+ * captures use. It lies outside every workspace and checkout, so a file there cannot reach a changelist, a commit or a pull
+ * request: that is what makes a read-only analysis artifact safe before a person approves the plan.
+ */
+const planArtifacts = (stateDir: string, ticketId: string): string => join(stateDir, 'evidence', ticketId)
+/**
+ * Whether a file tool call would write an analysis artifact: an absolute path under the ticket's evidence directory. A
+ * relative path is refused because the tool resolves it against the session's workspace, which the plan gate still protects.
+ */
+function writesPlanArtifact(execution: { name: string; arguments: unknown } | undefined, root: string): boolean {
+  if (!execution || !PLAN_BLOCKED.includes(execution.name)) return false
+  const filePath = (execution.arguments as { file_path?: unknown } | undefined)?.file_path
+  if (typeof filePath !== 'string' || !isAbsolute(filePath)) return false
+  return resolve(filePath).startsWith(resolve(root) + sep)
+}
 /** Tools the idle analysis refuses besides the write tools: it neither plans nor delivers, and its dossier is its whole output. */
 const ANALYSIS_BLOCKED = ['write', 'edit', 'orchestrator_plan', 'orchestrator_phase']
 /** The idle analysis's refusal, worded so a model reports its dossier instead of retrying the change. */
@@ -493,9 +512,16 @@ export class Sessions {
         const command = execution && SHELL_TOOLS.includes(execution.name) ? String((execution.arguments as { command?: unknown } | undefined)?.command ?? '') : ''
         return command && WRITE_COMMAND.test(command) ? `${ANALYSIS_CLOSED}; this command would change the workspace` : undefined
       }
-      // The P1 gate is closed until a person approves the plan: no file tool, and no shell command that would change the workspace.
+      // The P1 gate is closed until a person approves the plan: no file tool, and no shell command that would change the
+      // workspace. The one exception is a read-only analysis artifact: the file tools may write inside the ticket's evidence
+      // directory, which is outside every workspace, so the worker can show its findings before a person approves code.
       if (ticketPhase(current) !== 'plan') return undefined
-      if (execution && PLAN_BLOCKED.includes(execution.name)) return PLAN_CLOSED
+      const artifacts = planArtifacts(this.host.stateDir, current.id)
+      if (writesPlanArtifact(execution, artifacts)) {
+        mkdirSync(artifacts, { recursive: true, mode: 0o700 })
+        return undefined
+      }
+      if (execution && PLAN_BLOCKED.includes(execution.name)) return `${PLAN_CLOSED}; read-only analysis artifacts may be written under ${artifacts}, outside the workspace`
       const command = execution && SHELL_TOOLS.includes(execution.name) ? String((execution.arguments as { command?: unknown } | undefined)?.command ?? '') : ''
       return command && WRITE_COMMAND.test(command) ? `${PLAN_CLOSED}; this command would change the workspace` : undefined
     })]

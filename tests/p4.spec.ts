@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { join } from 'node:path'
 import { EXECUTOR_VARIABLES, environmentOf, p4Client, p4Prepare } from '../src/app/execution-environment.ts'
 import { baseAssignment, deliveryInstructions, sharingInstructions, ticketExecution } from '../src/executor/dsh.ts'
 import { ExecutorConfigSchema, SettingsSchema } from '../src/policy.ts'
@@ -32,7 +33,7 @@ describe('p4 delivery settings', () => {
 describe('p4 execution variables', () => {
   it('are declared once, so the Execution settings list them even with the git backend', () => {
     const keys = EXECUTOR_VARIABLES.map(variable => variable.key)
-    for (const key of ['DSH_SUPERAGENT_BACKEND', 'DSH_SUPERAGENT_P4_CLIENT', 'DSH_SUPERAGENT_P4_PORT',
+    for (const key of ['DSH_SUPERAGENT_BACKEND', 'DSH_SUPERAGENT_EVIDENCE', 'DSH_SUPERAGENT_P4_CLIENT', 'DSH_SUPERAGENT_P4_PORT',
       'DSH_SUPERAGENT_P4_DEPOT', 'DSH_SUPERAGENT_P4_STREAM', 'DSH_SUPERAGENT_P4_SYNC', 'DSH_SUPERAGENT_P4_CL', 'DSH_SUPERAGENT_SWARM_URL',
       'DSH_SUPERAGENT_SWARM_REVIEW']) expect(keys).toContain(key)
     expect(new Set(keys).size).toBe(keys.length)
@@ -41,13 +42,15 @@ describe('p4 execution variables', () => {
     const settings = settingsWith({ backend: 'p4', p4: { port: 'p4.example.com:1666', depot: '//depot/mainline',
       syncSpec: '@12345', swarmUrl: 'https://swarm.example.com' } })
     const variables = environmentOf({ deployment: testDeployment(), sources: noSources, settings,
-      ticket: { id: 't1', name: 'fix-thing', directory: '/work/fix-thing' } })
+      stateDir: '/state', ticket: { id: 't1', name: 'fix-thing', directory: '/work/fix-thing' } })
     expect(valueOf(variables, 'DSH_SUPERAGENT_BACKEND')).toBe('p4')
     expect(valueOf(variables, 'DSH_SUPERAGENT_P4_PORT')).toBe('p4.example.com:1666')
     expect(valueOf(variables, 'DSH_SUPERAGENT_P4_DEPOT')).toBe('//depot/mainline')
     expect(valueOf(variables, 'DSH_SUPERAGENT_P4_SYNC')).toBe('@12345')
     expect(valueOf(variables, 'DSH_SUPERAGENT_SWARM_URL')).toBe('https://swarm.example.com')
     expect(valueOf(variables, 'DSH_SUPERAGENT_P4_CLIENT')).toBe('dsh-fix-thing')
+    // The plan gate's one writable directory is outside every workspace: the ticket's evidence directory.
+    expect(valueOf(variables, 'DSH_SUPERAGENT_EVIDENCE')).toBe(join('/state', 'evidence', 't1'))
   })
   it('leave the changelist and review empty until the worker records them', () => {
     const variables = environmentOf({ deployment: testDeployment(), sources: noSources,
@@ -65,6 +68,7 @@ describe('p4 execution variables', () => {
   it('omit the ticket variables, including the client, when no ticket is given', () => {
     const variables = environmentOf({ deployment: testDeployment(), sources: noSources, settings: settingsWith({ backend: 'p4' }) })
     expect(variables.map(variable => variable.key)).not.toContain('DSH_SUPERAGENT_P4_CLIENT')
+    expect(variables.map(variable => variable.key)).not.toContain('DSH_SUPERAGENT_EVIDENCE')
   })
 })
 

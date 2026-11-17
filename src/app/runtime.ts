@@ -168,7 +168,7 @@ export class Runtime extends Service implements SourceHost {
         feishuPageSize: () => feishuSettings(sources).readPageSize, sourceLink: link }
       const sessions = this.sessions = new Sessions({ context: ctx, store, prompts, effects, health: board.claim('models'),
         toolsHealth: board.claim('worker-tools', { state: 'starting', detail: 'No worker Session has started yet' }),
-        masterId, lifetime: this.lifetime, wroteInSession: (id, text) => this.engine.wroteInSession(id, text),
+        masterId, stateDir: machine.stateDir, lifetime: this.lifetime, wroteInSession: (id, text) => this.engine.wroteInSession(id, text),
         closing: () => this.closing(), environment,
         restoreBilling: (id, events) => this.billing.restore(id, events),
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
@@ -399,7 +399,7 @@ export class Runtime extends Service implements SourceHost {
   ticketEnvironment(ticket: Ticket): Variable[] {
     const trigger = sourceTrigger(this, ticket)
     const { setup: { deployment }, sources } = this
-    return ticketEnvironment({ deployment, sources, settings: this.store.settings(), ticket, ...trigger ? { trigger } : {} })
+    return ticketEnvironment({ deployment, sources, settings: this.store.settings(), stateDir: this.machine.stateDir, ticket, ...trigger ? { trigger } : {} })
   }
   checkSetup(): void { this.setup.check() }
   receive(trigger: Trigger): ReceiveResult { return this.passes.receive(trigger) }
