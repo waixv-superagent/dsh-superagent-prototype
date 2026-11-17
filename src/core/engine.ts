@@ -1,7 +1,7 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
 import { isoTime, liveTicket } from './model.ts'
-import type { Backend, ChannelRef, Decision, LinkedRelationKind, ModelGrant, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, ThreadRef, Ticket, TicketPipeline, TicketRepair, Trigger } from './model.ts'
+import type { Backend, ChannelRef, Decision, LinkedRelationKind, ModelGrant, ModelRelay, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, ThreadRef, Ticket, TicketPipeline, TicketRepair, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
 import type { PlanDecision, PlanOption, PlanTemplate, PlanVia } from './plan.ts'
@@ -396,10 +396,11 @@ export class Engine {
     return this.repo.atomic(() => this.tickets.link(ticketId, kind, otherId, reason))
   }
   /**
-   * A fact the main Session gives an open ticket's Executor: see `Tickets.note`.
-   * @throws UserError when the ticket is unknown or has ended.
+   * A fact the main Session gives an open ticket's Executor: see `Tickets.note`. With `relay`, the note also records the model
+   * routes the person's own message names, so a conversation-level authorization reaches the ticket without a card.
+   * @throws UserError when the ticket is unknown or has ended, or the relay names no person's message or no route.
    */
-  note(ticketId: string, text: string): Ticket { return this.repo.atomic(() => this.tickets.note(ticketId, text)) }
+  note(ticketId: string, text: string, relay?: ModelRelay): Ticket { return this.repo.atomic(() => this.tickets.note(ticketId, text, relay)) }
   /**
    * An Executor's hand-back of a message that reached its ticket but asks for more than it: see `Evals.handback`.
    * @returns whether it was queued for Eval: false while another ticket still decides it, and for one this ticket did not decide (see `Evals.handback`).

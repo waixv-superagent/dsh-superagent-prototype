@@ -2,7 +2,7 @@
 import { z } from 'zod'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { LINKED_RELATION_KINDS, analysisRunning, liveTicket, missingVerifyLabels, modelRoute, PLAN_DIFF_LIMITS, TEAM_ROLE_CHARS, TEAM_ROLES_MAX,
-  TEAM_TASK_CHARS, ticketPhase, VERIFY_LABELS, type EngineForExecutor, type ModelGrant, type ModelRoute, type ReceiveResult, type RoutedModel, type TeamRoute,
+  TEAM_TASK_CHARS, ticketPhase, VERIFY_LABELS, type EngineForExecutor, type ModelGrant, type ModelRoute, type ReceiveResult, type TeamRoute,
   type Ticket } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
 import { matchDeliveryTarget, deliveryTargets } from '../delivery-targets.ts'
@@ -11,6 +11,7 @@ import { workerSessionId } from '../../executor/dsh.ts'
 import type { SourceContext } from '../../sources/host.ts'
 import type { PipelineChecks } from '../pipeline.ts'
 import { readResource, type ResourceHost } from '../resources.ts'
+import { routableModels } from '../model-routes.ts'
 import type { Store } from '../store.ts'
 import { reportRelay, threadFollowedNotice } from '../notices.ts'
 import type { Sessions } from '../sessions.ts'
@@ -79,10 +80,6 @@ function editorStatusFor(scheduler: EditorScheduler, ticketId: string) {
 /** The model catalog's display name for an exact route, or undefined when the deployment does not route it. */
 function routedModel(catalog: ModelCatalog, provider: string, model: string): string | undefined {
   return catalog.groups.find(group => group.id === provider)?.models.find(item => item.id === model)?.name || undefined
-}
-/** The routes the deployment serves, as the host compares them with the routes a person's own message names. */
-function routableModels(catalog: ModelCatalog): RoutedModel[] {
-  return catalog.groups.flatMap(group => group.models.map(model => ({ provider: group.id, model: model.id, name: model.name })))
 }
 /** A model-approval question that names the route and its display name, followed by the worker's own question. */
 function modelQuestion(model: ModelRoute, name: string, question: string): string {
@@ -245,8 +242,8 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           provider: z.string().trim().min(1).max(100),
           model: z.string().trim().min(1).max(200),
         }).strict().optional().describe('With human_action: ask the person to allow this subagent model route; the host asks 允许/不允许. '
-          + 'Without human_action, only when a person\'s own message on the ticket already named the route: the host records that message as the grant and sends no card. '
-          + 'Call list_subagent_models for the ids.'),
+          + 'Without human_action, only when a person\'s own message on the ticket (or one the main Session relayed to it) already named the route: '
+          + 'the host records that message as the grant and sends no card. Call list_subagent_models for the ids.'),
         subagent_team: z.array(z.object({
           role: z.string().trim().min(1).max(TEAM_ROLE_CHARS).describe('What this teammate does in the team, such as 实现 or 复核; unique in one team request.'),
           task: z.string().trim().min(1).max(TEAM_TASK_CHARS).describe('The one-line job this teammate is given, as the person will read it before allowing its route.'),
