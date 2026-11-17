@@ -354,7 +354,7 @@ Set `upgrade.checkout` in the `dsh-superagent` entry to a git checkout of this r
 
 The switch backs up the installed package entries and `orchestrator.sqlite` to `<stateDir>/upgrade/backup`. It copies the new build over the installed package (`upgrade.install`, by default the directory the plugin runs from). It then starts the service with `upgrade.startCommand`, by default the same command line, and waits for `/orchestrator/api/state` to report a running runtime. If the new version does not come up, the switch restores the package and the database and starts the previous version. Finally it resumes dispatch, unless dispatch was paused before the restart.
 
-`<stateDir>/upgrade/status.json` keeps the prepared build and the outcome, and `switch.log` keeps the output. The next host shows them in the dialog. If neither version comes up, the badge turns amber and the backup stays in place for a person. The management API offers the two phases as `POST upgrade/prepare` and `POST upgrade/apply`.
+`<stateDir>/upgrade/status.json` keeps the prepared run and the outcome, and `switch.log` keeps the output. The next host shows them in the dialog. If neither version comes up, the badge turns amber and the backup stays in place for a person. The management API offers the two phases as `POST upgrade/prepare` and `POST upgrade/apply`.
 
 The switch replaces only the plugin's own files and keeps the profile's `node_modules`. The dialog therefore refuses an update that changes dependencies (`pnpm-lock.yaml`, or the dependency fields of `package.json`): run the manual steps above for those.
 
