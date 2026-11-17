@@ -54,19 +54,25 @@ function activateTopic(ctx: SourceContext, trigger: Trigger): void {
   active[topicKey(chatId, root)] = trigger.at
   ctx.state.set(KV.feishu.active, active)
 }
+/**
+ * Takes in one Feishu message: it applies a processing control, hands the Trigger to the Engine, and settles the
+ * conversation records the message leaves behind — the topic its follow-ups stay active in, and the receipt reaction.
+ * A message that reached the bot keeps its topic open for follow-ups, and one the Policy admits is taken with the bot's
+ * reaction. A message with neither a mention nor a direct chat still earns the reaction when its sender is a person the
+ * Policy allows: the auto-created topic has nobody to mention the bot, and the reaction is what tells that person their
+ * follow-up was seen while the answer is being worked out. Anyone else gets none, since no reply is promised to them.
+ */
 async function receive(ctx: SourceContext, trigger: Trigger): Promise<void> {
   // A control word is the person's switch, not work for the Eval: applying it here is also what lets "恢复" through
   // while processing is paused, when no Eval runs to read it.
   if (await handleProcessingControl(ctx, trigger)) return
   const result = await ctx.receive(trigger)
-  // A message that reached the bot keeps its topic open for follow-ups. Only a message the Policy admits is taken
-  // with a receipt reaction: one the bot will ignore, such as a sender missing from the allowed list, must not show
-  // a reaction that promises a reply.
-  if (result === 'stored' && trigger.addressed) {
-    activateTopic(ctx, trigger)
+  if (result === 'stored') {
+    if (trigger.addressed) activateTopic(ctx, trigger)
     const emoji = enabled(ctx)?.ackEmoji ?? 'none'
     const messageId = String(trigger.meta.messageId ?? '')
-    if (ctx.admissible(trigger) && emoji !== 'none' && messageId && Date.now() - Date.parse(trigger.at) < RECEIPT_WINDOW_MS) {
+    if ((trigger.addressed || ctx.mayControl(trigger)) && ctx.admissible(trigger) && emoji !== 'none' && messageId
+      && Date.now() - Date.parse(trigger.at) < RECEIPT_WINDOW_MS) {
       // The reaction says the bot saw the message; taking it never fails receiving.
       await takeReceipt(ctx, { triggerId: trigger.id, messageId }, emoji)
     }

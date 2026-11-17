@@ -164,6 +164,33 @@ describe('feishu source', () => {
     expect(lark.mock.calls.some(([args]) => args[0] === 'im' && args[1] === 'reactions')).toBe(false)
     h.store.close()
   })
+  it('reacts to an admitted follow-up that does not address the bot, so a Ticket topic shows the bot saw it', async () => {
+    // An auto-created topic has no root message a person would mention the bot in; the receipt reaction is what tells the
+    // allowed person there that their follow-up was taken while the answer is worked out.
+    const h = host({ mayControl: trigger => trigger.human && trigger.actor.id === MEMBER })
+    vi.spyOn(h.commands, 'withSignal').mockReturnValue(h.commands)
+    const message = { message_id: 'om_follow', chat_id: 'oc_observed', create_time: String(Date.now()),
+      sender: { id: MEMBER, sender_type: 'user' }, body: { content: '{"text":"follow-up"}' }, root_id: 'om_root' }
+    const lark = vi.spyOn(h.commands, 'lark').mockImplementation(async args => args[0] === 'api'
+      ? { has_more: false, items: [message] } : { reaction_id: 'r1' })
+    await backfillChat(h, 'oc_observed', false, new Date(Date.now() - 60_000).toISOString(), new Date().toISOString(), new AbortController().signal)
+    expect(h.store.get(KV.feishu.receipts)).toMatchObject({ om_follow: { reactionId: 'r1' } })
+    expect(lark.mock.calls.map(([args]) => args)).toEqual(expect.arrayContaining([
+      ['im', 'reactions', 'create', '--message-id', 'om_follow', '--data', '{"reaction_type":{"emoji_type":"OnIt"}}'],
+    ]))
+    h.store.close()
+  })
+  it('does not react to an unaddressed follow-up from a person the Policy does not allow', async () => {
+    const h = host({ mayControl: () => false })
+    vi.spyOn(h.commands, 'withSignal').mockReturnValue(h.commands)
+    const message = { message_id: 'om_stranger', chat_id: 'oc_observed', create_time: String(Date.now()),
+      sender: { id: 'ou_stranger', sender_type: 'user' }, body: { content: '{"text":"hello"}' }, root_id: 'om_root' }
+    const lark = vi.spyOn(h.commands, 'lark').mockImplementation(async args => args[0] === 'api'
+      ? { has_more: false, items: [message] } : { reaction_id: 'r1' })
+    await backfillChat(h, 'oc_observed', false, new Date(Date.now() - 60_000).toISOString(), new Date().toISOString(), new AbortController().signal)
+    expect(lark.mock.calls.some(([args]) => args[0] === 'im' && args[1] === 'reactions')).toBe(false)
+    h.store.close()
+  })
   it('clears the receipt reaction on a message once its reply went out', async () => {
     const h = host()
     const lark = vi.spyOn(h.commands, 'lark').mockImplementation(async args => args[0] === 'im' && args[1] === 'reactions' ? { reaction_id: 'r1' } : {})
@@ -242,6 +269,26 @@ describe('feishu source', () => {
     // Every receipt ends with its lifetime, including one whose work never reported back.
     await sweepReceipts(h, Date.now() + RECEIPT_LIFETIME_MS)
     expect(h.store.get(KV.feishu.receipts)).toBeUndefined()
+    h.store.close()
+  })
+  it('lets a Feishu ticket only its actor act on a card, and another Source\'s ticket a person the Policy allows', () => {
+    const h = host()
+    const settings = h.store.settings()
+    // A second allowed person proves which tickets count them: only those another Source started.
+    h.store.saveSettings({ ...settings, policy: { ...settings.policy, sources: { ...settings.policy.sources,
+      feishu: { ...settings.policy.sources.feishu, allowed: [...settings.policy.sources.feishu?.allowed ?? [], { id: 'ou_bob' }] } } } })
+    const mandate = (actor: { source: string; id: string }) => ({ ...openTicket('t1').mandate, actor })
+    h.store.tickets.save({ ...openTicket('f1'), mandate: mandate({ source: 'feishu', id: MEMBER }) })
+    h.store.tickets.save({ ...openTicket('w1'), mandate: mandate({ source: 'web', id: 'operator' }) })
+    h.store.tickets.save({ ...openTicket('g1'), mandate: mandate({ source: 'github', id: 'alice' }) })
+    // A Feishu ticket's card belongs to the person whose request opened it, however the Policy lists others.
+    expect(h.mayActOnCard('f1', MEMBER)).toBe(true)
+    expect(h.mayActOnCard('f1', 'ou_bob')).toBe(false)
+    // A ticket from another Source has no Feishu actor, so the Policy's allowed people answer its cards.
+    expect(h.mayActOnCard('w1', MEMBER)).toBe(true)
+    expect(h.mayActOnCard('g1', 'ou_bob')).toBe(true)
+    expect(h.mayActOnCard('w1', 'ou_mallory')).toBe(false)
+    expect(h.mayActOnCard('missing', MEMBER)).toBe(false)
     h.store.close()
   })
   it('polls subscribed threads and stores unseen replies as triggers on that thread', async () => {
