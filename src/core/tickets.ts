@@ -1,8 +1,8 @@
 /** Tickets: their lifecycle from an accept to their end, their Subscriptions and their Inputs. */
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
-import { latestAssignment, latestReport, liveTicket, MODEL_APPROVAL_OPTIONS, modelRoute, personNamesRoute, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
-import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, LinkedRelationKind, Mandate, ModelGrant, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, TeamRoute, ThreadRef, Ticket, TicketEndBy,
+import { latestAssignment, latestReport, liveTicket, MODEL_APPROVAL_OPTIONS, modelRoute, personNamesRoute, readUntil, routesNamedIn, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
+import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, LinkedRelationKind, Mandate, ModelGrant, ModelRelay, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, TeamRoute, ThreadRef, Ticket, TicketEndBy,
   TicketInput, TicketOutcome, TicketPhaseReset, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
@@ -638,7 +638,9 @@ export class Tickets extends EnginePart {
       delete plan.waiting
       ticket.updatedAt = at
       this.repo.tickets.save(ticket)
-      this.addInput(ticket, { id: key('input', ticketId, 'plan-revise', at), kind: 'text', at,
+      // The person's own direction is their message to the worker: marked as theirs, so a model route it names is an
+      // authorization under docs/003 and the worker need not ask for it on a card.
+      this.addInput(ticket, { id: key('input', ticketId, 'plan-revise', at), kind: 'text', at, person: true,
         text: `人要求换方向（${where}${choice ? ` · ${choice}` : ''}）：${note || '（没有附说明）'}\n仍处于方案阶段：继续只读定位，再用 orchestrator_plan 交新方案。` })
     } else {
       // A stop answers the gate too: clear `waiting` so a later resume does not reopen a plan a person already closed.
@@ -1325,15 +1327,39 @@ export class Tickets extends EnginePart {
     return ticket
   }
   /**
-   * Give an open ticket's Executor a fact as a note Input, such as what another ticket found; it grants nothing (see `TicketInput`).
-   * @throws UserError when the ticket is unknown or has ended.
+   * Give an open ticket's Executor a fact as a note Input, such as what another ticket found; a note grants nothing by itself
+   * (see `TicketInput`). With `relay`, the note also carries a person's authorization the main Session saw in its own
+   * conversation: the host reads that message and records the model routes it names as the ticket's grants, so the worker's
+   * tool guard lets it select them without a card. Only a person's own message relays; a bot's, CI's or another note names
+   * nothing to record.
+   * @throws UserError when the ticket is unknown or has ended, the relay names no person's message, or that message names no
+   * route (or names one ambiguously, which still needs a card).
    */
-  note(ticketId: string, text: string): Ticket {
+  note(ticketId: string, text: string, relay?: ModelRelay): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     const at = this.now()
+    if (relay) this.relayModelGrant(ticket, relay)
     this.addInput(ticket, { id: key('input', ticketId, 'note', at, text), kind: 'note', text, at })
     return this.require(ticketId)
+  }
+  /**
+   * Record the model routes a person's own message names as this ticket's grants, idempotently. `triggerId` must name a
+   * Trigger the host holds, which only a person may have written; the routes come from that message's text, not from the
+   * caller, so the main Session can relay an authorization but cannot invent one.
+   */
+  private relayModelGrant(ticket: Ticket, relay: ModelRelay): void {
+    const trigger = this.repo.triggers.get(relay.triggerId)
+    if (!trigger?.human) throw new UserError('modelRelayPerson')
+    const routes = routesNamedIn(trigger.text, relay.catalog)
+    if (!routes.length) throw new UserError('modelRelayUnnamed')
+    const execution = ticket.execution ?? { name: '', directory: '', assignment: '' }
+    const missing = routes.filter(route => !execution.modelGrants?.some(item => item.provider === route.provider && item.model === route.model))
+    if (!missing.length) return
+    const grants: ModelGrant[] = missing.map(route => ({ provider: route.provider, model: route.model, at: trigger.at, triggerId: trigger.id }))
+    ticket.execution = { ...execution, modelGrants: [...execution.modelGrants ?? [], ...grants] }
+    // Persist before the note is queued: the worker reads the grant from the ticket, so the note must never arrive ahead of it.
+    this.repo.tickets.save(ticket)
   }
   /**
    * Record that a ticket's worker found it is to another ticket as `kind` says (see `TicketRelation`). Recording the same

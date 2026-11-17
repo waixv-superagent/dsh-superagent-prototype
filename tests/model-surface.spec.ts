@@ -73,7 +73,10 @@ interface Skill { name: string; description: string; content: string }
 // A candidate card now carries the images its own message does, so dispatch gains the line that they arrive attached with
 // `images_unreadable` for the rest, and admission gains the card images and their untrusted-data and unreadable wording;
 // the main Session's surface measures 68,235, so the orchestrator budget grows to 68,300.
-const BUDGET: Record<Role, number> = { orchestrator: 68_300, worker: 61_200 }
+// A relayed model authorization adds the note tool's `authorized_by` option, the orchestrator rule that records it and the
+// worker wording that a relayed message counts (docs/003); the main Session's surface measures 69,103, so the orchestrator
+// budget grows to 69,200.
+const BUDGET: Record<Role, number> = { orchestrator: 69_200, worker: 61_200 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

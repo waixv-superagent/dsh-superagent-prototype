@@ -877,6 +877,29 @@ describe('context threads and notes', () => {
     h.engine.stopTicket(ticketId, 'done')
     expect(() => h.engine.note(ticketId, 'Too late')).toThrow(new UserError('ticketEnded'))
   })
+  it('relays a person\'s own message as a model authorization, and refuses a bot\'s or one that names no route', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.tick(1)
+    const catalog = [{ provider: 'p', model: 'm', name: 'Opus 5.5' }]
+    // The person's message is in the main conversation, on a Thread the ticket does not subscribe to: only the relay reaches
+    // the ticket, and the host still checks that the Trigger is a person's and reads the route from its own text.
+    h.engine.receive(trigger('7', { threads: [{ source: 'chat', id: 't2' }], text: '复杂的可以让 opus 来' }))
+    const noted = h.engine.note(ticketId, 'The person authorized Opus 5.5 for this review.', { triggerId: '7', catalog })
+    expect(noted.execution?.modelGrants).toEqual([expect.objectContaining({ provider: 'p', model: 'm', triggerId: '7' })])
+    expect(noted.inputs.at(-1)).toMatchObject({ kind: 'note', text: 'The person authorized Opus 5.5 for this review.' })
+    // Idempotent: relaying the same message again adds no second grant.
+    expect(h.engine.note(ticketId, 'Again.', { triggerId: '7', catalog }).execution?.modelGrants).toHaveLength(1)
+    // A bot's message, a message that only mentions or refuses the route, and an unknown Trigger record nothing.
+    h.engine.receive(trigger('8', { human: false, threads: [{ source: 'chat', id: 't3' }], text: '让 opus 来' }))
+    expect(() => h.engine.note(ticketId, 'bot', { triggerId: '8', catalog })).toThrow(new UserError('modelRelayPerson'))
+    h.engine.receive(trigger('9', { threads: [{ source: 'chat', id: 't4' }], text: 'opus 太慢' }))
+    expect(() => h.engine.note(ticketId, 'mention', { triggerId: '9', catalog })).toThrow(new UserError('modelRelayUnnamed'))
+    expect(() => h.engine.note(ticketId, 'unknown', { triggerId: '99', catalog })).toThrow(new UserError('modelRelayPerson'))
+    // A plain note still grants nothing, even when the conversation has a matching message in the store.
+    h.engine.receive(trigger('10', { threads: [{ source: 'chat', id: 't5' }], text: '让 opus 来' }))
+    expect(h.engine.note(ticketId, 'Context only.').execution?.modelGrants).toHaveLength(1)
+  })
 })
 describe('follow-up owners', () => {
   const accept = { kind: 'accept' as const, title: 'Y', scope: 'small', reason: 'requested' }
@@ -1235,9 +1258,11 @@ describe('worker reports', () => {
       question: '模型授权：允许用 p/m 跑子 agent 吗？', model: { provider: 'p', model: 'm' } })
     expect(asked.attention).toMatchObject({ question: '模型授权：允许用 p/m 跑子 agent 吗？', options: ['允许', '不允许'],
       model: { provider: 'p', model: 'm' } })
-    // A written answer that is not the card's label authorizes nothing, and says so to the worker.
+    // A written answer that is not the card's label authorizes nothing, and says so to the worker; it is not a person's
+    // message either, so it can never become a source of a model grant.
     const written = h.engine.answerAttentionText(ticketId, asked.attention!.id, '先不用')
     expect(written.execution?.modelGrants).toBeUndefined()
+    expect(written.inputs.at(-1)).not.toHaveProperty('person')
     expect(written.inputs.at(-1)).toMatchObject({ kind: 'text', text: expect.stringContaining('未授权') })
     // Ask again and approve: the grant lives on the ticket, and the answer tells the worker it may select the route.
     h.tick(1)
@@ -1301,6 +1326,27 @@ describe('worker reports', () => {
     ambiguous.engine.receive(trigger('3', { text: '让 opus 5.5 出方案' }))
     expect(ambiguous.engine.authorizeModelFromPerson(ambiguousTicket, { provider: 'p', model: 'm' }, two))
       .toMatchObject({ provider: 'p', model: 'm' })
+  })
+  it('takes the person\'s own words in a panel direction as their message, so a route they name needs no card', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.tick(1)
+    h.engine.submitPlan(ticketId, PLAN)
+    // The panel writes the direction as an Input of the ticket; it is the person's message, so the host reads it like one.
+    const revised = h.engine.decidePlan(ticketId, 'revise', '不依赖实际资产的思路是对的，让 opus 复核修正一波', 'panel')
+    const feedback = revised.inputs.at(-1)!
+    expect(feedback).toMatchObject({ kind: 'text', person: true, text: expect.stringContaining('让 opus 复核') })
+    const catalog = [{ provider: 'ai-gateway', model: 'claude-opus-5.5', name: 'Opus 5.5' }]
+    const grant = h.engine.authorizeModelFromPerson(ticketId, { provider: 'ai-gateway', model: 'claude-opus-5.5' }, catalog)
+    expect(grant).toMatchObject({ provider: 'ai-gateway', model: 'claude-opus-5.5', inputId: feedback.id })
+    // A direction that refuses the route authorizes nothing, exactly as a message on the thread would not.
+    const refused = harness()
+    const refusedTicket = accepted(refused).ticketId!
+    refused.tick(1)
+    refused.engine.submitPlan(refusedTicket, PLAN)
+    refused.engine.decidePlan(refusedTicket, 'revise', 'opus 不要用，先走 deepseek', 'panel')
+    expect(refused.engine.authorizeModelFromPerson(refusedTicket, { provider: 'ai-gateway', model: 'claude-opus-5.5' }, catalog))
+      .toBeUndefined()
   })
   it('asks a person to allow a whole agent team on one card and records each role\'s route only on 允许', () => {
     const h = harness()

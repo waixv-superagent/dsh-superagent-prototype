@@ -1,6 +1,7 @@
 /** Main Session tools for routing triggers, assessing candidates, sending replies, and updating settings and prompts. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { z } from 'zod'
 import { TICKET_KINDS, UserError, followupOwners, key, reasonText, type Decision, type DecisionKind, type EngineForMainSession, type EngineForPeople,
   type TicketKind } from '../../core/index.ts'
@@ -8,6 +9,7 @@ import { IM_WORDS, NOTE_WORDS, wordCount } from '../../infra/text.ts'
 import { AssessmentSchema, EscalationSchema, EvalReadSchema, WorktreeNameSchema, type MasterAssessor } from '../assessment.ts'
 import { ticketCard } from '../cards.ts'
 import { deliveryTargets, matchDeliveryTarget } from '../delivery-targets.ts'
+import { routableModels } from '../model-routes.ts'
 import { PromptConfigSchema, savePrompts, type Prompts } from '../prompts.ts'
 import { readResource, type MainResourceHost, type ResourceHost } from '../resources.ts'
 import type { Sessions } from '../sessions.ts'
@@ -29,6 +31,8 @@ export interface MainToolsHost {
   readonly settings: Pick<Settings, 'view' | 'block' | 'save' | 'pause' | 'sync'>
   readonly assessor: Pick<MasterAssessor, 'context' | 'read' | 'decide'>
   readonly resources: ResourceHost
+  /** The deployment's routable models, which a relayed person's message is checked against. */
+  models(): Promise<ModelCatalog>
   /** Schedules a pass to carry out work queued by an Engine command (such as an Eval or ticket resume). */
   requestPass(): void
   sendReplies(): Promise<void>
@@ -250,14 +254,24 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
     }),
     tool({
       name: 'orchestrator_ticket_note',
-      description: 'Tell a ticket\'s worker a fact from other work, such as what another ticket found; it grants no authority.',
+      description: 'Tell a ticket\'s worker a fact from other work, such as what another ticket found. The note itself grants no authority, except '
+        + 'that it may relay a person\'s own authorization: pass authorized_by, the Trigger id of the person\'s message that named a subagent model '
+        + 'route, and the host verifies that message and records the route it names as the ticket\'s grant, so its worker needs no 允许 card.',
       schema: z.object({
         ticket_id: z.string(),
         text: z.string().trim().min(1).refine(text => wordCount(text) <= IM_WORDS, `At most ${IM_WORDS} words`),
+        authorized_by: z.string().trim().min(1).optional().describe('The Trigger id of the person\'s own message that authorizes a subagent model route for this '
+          + 'ticket; the host records the routes that message names. A bot\'s message or a note authorizes nothing, so it is refused.'),
       }).strict(),
       execute: async args => {
-        host.engine.note(args.ticket_id, args.text)
-        return routed(host, { reason: 'Noted for the worker', ticketId: args.ticket_id })
+        const updated = args.authorized_by
+          ? host.engine.note(args.ticket_id, args.text, { triggerId: args.authorized_by, catalog: routableModels(await host.models()) })
+          : host.engine.note(args.ticket_id, args.text)
+        // The grant keeps the Trigger it came from, so the result names exactly the routes this relay recorded.
+        const relayed = args.authorized_by
+          ? (updated.execution?.modelGrants ?? []).filter(grant => grant.triggerId === args.authorized_by) : []
+        return { ...routed(host, { reason: relayed.length ? 'Noted, and recorded the model route the person named' : 'Noted for the worker',
+          ticketId: args.ticket_id }), ...(relayed.length ? { authorized: relayed.map(grant => `${grant.provider}/${grant.model}`) } : {}) }
       },
     }),
     tool({

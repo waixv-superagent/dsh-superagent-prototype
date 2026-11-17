@@ -275,7 +275,7 @@ export type TicketInput =
   | { id: string; kind: 'session-resume'; text: string; at: string }
   /** The host's own instruction, such as a status request; `person` marks one a person wrote, which the idle gate never holds. */
   | { id: string; kind: 'text'; text: string; at: string; person?: true }
-  /** A fact the main Session gave the ticket from other work: context, which asks for nothing and grants nothing. */
+  /** A fact the main Session gave the ticket from other work: context, which asks for nothing; a model authorization it relays is recorded on the ticket, not by the note itself (see `ModelGrant.triggerId`). */
   | { id: string; kind: 'note'; text: string; at: string }
 
 /**
@@ -299,9 +299,12 @@ export interface QuestionSection { label: string; text: string; fold?: boolean }
 export interface ModelRoute { provider: string; model: string }
 /**
  * A person's recorded authorization for one route on a ticket; `role` is the team role it was approved for. A click on the
- * card records `attentionId`; a message the person wrote on the ticket that named the route records `inputId` instead.
+ * card records `attentionId`; a message the person wrote on the ticket that named the route records `inputId` instead; and
+ * `triggerId` names the person's message the main Session relayed from its conversation (docs/003).
  */
-export interface ModelGrant extends ModelRoute { at: string; attentionId?: string; inputId?: string; role?: string }
+export interface ModelGrant extends ModelRoute { at: string; attentionId?: string; inputId?: string; triggerId?: string; role?: string }
+/** A person's message the main Session relays, so the host records the model routes that message names on a ticket. */
+export interface ModelRelay { triggerId: string; catalog: readonly RoutedModel[] }
 /** One model as the deployment's catalog names it, for judging whether a person's own message named a route. */
 export interface RoutedModel extends ModelRoute { name: string }
 /** One member of a worker's proposed agent team: the role and job a person sees before allowing its route, and that route. */
@@ -364,6 +367,13 @@ export function personNamesRoute(text: string, route: ModelRoute, catalog: reado
     }
   }
   return false
+}
+/**
+ * The routes `text` names and asks to use, as a person's own message does (see `personNamesRoute`). The main Session relays
+ * such a message to a ticket with `orchestrator_ticket_note`, and the host records exactly the routes that message names.
+ */
+export function routesNamedIn(text: string, catalog: readonly RoutedModel[]): ModelRoute[] {
+  return catalog.filter(item => personNamesRoute(text, item, catalog)).map(item => ({ provider: item.provider, model: item.model }))
 }
 /** A question for a person; `triggerId` is the human message that raised it, whose conversation it goes back to. */
 export interface Attention { id: string; question: string; /** The worker's choices, when it offers any; a card shows them and a click answers. */ options?: string[]; /** The context the worker adds, in its own order; absent keeps the card's default layout. */ sections?: QuestionSection[]; triggerId?: string

@@ -41,7 +41,7 @@ A person can send an owned follow-up to Eval from the panel. If the main Session
 
 ### Context-only subscriptions
 
-An Executor can follow a related Thread, such as another Issue or pull request, for context. Its messages reach the Ticket but grant no authority or follow-up strength. Human messages there do not resume an ended Ticket unless the main Session attaches a message from that Thread. Notes from the main Session about other work are also context only.
+An Executor can follow a related Thread, such as another Issue or pull request, for context. Its messages reach the Ticket but grant no authority or follow-up strength. Human messages there do not resume an ended Ticket unless the main Session attaches a message from that Thread. Notes from the main Session about other work are also context only, except that a note may relay a person's own message from the main conversation: the host verifies that the named Trigger is a person's and records the model route its words name, so the relay carries that person's authorization rather than granting one by itself (docs/003).
 
 Human messages that reach no Ticket, including Threads whose Tickets were stopped by a person, take the Eval path. Bot messages take that path independently of their delivery to subscribed Tickets.
 
