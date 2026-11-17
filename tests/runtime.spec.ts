@@ -256,6 +256,14 @@ it('relays an explicit member mention as a candidate and creates the ticket, ack
   expect(await route({ kind: 'accept', trigger_id: trigger.id, title: 'again', worktree_name: worktreeName, acknowledgement: 'x' })).toMatchObject({ ticket: { ticket_id: ticket.id } })
 })
 
+it('hands the accept receipt to the Source that opens the ticket conversation, so its link travels in that message', async () => {
+  const opened = vi.spyOn(feishuKind as { opened: NonNullable<typeof feishuKind.opened> }, 'opened')
+  const { ticket } = await acceptedTicket()
+  expect(opened).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: ticket.id }), expect.objectContaining({
+    source: 'feishu', address: expect.objectContaining({ chatId: CHAT, messageId: 'om_1' }),
+  }))
+})
+
 it('sends one receipt naming every ticket a multi-goal accept opened, so the batch is visible in the conversation', async () => {
   const trigger = feishu('9', '@bot 修列表，并把测试和文档补上')
   await receive(trigger)

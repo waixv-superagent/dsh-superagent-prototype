@@ -1,0 +1,26 @@
+{
+  "description": "The call the Feishu channel now makes for an acceptance receipt whose topic opened in time: one message, with the topic as a described markdown link.",
+  "command": [
+    "im",
+    "+messages-reply",
+    "--message-id",
+    "<the request message>",
+    "--msg-type",
+    "post",
+    "--content",
+    "<post JSON>",
+    "--reply-in-thread"
+  ],
+  "post": {
+    "zh_cn": {
+      "content": [
+        [
+          {
+            "tag": "md",
+            "text": "收到：把接单回执和开话题合成一条，话题链接改成描述超链接。\n工单 85e56605\n已开话题：[「合并两条接单通知并缩短话题链接」](https://applink.feishu.cn/client/thread/open?open_chat_id=oc_demo&open_thread_id=omt_demo)\n[工单 85e56605 ↗](https://panel.example/?ticket=85e56605e9f9a7e8f12e7eefc8be034d)"
+          }
+        ]
+      ]
+    }
+  }
+}

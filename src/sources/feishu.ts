@@ -92,7 +92,7 @@ export const feishuKind: SourceKind<FeishuConfig> = {
     send: sendFeishu, link: feishuLink,
   },
   threadContext: feishuThreadContext,
-  opened: (ctx, ticket) => openFeishuTopic(ctx, ticket),
+  opened: (ctx, ticket, receipt) => openFeishuTopic(ctx, ticket, receipt),
   find: query => ({ threads: [], terms: [...new Set(query.match(/om_[A-Za-z0-9_-]+/g) ?? [])] }),
   // A message's Trigger is named after the message, so the one it answers is named after its parent.
   repliesTo: trigger => typeof trigger.meta.parentId === 'string' ? feishuTriggerId(trigger.meta.parentId) : undefined,
