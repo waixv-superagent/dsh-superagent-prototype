@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AppUpgrade, AppUpgradeRefused, newestInstaller, type AppUpgradeHost } from '../src/app/app-upgrade.ts'
+import { AppUpgrade, AppUpgradeRefused, newestInstaller, readInstalledApp, type AppUpgradeHost } from '../src/app/app-upgrade.ts'
 import { NO_UPGRADE } from '../src/deployment.ts'
 import type { Runner } from '../src/app/upgrade.ts'
 
@@ -165,6 +165,31 @@ describe('desktop app build', () => {
   it('refuses to apply before a build finished', () => {
     const { upgrade } = make()
     expect(() => upgrade.apply()).toThrow(AppUpgradeRefused)
+  })
+
+  it('reads an app install directory this host did not run from', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-app-root-'))
+    directories.push(root)
+    mkdirSync(join(root, 'resources', 'app.asar'), { recursive: true })
+    writeFileSync(join(root, 'resources', 'app.asar', 'package.json'), JSON.stringify({ dshBuildCommit: A, version: '0.2.2-alpha.3' }))
+    expect(readInstalledApp(root)).toEqual({ commit: A, version: '0.2.2-alpha.3' })
+    expect(readInstalledApp(join(root, 'missing'))).toEqual({ commit: null, version: null })
+  })
+
+  it('targets the configured install directory for the in-place action', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dsh-app-target-'))
+    directories.push(directory)
+    const artifact = join(directory, 'deepseek-harness-unsigned.exe')
+    writeFileSync(artifact, 'installer')
+    const app = join(directory, 'win-unpacked')
+    mkdirSync(join(app, 'resources', 'app.asar'), { recursive: true })
+    writeFileSync(join(app, 'resources', 'app.asar', 'package.json'), '{}')
+    const { upgrade } = make(CHECK, { config: { ...NO_UPGRADE, appCheckout: 'C:/dsh', appInstall: 'C:/configured-app' },
+      findArtifact: () => artifact, launch: () => {} })
+    await upgrade.check()
+    upgrade.build()
+    await vi.waitFor(() => { expect(upgrade.view().run?.state).toBe('done') })
+    expect(upgrade.view().ready).toMatchObject({ app, target: 'C:/configured-app' })
   })
 
   it('marks a build a previous host left running as interrupted on the next start', () => {

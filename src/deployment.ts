@@ -33,6 +33,7 @@ export const Config = s.object({
     intervalMin: s.number().min(1).max(1440).step(1).default(10).description('Minutes between update checks.'),
     idleTimeoutMin: s.number().min(1).max(240).step(1).default(30).description('Minutes an update waits for running workers before it gives up.'),
     appCheckout: s.string().default('').description('Absolute path of the DSH fork checkout whose desktop app this host can build; empty turns app updates off.'),
+    appInstall: s.string().default('').description('Absolute path of the desktop app install directory this host updates in place; empty detects the app this host runs from.'),
     appRemote: s.string().pattern(/^[A-Za-z0-9_.\/-]+$/).default('fork').description('The fork remote of the DSH checkout to check.'),
     appBranch: s.string().pattern(/^[A-Za-z0-9_.\/-]+$/).default('master').description('The fork branch whose desktop app is built.'),
     appOfficialRemote: s.string().pattern(/^[A-Za-z0-9_.\/-]+$/).default('origin').description('The official upstream remote of the DSH checkout, shown for comparison.'),
@@ -57,6 +58,7 @@ export interface UpgradeConfig {
   idleTimeoutMin: number
   /** Empty turns desktop app updates off. */
   appCheckout: string
+  appInstall: string
   appRemote: string
   appBranch: string
   appOfficialRemote: string
@@ -67,7 +69,7 @@ export interface UpgradeConfig {
   appIntervalMin: number
 }
 export const NO_UPGRADE: UpgradeConfig = { checkout: '', remote: 'origin', branch: 'main', install: '', startCommand: '', holdFile: '',
-  pnpm: 'pnpm', intervalMin: 10, idleTimeoutMin: 30, appCheckout: '', appRemote: 'fork', appBranch: 'master',
+  pnpm: 'pnpm', intervalMin: 10, idleTimeoutMin: 30, appCheckout: '', appInstall: '', appRemote: 'fork', appBranch: 'master',
   appOfficialRemote: 'origin', appOfficialBranch: 'master', appBuildScript: 'package:desktop:win:x64:unsigned',
   appArtifacts: '', appPnpm: '', appIntervalMin: 60 }
 export interface Machine {
@@ -96,6 +98,9 @@ export function machineOf(config: DeploymentConfig): Machine {
   }
   if (upgrade.appCheckout && !isAbsolute(upgrade.appCheckout)) {
     throw new Error('dsh-superagent configuration upgrade.appCheckout must be an absolute path')
+  }
+  if (upgrade.appInstall && !isAbsolute(upgrade.appInstall)) {
+    throw new Error('dsh-superagent configuration upgrade.appInstall must be an absolute path')
   }
   return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, pipelineSkill, upgrade }
 }

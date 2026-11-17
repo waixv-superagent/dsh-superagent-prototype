@@ -79,14 +79,19 @@ const LOG_TAIL = 4_000
 const tail = (text: string): string => text.length > LOG_TAIL ? `…${text.slice(-LOG_TAIL)}` : text
 const isCommit = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{7,40}$/u.test(value)
 
-/** Read the installed desktop application's own manifest, including the commit its build recorded. */
-export function readInstalledApp(): AppInstalled {
+/**
+ * Read the installed desktop application's manifest, including the commit its build recorded.
+ * @param root - The app install directory when this host runs outside the App, such as the web host managing a standalone App.
+ */
+export function readInstalledApp(root?: string): AppInstalled {
   // Electron adds `resourcesPath`; the plugin's own types compile against plain Node.
   const resources = (process as NodeJS.Process & { readonly resourcesPath?: string }).resourcesPath
-  const candidates = [
-    ...(resources === undefined || resources === '' ? [] : [join(resources, 'app.asar', 'package.json')]),
-    join(dirname(process.execPath), 'resources', 'app.asar', 'package.json'),
-  ]
+  const candidates = root !== undefined
+    ? [join(root, 'resources', 'app.asar', 'package.json')]
+    : [
+        ...(resources === undefined || resources === '' ? [] : [join(resources, 'app.asar', 'package.json')]),
+        join(dirname(process.execPath), 'resources', 'app.asar', 'package.json'),
+      ]
   for (const path of candidates) {
     try {
       const manifest = JSON.parse(readFileSync(path, 'utf8')) as { dshBuildCommit?: unknown; version?: unknown }
@@ -161,10 +166,10 @@ export class AppUpgrade {
     this.config = host.config
     this.run = host.run ?? systemRunner
     this.now = host.now ?? Date.now
-    this.installed = host.installed ?? readInstalledApp
+    this.installed = host.installed ?? (() => readInstalledApp(this.config.appInstall === '' ? undefined : this.config.appInstall))
     this.findArtifact = host.findArtifact
       ?? (since => newestInstaller(this.config.appCheckout, this.config.appArtifacts, since))
-    this.appRoot = host.appRoot ?? installedAppRoot
+    this.appRoot = host.appRoot ?? (this.config.appInstall !== '' ? () => this.config.appInstall : installedAppRoot)
     this.launch = host.launch ?? (script => this.run.detach('powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
       { cwd: this.directory, log: join(this.directory, 'apply.log') }))
