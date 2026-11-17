@@ -48,7 +48,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "node scripts/test-suite.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm build"
   },
   "engines": {
