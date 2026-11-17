@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { Ticket } from '../src/core/index.ts'
+import type { ChannelRef, Ticket } from '../src/core/index.ts'
 import { feishuKind } from '../src/sources/feishu.ts'
 import { openFeishuTopic, shortTicketId, topicText } from '../src/sources/feishu-topic.ts'
+import { takeTopicLink, topicLinkLine } from '../src/sources/feishu-topic-link.ts'
 import type { SourceContext } from '../src/sources/host.ts'
 
 const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
@@ -18,6 +19,17 @@ const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   origin: { triggerId: 'trigger-1', triggerIds: ['trigger-1'] },
   ...overrides,
 })
+const receipt: ChannelRef = { source: 'feishu', thread: 'feishu:oc_dm', address: { chatId: 'oc_dm', messageId: 'om_1' } }
+/** The Source's KV state, as the topic opener and the receipt share it. */
+const memory = () => {
+  const values = new Map<string, unknown>()
+  return {
+    get: (key: string) => values.get(key),
+    set: (key: string, value: unknown) => { if (value === undefined) values.delete(key); else values.set(key, value) },
+    keys: (prefix: string) => [...values.keys()].filter(key => key.startsWith(prefix)),
+  }
+}
+type Memory = ReturnType<typeof memory>
 const trigger = {
   id: 'trigger-1', source: 'feishu', at: '2026-11-03T00:00:00.000Z', text: '把话题改成工单简述',
   actor: { id: 'ou_1', name: '王怀扬' }, human: true, meta: {}, threads: [{ source: 'feishu', id: 'oc_dm:om_1' }],
@@ -26,14 +38,16 @@ const trigger = {
 }
 const context = (lark: ReturnType<typeof vi.fn>, retarget: ReturnType<typeof vi.fn>,
   describe: ReturnType<typeof vi.fn> = vi.fn(), patch: ReturnType<typeof vi.fn> = vi.fn(),
-  notify: ReturnType<typeof vi.fn> = vi.fn()): SourceContext => ({
+  notify: ReturnType<typeof vi.fn> = vi.fn(), state: Memory = memory()): SourceContext => ({
     config: () => ({ topicChat: 'oc_topic' }),
     triggers: { get: () => trigger },
     commands: { lark },
     tickets: { retarget },
     threads: { describe, patch },
     notify,
+    state,
   }) as unknown as SourceContext
+const stateOf = (value: Memory) => value as unknown as Parameters<typeof takeTopicLink>[0]
 
 describe('Feishu ticket topics', () => {
   it('opens a topic named after the ticket and moves its replies there', async () => {
@@ -61,19 +75,72 @@ describe('Feishu ticket topics', () => {
     expect(describe).toHaveBeenCalledWith('feishu:oc_topic:om_topic',
       expect.objectContaining({ label: '「把话题改成工单简述」· 工单 8b4722eb', url: trigger.url }))
     expect(patch).toHaveBeenCalledWith('feishu:oc_topic:om_topic', { threadId: 'omt_topic' })
-    // The original thread gets a back-link, so the person who wrote there finds the topic.
+    // The original thread gets a back-link, so the person who wrote there finds the topic. It is a described link: the
+    // long AppLink stays in the target, and people read a short label.
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({
       id: 'topic-link-8b4722eb84a73a17d2b889adf1b7d43f',
       channel: trigger.channel,
-      text: '已开话题：https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic',
+      text: '已开话题：[「把话题改成工单简述」](https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic)',
       kind: 'reply',
       ticketId: ticket().id,
     }))
   })
 
-  it('keeps the topic when the link lookup fails, and skips only the back-link', async () => {
+  it('folds the topic link into the receipt queued for the same ticket, so the thread gets one message', async () => {
+    const lark = vi.fn(async (args: string[]) => args[1] === '+messages-send'
+      ? { message_id: 'om_topic', thread_id: 'omt_topic' }
+      : { data: { messages: [{ message_id: 'om_topic', thread_id: 'omt_topic',
+        message_app_link: 'https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic' }] } })
+    const notify = vi.fn()
+    const carried = ticket({ id: 'a1b2c3d4e5f60718293a4b5c6d7e8f90' })
+    const state = memory()
+    const opening = openFeishuTopic(context(lark, vi.fn(), vi.fn(), vi.fn(), notify, state), carried, receipt)
+    // The receipt is the message already queued for the accept; it waits for the topic instead of a second notice.
+    expect(await takeTopicLink(stateOf(state), carried.id)).toEqual({
+      url: 'https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic', title: '把话题改成工单简述',
+    })
+    await opening
+    expect(notify).not.toHaveBeenCalled()
+  })
+
+  it('posts its own notice when the receipt gave up waiting for the topic', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(done => { release = done })
+    const lark = vi.fn(async (args: string[]) => {
+      if (args[1] === '+messages-send') { await gate; return { message_id: 'om_topic', thread_id: 'omt_topic' } }
+      return { data: { messages: [{ message_id: 'om_topic', thread_id: 'omt_topic',
+        message_app_link: 'https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic' }] } }
+    })
+    const notify = vi.fn()
+    const waiting = ticket({ id: 'b1b2c3d4e5f60718293a4b5c6d7e8f90' })
+    const state = memory()
+    const opening = openFeishuTopic(context(lark, vi.fn(), vi.fn(), vi.fn(), notify, state), waiting, receipt)
+    expect(await takeTopicLink(stateOf(state), waiting.id, 20)).toBeUndefined()
+    release()
+    await opening
+    // The receipt went out without the link; the notice still tells the person where the conversation continues.
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+      text: '已开话题：[「把话题改成工单简述」](https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic)',
+    }))
+  })
+
+  it('keeps the topic and still links it from its thread id when the link lookup fails', async () => {
     const lark = vi.fn(async (args: string[]) => {
       if (args[1] === '+messages-send') return { message_id: 'om_topic', thread_id: 'omt_topic' }
+      throw new Error('lookup failed')
+    })
+    const retarget = vi.fn()
+    const notify = vi.fn()
+    await openFeishuTopic(context(lark, retarget, vi.fn(), vi.fn(), notify), ticket())
+    expect(retarget).toHaveBeenCalled()
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+      text: '已开话题：[「把话题改成工单简述」](https://applink.feishu.cn/client/thread/open?open_chat_id=oc_topic&open_thread_id=omt_topic)',
+    }))
+  })
+
+  it('skips only the back-link when neither the topic link nor its thread id is known', async () => {
+    const lark = vi.fn(async (args: string[]) => {
+      if (args[1] === '+messages-send') return { message_id: 'om_topic' }
       throw new Error('lookup failed')
     })
     const retarget = vi.fn()
@@ -143,6 +210,15 @@ describe('Feishu ticket topics', () => {
   it('keeps the ticket brief short and uses the original message link on the second line', () => {
     expect(shortTicketId(ticket())).toBe('8b4722eb')
     expect(topicText(ticket(), trigger.url)).toBe('「把话题改成工单简述」· 工单 8b4722eb\nhttps://applink.feishu.cn/client/message/open?message_id=om_1')
+  })
+
+  it('describes a topic link in a short label, so the long AppLink never shows in a message', () => {
+    const url = 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_topic&open_thread_id=omt_topic'
+    const line = topicLinkLine('把 [开单] 和开话题两条通知合并成一条，并缩短话题的 feishu applink', url)
+    const label = line.slice('已开话题：[「'.length, line.indexOf('」]('))
+    expect(Array.from(label)).toHaveLength(24)
+    expect(label).not.toMatch(/[[\]]/)
+    expect(line.endsWith(`](${url})`)).toBe(true)
   })
 
   it('requires the topic chat to be listed with all messages, since replies there arrive without a mention', () => {

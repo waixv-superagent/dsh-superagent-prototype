@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { OutboundMessage } from '../src/core/index.ts'
 import { CliError } from '../src/infra/commands.ts'
 import { feishuClientLink, feishuPostContent, sendFeishu } from '../src/sources/feishu-channel.ts'
+import { expectTopicLink, settleTopicLink, takeTopicLink } from '../src/sources/feishu-topic-link.ts'
 
 const message = (text: string): OutboundMessage => ({
   id: 'reply-1',
@@ -9,6 +10,17 @@ const message = (text: string): OutboundMessage => ({
   text,
   kind: 'reply',
 })
+const host = (lark: ReturnType<typeof vi.fn>, state = memory()) => ({ commands: { lark }, state }) as never
+/** The Source's KV state the topic link is kept in, as the opener writes it and the receipt reads it. */
+function memory() {
+  const values = new Map<string, unknown>()
+  return {
+    get: (key: string) => values.get(key),
+    set: (key: string, value: unknown) => { if (value === undefined) values.delete(key); else values.set(key, value) },
+  }
+}
+const linkState = (state: ReturnType<typeof memory>) => state as unknown as Parameters<typeof takeTopicLink>[0]
+const topic = { url: 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1', title: '修好登录' }
 
 describe('Feishu outbound replies', () => {
   it('encodes Markdown as one post payload, so no literal newline survives in the argument', () => {
@@ -30,6 +42,42 @@ describe('Feishu outbound replies', () => {
     expect(JSON.parse(args[args.indexOf('--content') + 1]!)).toEqual({ zh_cn: { content: [[{ tag: 'md', text }]] } })
     expect(args[args.indexOf('--idempotency-key') + 1]).toBe('reply-1')
     expect(args).toContain('--reply-in-thread')
+  })
+  it('carries the topic a ticket\'s accept opens in that one receipt, as a described link', async () => {
+    const state = memory()
+    expectTopicLink('t-topic')
+    settleTopicLink(linkState(state), 't-topic', topic)
+    const lark = vi.fn(async (_args: string[]) => ({ ok: true }))
+    const ack: OutboundMessage = { ...message('收到，排查登录。'), kind: 'acknowledgement', ticketId: 't-topic' }
+    expect(await sendFeishu(host(lark, state), ack, { panelUrl: 'https://panel.example' })).toBe('sent')
+    const args = lark.mock.calls[0]![0] as string[]
+    expect(lark).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(args[args.indexOf('--content') + 1]!).zh_cn.content[0][0].text).toBe(
+      '收到，排查登录。\n已开话题：[「修好登录」](https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1)'
+      + '\n[工单 t-topic ↗](https://panel.example/?ticket=t-topic)')
+  })
+  it('waits for the topic its accept is opening, so the receipt goes out with the link', async () => {
+    expectTopicLink('t-wait')
+    const state = memory()
+    const lark = vi.fn(async (_args: string[]) => ({ ok: true }))
+    const ack: OutboundMessage = { ...message('收到，排查登录。'), kind: 'acknowledgement', ticketId: 't-wait' }
+    const sending = sendFeishu(host(lark, state), ack)
+    settleTopicLink(linkState(state), 't-wait', topic)
+    expect(await sending).toBe('sent')
+    const args = lark.mock.calls[0]![0] as string[]
+    expect(JSON.parse(args[args.indexOf('--content') + 1]!).zh_cn.content[0][0].text)
+      .toContain('已开话题：[「修好登录」](https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1)')
+  })
+  it('leaves a receipt without a topic, and a later reply, exactly as written', async () => {
+    const lark = vi.fn(async (_args: string[]) => ({ ok: true }))
+    const ack: OutboundMessage = { ...message('收到，排查登录。'), kind: 'acknowledgement', ticketId: 't-none' }
+    expect(await sendFeishu(host(lark), ack)).toBe('sent')
+    expect(await sendFeishu(host(lark), message('第一条修复已推。'))).toBe('sent')
+    expect(lark).toHaveBeenCalledTimes(2)
+    for (const call of lark.mock.calls) {
+      const args = call[0] as string[]
+      expect(JSON.parse(args[args.indexOf('--content') + 1]!).zh_cn.content[0][0].text).not.toContain('已开话题')
+    }
   })
   it('settles a reply whose target message never existed, instead of retrying it forever', async () => {
     const lark = vi.fn(async () => {

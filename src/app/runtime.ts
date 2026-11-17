@@ -294,9 +294,14 @@ export class Runtime extends Service implements SourceHost {
           // conversation of its own, and its plan cards and replies would otherwise never reach Feishu.
           if (event.type === 'ticket.created') {
             const ticket = store.tickets.get(event.data.ticketId)
+            // The accept's receipt is queued but not yet delivered: hand it to the Source that opens the ticket's own
+            // conversation, which folds the link into that one message instead of posting a second notice.
+            const receipt = ticket ? store.receipts.get(key('ack', ticket.origin.triggerId)) : undefined
+            const receiptChannel = receipt?.status === 'pending' && receipt.ticketId === ticket?.id ? receipt.channel : undefined
             if (ticket) for (const kind of sources.sourceKinds()) {
               if (!kind.opened || !sources.instance(kind.kind)?.enabled) continue
-              void Promise.resolve(kind.opened(this.context(kind), ticket)).catch(error => {
+              const own = receiptChannel?.source === kind.kind ? receiptChannel : undefined
+              void Promise.resolve(kind.opened(this.context(kind), ticket, own)).catch(error => {
                 ctx.logger.warn('dsh-superagent: could not open a conversation for ticket %s: %s', ticket.id, String(error))
               })
             }

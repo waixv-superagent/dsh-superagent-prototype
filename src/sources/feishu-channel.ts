@@ -8,6 +8,7 @@ import { rememberSent, threadIdOf, ticketPanelLink, withTicketFooter } from './f
 import { releaseReceipt } from './feishu-receipt.ts'
 import { jsonForCmd, feishuPostContent } from './feishu-text.ts'
 import { feishuTriggerId } from './feishu-trigger.ts'
+import { takeTopicLink, topicLinkLine } from './feishu-topic-link.ts'
 import type { ChannelHost, ChannelLink, ChannelLinks } from './kind.ts'
 
 export { feishuPostContent } from './feishu-text.ts'
@@ -76,8 +77,12 @@ export async function sendFeishu(host: ChannelHost, message: OutboundMessage, co
   if (!messageId) throw new Error('Missing Feishu reply target')
   const checked = checkedImText(message.text)
   const panelUrl = config.panelUrl?.trim() ?? ''
+  // A ticket's acceptance receipt is its first message; the topic opened for the same ticket folds into it, so one message
+  // says what was accepted and where the conversation continues. The link line goes on after the limit check, like the
+  // footer, and a receipt that waited too long goes out without it while the opener posts its notice instead.
+  const topic = message.kind === 'acknowledgement' && message.ticketId ? await takeTopicLink(host.state, message.ticketId) : undefined
   // The ticket link goes on after the limit check, so the footer never takes words from the message itself.
-  const text = withTicketFooter(checked, panelUrl, message.ticketId)
+  const text = withTicketFooter(topic ? `${checked}\n${topicLinkLine(topic.title, topic.url)}` : checked, panelUrl, message.ticketId)
   const chatId = message.channel.address.chatId ?? ''
   /** Keeps the way back from the bot's message to its ticket, for the panel's search. */
   const remember = (output: unknown): void => {
