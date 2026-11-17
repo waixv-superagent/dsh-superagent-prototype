@@ -60,10 +60,10 @@ beforeEach(async () => {
   await exec('git', ['init', '-q', join(dir, 'widgets')], { env: gitEnv() })
   await exec('git', ['-C', join(dir, 'widgets'), 'remote', 'add', 'origin', 'git@github.com:acme/widgets.git'], { env: gitEnv() })
 })
-afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
-
-// Setup spawns CLI subprocesses that can take several seconds when tests run in parallel.
-vi.setConfig({ testTimeout: 30_000 })
+// The CLI probes spawn real wrappers; leave room for a busy host running the update's test step. A real hang still fails.
+vi.setConfig({ testTimeout: 300_000 })
+// Windows briefly holds a just-finished wrapper's files; retry the temp cleanup rather than fail the test.
+afterEach(() => { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) })
 
 describe('configuration schema', () => {
   it('requires only the state directory and reads the editable fields through references', () => {

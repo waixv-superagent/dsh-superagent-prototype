@@ -11,8 +11,9 @@ import { commandLine, CliError } from '../src/infra/commands.ts'
 import { testDeployment } from './fixtures/deployment.ts'
 import { gitEnv } from './fixtures/git.ts'
 
-// Git and shell subprocesses can exceed the 5s default timeout when the test suite runs in parallel.
-vi.setConfig({ testTimeout: 30_000 })
+// The shim tests spawn the real Windows command wrappers; while the one-click update runs this file on a busy host they
+// can take minutes, so this file waits longer than the suite's default while a real hang still fails.
+vi.setConfig({ testTimeout: 300_000 })
 const exec = promisify(execFile)
 const windows = process.platform === 'win32'
 let dir: string
@@ -48,7 +49,8 @@ const runShim = async (name: string, args: string[], options: { env?: Record<str
 const workerEnv = (env: Record<string, string | undefined>): Record<string, string> =>
   Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined && !SENSITIVE_ENV_PATTERN.test(entry[0])))
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'environment-')); mkdirSync(join(dir, 'real')) })
-afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+// Windows keeps a handle on a just-finished shim's files for a moment; retry the temp cleanup rather than fail the test.
+afterEach(() => { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) })
 
 describe('worker shims', () => {
   it('run a wrapper that calls `gh` by name without reaching the shim again, and keep the caller\'s other PATH entries', async () => {
