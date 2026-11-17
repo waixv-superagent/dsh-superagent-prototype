@@ -1311,6 +1311,7 @@ button.dt-problem-title:hover { color: var(--dsw-alias-label-primary); text-deco
 .dt-upgrade-run[data-state='failed'] .dt-upgrade-outcome, .dt-upgrade-run[data-state='down'] .dt-upgrade-outcome { color: var(--dsw-alias-state-error-primary); }
 .dt-upgrade-run[data-state='rolledBack'] .dt-upgrade-outcome { color: var(--dsw-alias-state-warn-primary); }
 .dt-upgrade-run[data-state='done'] .dt-upgrade-outcome { color: var(--dsw-alias-state-success-primary); }
+.dt-upgrade-run[data-state='prepared'] .dt-upgrade-outcome { color: var(--dsw-alias-state-success-primary); }
 .dt-upgrade-error { margin: 0; padding: 8px; max-height: 160px; overflow: auto; border-radius: 8px; background: var(--dsw-alias-bg-module-platform); font-family: var(--ds-font-family-code, Menlo, monospace); font-size: 11px; line-height: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .dt-upgrade-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
 .dt-upgrade-steps li { display: flex; align-items: center; gap: 8px; color: var(--dsw-alias-label-tertiary); }

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+﻿import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BUILD_INFO, dependenciesChanged, installedCommit, onlyVersionFields, parseCommits, Upgrade, UpgradeRefused, type Runner,
   type UpgradeHost } from '../src/app/upgrade.ts'
 import { NO_UPGRADE } from '../src/deployment.ts'
@@ -15,6 +15,8 @@ function runner(files: Record<string, string>, git: Record<string, string | Erro
       const key = file === 'git' ? args.slice(2).join(' ') : `${file} ${args.join(' ')}`
       commands.push(key)
       if (file !== 'git') { const failure = pnpm[args[0]!]; if (failure) throw failure; return '' }
+      // A worktree the fake adds exists as a directory afterwards, which the prepare guard and the restart look for.
+      if (args.includes('add') && args.includes('--detach')) files[args.at(-2)!.replaceAll('\\', '/')] = 'worktree'
       const found = Object.entries(git).find(([prefix]) => key.startsWith(prefix))?.[1]
       if (found instanceof Error) throw found
       return found ?? ''
@@ -47,7 +49,7 @@ describe('update check', () => {
     await upgrade.check()
     expect(upgrade.view()).toMatchObject({ enabled: false, available: false })
     expect(commands).toEqual([])
-    expect(() => upgrade.begin()).toThrow(UpgradeRefused)
+    expect(() => upgrade.prepare()).toThrow(UpgradeRefused)
   })
   it('lists the commits on the fork branch the installed build lacks, newest first', async () => {
     const { run } = runner(installed(A), GIT)
@@ -70,7 +72,7 @@ describe('update check', () => {
     const upgrade = new Upgrade(host(run).value)
     await upgrade.check()
     expect(upgrade.view()).toMatchObject({ available: true, blocked: 'dependencies' })
-    expect(() => upgrade.begin()).toThrow('dependencies')
+    expect(() => upgrade.prepare()).toThrow('dependencies')
   })
   it('keeps the last good answer and shows the fetch error when the remote cannot be read', async () => {
     const { run } = runner(installed(A), { fetch: new Error('Could not resolve host: github.com') })
@@ -89,37 +91,70 @@ describe('update check', () => {
 
 describe('update run', () => {
   const settle = async (upgrade: Upgrade, state: string) => { await vi.waitFor(() => { expect(upgrade.view().run?.state).toBe(state) }, { timeout: 5000 }) }
-  it('builds in a detached worktree, pauses, waits for idle, then hands off to the switch and exits', async () => {
+  it('prepares in a detached worktree without touching the running service, then restarts only when asked', async () => {
     const { run, commands, detached, files } = runner(installed(A), GIT)
     let active = 1
     const { value, pause, exit } = host(run, { activeCount: () => active })
     const upgrade = new Upgrade(value)
     await upgrade.check()
-    upgrade.begin()
-    await settle(upgrade, 'waiting')
+    upgrade.prepare()
+    await settle(upgrade, 'prepared')
     expect(commands.find(command => command.startsWith('worktree add --detach --force'))?.replaceAll('\\', '/')).toBe(`worktree add --detach --force /state/upgrade/build ${C}`)
     expect(commands.filter(command => command.startsWith('pnpm')).map(command => command.split(' ')[1])).toEqual(['install', 'typecheck', 'test', 'build'])
-    expect(pause).toHaveBeenCalledWith(true)
+    // The prepare phase changes nothing a person would notice: no pause, no switch, no exit, and the build stays ready.
+    expect(pause).not.toHaveBeenCalled()
+    expect(detached).toEqual([])
+    expect(exit).not.toHaveBeenCalled()
+    expect(upgrade.view()).toMatchObject({ prepared: { sha: C }, available: true, running: 1 })
+    expect(JSON.parse(files['/state/upgrade/status.json']!)).toMatchObject({ state: 'prepared', sha: C })
+    // Only the explicit restart pauses dispatch and waits for the running ticket.
+    upgrade.apply()
+    await vi.waitFor(() => { expect(pause).toHaveBeenCalledWith(true) }, { timeout: 5000 })
     expect(detached).toEqual([])
     active = 0
     await settle(upgrade, 'switching')
     expect(detached).toHaveLength(1)
     const plan = JSON.parse(Object.entries(files).find(([path]) => path.endsWith('upgrade/plan.json'))![1]) as SwitchPlan
     expect(plan).toMatchObject({ sha: C, from: A, install: '/install', wasPaused: false, pid: process.pid, url: 'http://127.0.0.1:3082' })
+    expect(plan.steps!.map(step => step.name)).toEqual(expect.arrayContaining(['fetch', 'build', 'pause', 'idle']))
     await vi.waitFor(() => { expect(exit).toHaveBeenCalledTimes(1) }, { timeout: 5000 })
   })
+  it('refuses to restart before a build is prepared', async () => {
+    const { run } = runner(installed(A), GIT)
+    const upgrade = new Upgrade(host(run).value)
+    await upgrade.check()
+    expect(() => upgrade.apply()).toThrow('not-prepared')
+    expect(() => upgrade.apply(true)).toThrow('not-prepared')
+    expect(upgrade.view().run).toBeNull()
+  })
+  it('keeps a prepared build across a host restart, and offers preparing again when its worktree is gone', async () => {
+    const { run, files } = runner(installed(A), GIT)
+    const startedAt = new Date().toISOString()
+    files['/state/upgrade/status.json'] = JSON.stringify({ state: 'prepared', sha: C, from: A, startedAt,
+      steps: [{ name: 'build', state: 'done', detail: '', at: startedAt }], error: null })
+    files['/state/upgrade/build'] = 'worktree'
+    const upgrade = new Upgrade(host(run).value)
+    expect(upgrade.view()).toMatchObject({ prepared: { sha: C }, run: { state: 'prepared' } })
+    delete files['/state/upgrade/build']
+    expect(upgrade.view().prepared).toBeNull()
+    await upgrade.check()
+    upgrade.prepare()
+    await settle(upgrade, 'prepared')
+    expect(upgrade.view().prepared).toEqual({ sha: C })
+  })
   it('stops at a failed check before touching the running service, and lifts nothing it did not set', async () => {
-    const { run, detached } = runner(installed(A), GIT, { test: new Error('1 failed') })
+    const { run, detached, files } = runner(installed(A), GIT, { test: new Error('1 failed') })
     const { value, pause, exit } = host(run)
     const upgrade = new Upgrade(value)
     await upgrade.check()
-    upgrade.begin()
+    upgrade.prepare()
     await settle(upgrade, 'failed')
     expect(upgrade.view().run).toMatchObject({ error: '1 failed' })
     expect(upgrade.view().run!.steps.find(step => step.name === 'test')).toMatchObject({ state: 'failed' })
     expect(pause).not.toHaveBeenCalled()
     expect(detached).toEqual([])
     expect(exit).not.toHaveBeenCalled()
+    expect(JSON.parse(files['/state/upgrade/status.json']!)).toMatchObject({ state: 'failed', error: '1 failed' })
   })
   it('gives up after the idle timeout and resumes the dispatch it paused', async () => {
     const { run, detached } = runner(installed(A), GIT)
@@ -127,7 +162,9 @@ describe('update run', () => {
     const { value, pause } = host(run, { activeCount: () => 2, now: () => clock, config: { ...NO_UPGRADE, checkout: '/src/fork', install: '/install', idleTimeoutMin: 1 } })
     const upgrade = new Upgrade(value)
     await upgrade.check()
-    upgrade.begin()
+    upgrade.prepare()
+    await settle(upgrade, 'prepared')
+    upgrade.apply()
     await settle(upgrade, 'waiting')
     clock = 2 * 60_000
     await settle(upgrade, 'failed')
@@ -139,19 +176,29 @@ describe('update run', () => {
     const { value, pause } = host(run, { paused: () => true })
     const upgrade = new Upgrade(value)
     await upgrade.check()
-    upgrade.begin(true)
+    upgrade.prepare()
+    await settle(upgrade, 'prepared')
+    upgrade.apply(true)
     await settle(upgrade, 'switching')
     expect(pause).not.toHaveBeenCalled()
     const plan = JSON.parse(Object.entries(files).find(([path]) => path.endsWith('upgrade/plan.json'))![1]) as SwitchPlan
     expect(plan.wasPaused).toBe(true)
   })
-  it('refuses a second update while one runs, and reads a switch that died as down after a restart', async () => {
+  it('refuses a second prepare while one runs, and cancel drops a prepared build', async () => {
     const { run, files } = runner(installed(A), GIT)
     const upgrade = new Upgrade(host(run, { activeCount: () => 1 }).value)
     await upgrade.check()
-    upgrade.begin()
-    expect(() => upgrade.begin()).toThrow('running')
-    await upgrade.cancel()
+    upgrade.prepare()
+    expect(() => upgrade.prepare()).toThrow('running')
+    expect(() => upgrade.apply()).toThrow('not-prepared')
+    await settle(upgrade, 'prepared')
+    expect(() => upgrade.prepare()).toThrow('prepared')
+    expect(await upgrade.cancel()).toBe(true)
+    expect(upgrade.view().run?.state).toBe('cancelled')
+    expect(JSON.parse(files['/state/upgrade/status.json']!)).toMatchObject({ state: 'cancelled' })
+  })
+  it('reads a switch that died as down after a restart', async () => {
+    const { run, files } = runner(installed(A), GIT)
     const stale = new Date(Date.now() - 21 * 60_000).toISOString()
     files['/state/upgrade/status.json'] = JSON.stringify({ state: 'switching', sha: C, from: A, startedAt: stale, steps: [], error: null })
     expect(new Upgrade(host(run).value).view().run).toMatchObject({ state: 'down' })

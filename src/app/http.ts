@@ -83,7 +83,7 @@ export interface HttpHost {
   /** Rolling model spend the overview's billing strip reads; absent on a host built before it. */
   readonly billing?: Pick<Billing, 'view'>
   /** The one-click update the sidebar badge offers; absent on a host built before it. */
-  readonly upgrade?: Pick<Upgrade, 'view' | 'check' | 'begin' | 'cancel'>
+  readonly upgrade?: Pick<Upgrade, 'view' | 'check' | 'prepare' | 'apply' | 'cancel'>
   readonly health: Record<string, Health>
   readonly machine: Machine
   readonly masterId: string
@@ -532,7 +532,8 @@ function routes(runtime: HttpHost): Routes {
     'POST setup/check': () => { runtime.checkSetup(); return { restarting: true } },
     'GET upgrade': () => upgrade().view(),
     'POST upgrade/check': async () => { await upgrade().check(); return upgrade().view() },
-    'POST upgrade': async ({ body }) => upgrade().begin(UpgradeRequest.parse(await body(1_024)).force ?? false),
+    'POST upgrade/prepare': () => upgrade().prepare(),
+    'POST upgrade/apply': async ({ body }) => upgrade().apply(UpgradeRequest.parse(await body(1_024)).force ?? false),
     'POST upgrade/cancel': async () => ({ cancelled: await upgrade().cancel() }),
     'GET models': () => runtime.models(),
     'GET prompts': ({ query }) => { const { revision, offset } = PromptsQuery.parse(query); return promptsView(runtime, revision, offset) },
