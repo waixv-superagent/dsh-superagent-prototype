@@ -262,7 +262,9 @@ export class Runtime extends Service implements SourceHost {
         warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       this.assessor = new MasterAssessor({ get engine() { return runtime.engine }, commands, get deployment() { return setup.deployment }, effects,
         settings: () => store.settings(), paused: () => this.paused(), threadContext: trigger => sources.threadContext(trigger),
-        deliver: (id, text) => sessions.prompt(masterId, id, text, 'steer'), candidateCard: candidate => candidateCard(links, candidate) })
+        agent: () => sessions.master(),
+        deliver: (id, text, images) => sessions.prompt(masterId, id, text, 'steer', undefined, undefined, images),
+        candidateCard: candidate => candidateCard(links, candidate) })
       const outbox = this.outbox = new Outbox({ store, effects, sources, commands, state: sourceState(store), paused: () => this.paused() })
       const { assessor, executor } = this
       const policy = () => settingsPolicy(store.settings(), sources)

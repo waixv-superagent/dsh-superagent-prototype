@@ -70,7 +70,10 @@ interface Skill { name: string; description: string; content: string }
 // combined worker surface measures about 58,600, so the budget grows to 58,700.
 // The Sentry search tool (docs/032) adds its description, the search query/stack/GUID fields and the issue/event reads; the
 // combined worker surface measures 61,120, so the budget grows to 61,200.
-const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 61_200 }
+// A candidate card now carries the images its own message does, so dispatch gains the line that they arrive attached with
+// `images_unreadable` for the rest, and admission gains the card images and their untrusted-data and unreadable wording;
+// the main Session's surface measures 68,235, so the orchestrator budget grows to 68,300.
+const BUDGET: Record<Role, number> = { orchestrator: 68_300, worker: 61_200 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

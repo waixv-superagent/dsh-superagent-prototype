@@ -1,5 +1,6 @@
 /** SourceKind plugin contract: configuration schema, UI form fields, policy integration, channel adapter, and thread context reader. */
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { z } from 'zod'
 import type { OutboundMessage, ScopeResult, Ticket, Trigger } from '../core/index.ts'
 import type { Deployment } from '../deployment.ts'
@@ -7,6 +8,10 @@ import type { Commands } from '../infra/commands.ts'
 import type { SourceContext, SourceHost } from './host.ts'
 
 export interface Localized { zh: string; en: string }
+/** A Source's image read: the durable attachment a card or an assessment's tool result hands to the model. */
+export interface ContextImage {
+  image: ImageAttachmentRef
+}
 /** `advanced` folds a rarely changed field (such as a polling tunable) behind the card's Advanced section. */
 interface FieldBase { key: string; label: Localized; hint?: Localized; advanced?: true }
 /**
@@ -73,7 +78,7 @@ export interface ThreadContext<C> {
   images?(text: string): string[]
   /** Reads one image of a message in the Trigger's Thread as an attachment for `agent`. */
   image?(agent: Agent, commands: Commands, trigger: Trigger, message: { id: string; text: string }, key: string, stateDir: string,
-    signal: AbortSignal): Promise<unknown>
+    signal: AbortSignal): Promise<ContextImage>
 }
 export interface TriggerContext {
   readonly messageId: string
@@ -81,7 +86,7 @@ export interface TriggerContext {
   images(text: string): string[]
   /** @throws for a kind without image support. */
   image(agent: Agent, commands: Commands, message: { id: string; text: string }, key: string, stateDir: string,
-    signal: AbortSignal): Promise<unknown>
+    signal: AbortSignal): Promise<ContextImage>
 }
 /** Pluggable source kind descriptor registered with SourceRegistry. */
 export interface SourceKind<C extends Record<string, unknown> = Record<string, unknown>> {

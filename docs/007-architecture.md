@@ -171,7 +171,7 @@ Failures retry with exponential backoff. Throwing `Later` defers work without co
 
 | Kind | Handler | Does | At once | Retry |
 | --- | --- | --- | --- | --- |
-| `assessment` | MasterAssessor | Steers an Eval's candidate card into the main Session's turn, then tells the Engine it was delivered, which starts the Eval's deadline | 4, none while paused | 2 s doubling to 60 s |
+| `assessment` | MasterAssessor | Steers an Eval's candidate card, with the images its own message carries as attachments, into the main Session's turn, then tells the Engine it was delivered, which starts the Eval's deadline | 4, none while paused | 2 s doubling to 60 s |
 | `launch` | DshExecutor | Launches a pending Assignment: prepare command, Executor Session, assignment message | The free worker slots, none while paused | A passing failure of the model provider or the network runs again after 5 s doubling to 300 s, three times; any other failure, and a failed prepare command, fails its Ticket. One held by a pause or by full worker slots tries again after 5 s |
 | `delivery` | DshExecutor | Hands a Ticket's waiting Inputs to its running Assignment, in order | 4, none while paused | 2 s doubling to 60 s; one that waits for a worker slot tries again after 2 s |
 | `relay` | Sessions | Steers a worker's report or question, or a person's follow-up, into the main Session's turn | 1, in queue order | 2 s doubling to 60 s |
@@ -211,6 +211,8 @@ Transient provider and network failures get three retries. Launches use effect b
 ### MasterAssessor
 
 `MasterAssessor` (`src/app/assessment.ts`) lets the main Session assess proactive candidates. `request` queues an assessment effect; `release` drops cached state when its Eval ends.
+
+Before the card effect delivers a candidate, `card-images.ts` downloads the images the candidate's own message carries through the Source's ThreadContext and hands them to the main Session as image content blocks, so a screenshot reaches the model natively; the attachment service's per-message image count and byte limits bound them. An image that cannot be downloaded or does not fit is listed in the card's `images_unreadable` instead of failing delivery, and an `orchestrator_eval_read` image read remains the way to see images of the thread's other messages.
 
 Its `context`, `read` and `decide` methods serve `orchestrator_eval`, `orchestrator_eval_read` and `orchestrator_eval_decide`. They provide bounded Thread context through `SourceRegistry.threadContext`, repository context, and decision submission. A kind without a context reader supplies only the Trigger and batch.
 
@@ -386,6 +388,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/billing.ts` | The board's billing strip: replays each billed `assistant/message` into a minute-granular rolling hour, prices it from the route's published `/v1/models` list, persists the aggregate, proves the route that is charging now, and reads the gateway account's settled hour and period quota |
 | `src/app/role-models.ts` | Resolves the Eval and Executor models, and seeds a new Session with its role's model |
 | `src/app/assessment.ts` | The MasterAssessor, the assessment schema and the window `orchestrator_eval` answers |
+| `src/app/card-images.ts` | `candidateImages`: the images a candidate's own message carries, downloaded for the card within the attachment service's per-message count and byte limits |
 | `src/app/execution-environment.ts` | The execution environment: its variables, a Ticket's values, the directory root and the lines of the prompt section, which `src/app/prompts.ts` fills into its template |
 | `src/app/delivery-targets.ts` | `deliveryTargets`, the repository and depot this installation delivers to, and `resolveDelivery`, which turns a Ticket's target or Source into its backend |
 | `src/app/source-context.ts` | `sourceContextOf`: each Source kind's `SourceContext` |
@@ -444,7 +447,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/feishu-cards.ts` | `card.action.trigger` handling: a button or form answer decides a waiting plan without a Trigger or Eval, then replaces the card in place |
 | `src/sources/feishu-read.ts` | The `feishu/` reads of a Trigger's message, its root, parent and topic, and `feishuThreadContext`, which gives them to assessments with their images |
 | `src/sources/admission-context.ts` | The bounded window an assessment starts from: the first pages of a Trigger's Thread, read through its kind, and the messages around the Trigger |
-| `src/sources/feishu-image.ts` | Reads a Feishu message's image as an attachment for the assessing Session |
+| `src/sources/feishu-image.ts` | Reads a Feishu message's image as an attachment for an assessing or card-delivering Session |
 | `src/sources/tapd.ts` | The TAPD kind and plugin entry, exported as `./tapd-watch`: a read-only poll of the open bugs assigned to one person, one Trigger per bug revision, and the bug's ID and link as execution variables |
 | `src/sources/web.ts` | The Web Source: a request a person submits from the panel, as an addressed Trigger of the panel operator with its own Thread, and a Channel that injects the Ticket's replies into the main Session |
 | `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel, the worker Session header actions (open the Ticket, copy the Session id), the child Session model route, the active-Tickets dock in the bottom strip (a row opens the worker Session, else the Ticket), and the page in DeepSeek Harness's Plugin Manager |
@@ -505,7 +508,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/repro-ab.spec.ts` | The A/B reproduction harness (`scripts/repro-ab.mjs`): manifest validation, the differential expectations and their tolerances, missing data never passing, repeated runs that disagree, the CLI end to end, the report's escaping, and `init` |
 | `tests/feishu-read.spec.ts`, `tests/github-read.spec.ts` | Feishu and GitHub reads |
 | `tests/admission-context.spec.ts`, `tests/feishu-image.spec.ts` | The Thread window of assessments, and Feishu image reads |
-| `tests/assessment.spec.ts` | What the MasterAssessor keeps per Eval, and when it lets go |
+| `tests/card-images.spec.ts` | The images a candidate card carries: their order, the per-message count and byte limits, and the reasons an image is left out |
+| `tests/assessment.spec.ts` | What the MasterAssessor keeps per Eval, when it lets go, and the images it delivers with the card |
 | `tests/background.spec.ts` | Waiting for a worker's shell jobs and subagents: an end that woke it, and a host that stops |
 | `tests/billing.spec.ts` | The billing ledger: the rolling hour, deduplication, priced and unpriced routes, persisted recovery, role overrides, the published `/v1/models` price read, and the gateway account's settled hour and quota |
 | `tests/bundle-patch.spec.ts` | The bundle's patch, read as DeepSeek Harness reads it, and the agent preset of Executor Sessions it defines |

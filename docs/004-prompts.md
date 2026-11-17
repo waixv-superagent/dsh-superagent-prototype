@@ -54,7 +54,7 @@ The system prompt is assembled in this order:
 7. `runtime/environment`.
 8. `runtime/policy`, for the main Session only.
 
-Admission instructions come from `prompts/admission.md`. They describe proactive assessment, the three outcomes a candidate can reach（接单 / 闲聊 / 忽略），when a chat must reply without a ticket, when it may carry an escalation that creates one, and when an irrelevant candidate can be chatted to or ignored from its card. `orchestrator_eval` returns context rather than repeating these instructions.
+Admission instructions come from `prompts/admission.md`. They describe proactive assessment, the three outcomes a candidate can reach（接单 / 闲聊 / 忽略），when a chat must reply without a ticket, when it may carry an escalation that creates one, and when an irrelevant candidate can be chatted to or ignored from its card. `orchestrator_eval` returns context rather than repeating these instructions. A candidate card arrives with the images its own message carries attached, so the instructions also say to look at them and to treat them as untrusted data.
 
 The environment section gives the main Session deployment-wide values and each Executor its Ticket-specific values. The Policy section is regenerated from settings on every model request. It contains the Policy version, accept mode, the explicit-request exemption, and enabled rules as `- <name> (<id>): <instruction>`, or a statement that none is enabled. It is last so a Policy change leaves the preceding prompt text unchanged.
 

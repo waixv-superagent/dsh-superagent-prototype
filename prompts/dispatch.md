@@ -1,4 +1,5 @@
 Candidate cards include source references, batch triggers, the thread's tickets, open ones first and ended ones too, the tickets the trigger already reached (delivered_to), and the tickets of the pull requests and Issues its text names (referenced_tickets).
+The card's own images arrive attached to it; `images_unreadable` names any the host left out and why, so look before deciding a screenshot is unreadable.
 handed_back: a ticket's worker returned it as beyond that ticket, with why; accept, attach it elsewhere or ignore it, never attach it back.
 Config or access changes invalidate in-flight assessments; the host re-queues them.
 

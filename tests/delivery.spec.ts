@@ -1,5 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { expect, it, vi } from 'vitest'
@@ -23,7 +24,8 @@ function fixture(history: UserMessage[] = []) {
   ctx.reflect.provide('sessionPersistence', { open, flush })
   const delivery = new AgentDelivery(ctx)
   const signal = new AbortController()
-  const send = (id = 'request', mode: 'queue' | 'steer' = 'steer') => delivery.send(agent, id, '{"event_id":"event"}', mode, signal.signal)
+  const send = (id = 'request', mode: 'queue' | 'steer' = 'steer', images: readonly ImageAttachmentRef[] = []) =>
+    delivery.send(agent, id, '{"event_id":"event"}', mode, signal.signal, undefined, undefined, images)
   const inject = (id: string, summary: string) => delivery.send(agent, id, '{"settings_saved":"policy"}', { inject: summary }, signal.signal)
   const holds = (id: string) => delivery.holds(agent, id)
   const consume = (message: UserMessage) => {
@@ -52,6 +54,15 @@ it.each(['queue', 'steer'] as const)('delivers %s as an orchestrator relay, dedu
   await restored.send('request', mode)
   expect(restored.steer).not.toHaveBeenCalled()
   expect(restored.followup).not.toHaveBeenCalled()
+})
+
+it('carries a card\'s images in the delivered message, after its text', async () => {
+  const f = fixture()
+  const image: ImageAttachmentRef = { attachmentId: 'image-id' as ImageAttachmentRef['attachmentId'], mediaType: 'image/png', bytes: 4, width: 1, height: 1, name: 'img_a.png' }
+  await f.send('with-image', 'steer', [image])
+  const message = f.steer.mock.calls[0]![0]
+  expect(message.content).toEqual([{ type: 'text', text: '{"event_id":"event"}' }, { type: 'image', attachment: image }])
+  expect(Object.isFrozen(message.content[1])).toBe(true)
 })
 
 it.each(['pending', 'consumed', 'live'] as const)('recognizes legacy plugin identity in %s input without rewriting it', async location => {
