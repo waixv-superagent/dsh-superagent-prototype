@@ -86,7 +86,7 @@ export interface HttpHost {
   /** The one-click update the sidebar badge offers; absent on a host built before it. */
   readonly upgrade?: Pick<Upgrade, 'view' | 'check' | 'prepare' | 'apply' | 'cancel'>
   /** The desktop app track: fork/official checks and the local installer build; absent on an older host. */
-  readonly appUpgrade?: Pick<AppUpgrade, 'view' | 'check' | 'build'>
+  readonly appUpgrade?: Pick<AppUpgrade, 'view' | 'check' | 'build' | 'apply'>
   readonly health: Record<string, Health>
   readonly machine: Machine
   readonly masterId: string
@@ -543,6 +543,7 @@ function routes(runtime: HttpHost): Routes {
     'GET app-upgrade': () => appUpgrade().view(),
     'POST app-upgrade/check': async () => { await appUpgrade().check(); return appUpgrade().view() },
     'POST app-upgrade/build': () => appUpgrade().build(),
+    'POST app-upgrade/apply': () => appUpgrade().apply(),
     'GET models': () => runtime.models(),
     'GET prompts': ({ query }) => { const { revision, offset } = PromptsQuery.parse(query); return promptsView(runtime, revision, offset) },
     'PUT prompts': async input => {

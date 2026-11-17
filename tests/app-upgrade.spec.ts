@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -132,13 +132,39 @@ describe('desktop app build', () => {
     expect(upgrade.view().ready).toMatchObject({ sha: C, artifact })
   })
 
-  it('fails the run with the step and keeps the error for the panel', async () => {
-    const { upgrade } = make(CHECK, { findArtifact: () => undefined })
+  it('fails the run with the step and keeps the error for the panel', async () => {    const { upgrade } = make(CHECK, { findArtifact: () => undefined })
     await upgrade.check()
     upgrade.build()
     await vi.waitFor(() => { expect(upgrade.view().run?.state).toBe('failed') })
     expect(upgrade.view().run?.error).toContain('no installer was found')
     expect(upgrade.view().ready).toBeNull()
+  })
+
+  it('applies the finished build over the install directory and restarts it', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dsh-app-apply-'))
+    directories.push(directory)
+    const artifact = join(directory, 'deepseek-harness-unsigned.exe')
+    writeFileSync(artifact, 'installer')
+    const app = join(directory, 'win-unpacked')
+    mkdirSync(join(app, 'resources', 'app.asar'), { recursive: true })
+    writeFileSync(join(app, 'resources', 'app.asar', 'package.json'), '{}')
+    let launched: string | undefined
+    const { upgrade } = make(CHECK, { findArtifact: () => artifact, appRoot: () => 'C:/installed', launch: script => { launched = script } })
+    await upgrade.check()
+    upgrade.build()
+    await vi.waitFor(() => { expect(upgrade.view().run?.state).toBe('done') })
+    expect(upgrade.view().ready).toMatchObject({ app, target: 'C:/installed' })
+    expect(upgrade.apply()).toEqual({ started: true })
+    expect(launched).toBeDefined()
+    const script = readFileSync(launched!, 'utf8')
+    expect(script).toContain(app)
+    expect(script).toContain('C:/installed')
+    expect(script).toContain('robocopy')
+  })
+
+  it('refuses to apply before a build finished', () => {
+    const { upgrade } = make()
+    expect(() => upgrade.apply()).toThrow(AppUpgradeRefused)
   })
 
   it('marks a build a previous host left running as interrupted on the next start', () => {

@@ -97,6 +97,7 @@ export function UpgradeDialog({ view, onClose, onView }: { view: UpgradeView | u
   const [app, setApp] = useState<AppUpgradeView>()
   const appRef = useRef<AppUpgradeView>()
   const buildApp = useAction(async () => { await call('POST app-upgrade/build') }, { reload: async () => { setApp(await call('GET app-upgrade')) } })
+  const applyApp = useAction(async () => { await call('POST app-upgrade/apply') })
   useEffect(() => {
     let active = true
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -152,7 +153,8 @@ export function UpgradeDialog({ view, onClose, onView }: { view: UpgradeView | u
       </ul>}
       {!view.available && !run && <p className="dt-hint">{t('upgradeCurrent')}</p>}
       {run && <RunSteps run={run} />}
-      <AppUpgradeSection view={app} building={buildApp.busy} onBuild={() => { void buildApp.run() }} />
+      <AppUpgradeSection view={app} building={buildApp.busy} applying={applyApp.busy}
+        onBuild={() => { void buildApp.run() }} onApply={() => { void applyApp.run() }} />
     </div>}
   </Modal>
 }
@@ -177,7 +179,13 @@ function RunSteps({ run }: { run: UpgradeRun }) {
 }
 
 /** The desktop app track below the plugin update: fork/official versions, the build button, its steps and installer. */
-function AppUpgradeSection({ view, building, onBuild }: { view: AppUpgradeView | undefined; building: boolean; onBuild: () => void }) {
+function AppUpgradeSection({ view, building, applying, onBuild, onApply }: {
+  view: AppUpgradeView | undefined
+  building: boolean
+  applying: boolean
+  onBuild: () => void
+  onApply: () => void
+}) {
   const { t } = usePanel()
   if (!view) return null
   const blocked = view.blocked
@@ -205,11 +213,13 @@ function AppUpgradeSection({ view, building, onBuild }: { view: AppUpgradeView |
         : <Button variant="primary" disabled={building || running} onClick={onBuild}>{ready ? t('appUpgradeRebuild') : t('appUpgradeBuild')}</Button>)}
       {running && <p className="dt-hint">{t('appUpgradeRunning')}</p>}
       {view.run && <AppRunSteps run={view.run} />}
-      {ready && <>
-        <p className="dt-upgrade-outcome">{t('appUpgradeReady')}</p>
-        <p><code className="dt-mono">{ready.artifact}</code></p>
-        <p className="dt-hint">{t('appUpgradeInstallHint')}</p>
-      </>}
+      {ready && <p className="dt-upgrade-outcome">{t('appUpgradeReady')}</p>}
+      {ready && ready.app !== null && ready.target !== null
+        && <Button variant="primary" disabled={building || applying} onClick={onApply}>{t('appUpgradeApply')}</Button>}
+      {ready && <p className="dt-hint">{ready.app !== null && ready.target !== null
+        ? (applying ? t('appUpgradeApplying') : t('appUpgradeApplyHint'))
+        : t('appUpgradeInstallHint')}</p>}
+      {ready && <p><code className="dt-mono">{ready.artifact}</code></p>}
     </>}
   </section>
 }

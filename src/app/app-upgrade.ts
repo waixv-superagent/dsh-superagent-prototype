@@ -43,8 +43,8 @@ export interface AppUpgradeView {
   available: boolean
   blocked: AppUpgradeBlocked | null
   run: AppUpgradeRun | null
-  /** A finished build whose installer still exists. */
-  ready: { sha: string; artifact: string; builtAt: string } | null
+  /** A finished build whose installer still exists, with the unpacked app and the current install directory when known. */
+  ready: { sha: string; artifact: string; builtAt: string; app: string | null; target: string | null } | null
 }
 /** What the desktop build needs from the host; tests pass fakes. */
 export interface AppUpgradeHost {
@@ -58,11 +58,17 @@ export interface AppUpgradeHost {
   installed?: () => AppInstalled
   /** Defaults to the newest installer the desktop build wrote. */
   findArtifact?: (since: number) => string | undefined
+  /** Defaults to the packaged application's install directory when this host runs from it. */
+  appRoot?: () => string | null
+  /** Starts the in-place switch script; defaults to a detached PowerShell process. */
+  launch?: (script: string) => void
 }
 /** A build request the checked state does not allow. */
 export class AppUpgradeRefused extends Error {
-  constructor(readonly code: AppUpgradeBlocked | 'running') { super(code) }
+  constructor(readonly code: AppUpgradeBlocked | AppApplyRefused | 'running') { super(code) }
 }
+/** Why the finished build cannot be applied over the running application. */
+export type AppApplyRefused = 'not-ready' | 'no-source' | 'no-target' | 'unsupported' | 'script-failed'
 
 const MAX_COMMITS = 30
 const MAX_OFFICIAL = 10
@@ -89,6 +95,22 @@ export function readInstalledApp(): AppInstalled {
     } catch { /* Try the next layout. */ }
   }
   return { commit: null, version: null }
+}
+
+/** The install directory of the desktop app this host runs from, or null in a plain Node host. */
+export function installedAppRoot(): string | null {
+  const resources = (process as NodeJS.Process & { readonly resourcesPath?: string }).resourcesPath
+  const roots = [resources === undefined || resources === '' ? undefined : dirname(resources), dirname(process.execPath)]
+  for (const root of roots) {
+    if (root !== undefined && existsSync(join(root, 'resources', 'app.asar', 'package.json'))) return root
+  }
+  return null
+}
+
+/** The unpacked application a build leaves beside its installer, or null when it was cleaned away. */
+export function builtAppDirectory(artifact: string): string | null {
+  const directory = join(dirname(artifact), 'win-unpacked')
+  return existsSync(join(directory, 'resources', 'app.asar', 'package.json')) ? directory : null
 }
 
 /** The directory the unsigned desktop build writes its installer into. */
@@ -121,6 +143,8 @@ export class AppUpgrade {
   private readonly now: () => number
   private readonly installed: () => AppInstalled
   private readonly findArtifact: (since: number) => string | undefined
+  private readonly appRoot: () => string | null
+  private readonly launch: (script: string) => void
   private fork: AppRemoteView
   private official: AppRemoteView
   private behind: UpgradeCommit[] = []
@@ -140,6 +164,10 @@ export class AppUpgrade {
     this.installed = host.installed ?? readInstalledApp
     this.findArtifact = host.findArtifact
       ?? (since => newestInstaller(this.config.appCheckout, this.config.appArtifacts, since))
+    this.appRoot = host.appRoot ?? installedAppRoot
+    this.launch = host.launch ?? (script => this.run.detach('powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
+      { cwd: this.directory, log: join(this.directory, 'apply.log') }))
     this.fork = { ref: `${this.config.appRemote}/${this.config.appBranch}`, sha: null, checkedAt: null, error: null }
     this.official = { ref: `${this.config.appOfficialRemote}/${this.config.appOfficialBranch}`, sha: null, checkedAt: null, error: null }
     this.current = this.readLast()
@@ -186,7 +214,8 @@ export class AppUpgrade {
       blocked: this.blockedState(installedCommit),
       run,
       ready: run?.state === 'done' && run.artifact !== null && existsSync(run.artifact)
-        ? { sha: run.sha, artifact: run.artifact, builtAt: run.endedAt ?? run.startedAt }
+        ? { sha: run.sha, artifact: run.artifact, builtAt: run.endedAt ?? run.startedAt,
+            app: builtAppDirectory(run.artifact), target: this.appRoot() }
         : null,
     }
   }
@@ -268,6 +297,59 @@ export class AppUpgrade {
       this.fail(run, String((error as Error).message ?? error))
     })
     return run
+  }
+
+  /** The path of the in-place switch's own log. */
+  private get applyLog(): string { return join(this.directory, 'apply.log') }
+
+  /**
+   * Replace the running application's files with the finished build and restart it, the way an IDE updates itself. The
+   * script runs outside this process's job so it survives the App being stopped: it stops the App, mirrors the unpacked
+   * build over the install directory, then starts the new App. Profile and settings live outside the install directory, so
+   * they stay; the person's next start is the built commit.
+   * @returns started once the detached script is launched.
+   * @throws AppUpgradeRefused when no finished build or no writable install directory is known.
+   */
+  apply(): { started: true } {
+    if (this.current?.state === 'preparing') throw new AppUpgradeRefused('running')
+    if (process.platform !== 'win32') throw new AppUpgradeRefused('unsupported')
+    const ready = this.view().ready
+    if (ready === null) throw new AppUpgradeRefused('not-ready')
+    if (ready.app === null) throw new AppUpgradeRefused('no-source')
+    if (ready.target === null) throw new AppUpgradeRefused('no-target')
+    try {
+      mkdirSync(this.directory, { recursive: true })
+      writeFileSync(join(this.directory, 'apply.ps1'), this.applyScript(ready.app, ready.target))
+    } catch { throw new AppUpgradeRefused('script-failed') }
+    this.launch(join(this.directory, 'apply.ps1'))
+    return { started: true }
+  }
+
+  /** The switch script: stop this app, copy the build over its install directory, start it again. */
+  private applyScript(source: string, target: string): string {
+    const quote = (value: string): string => `'${value.replaceAll("'", "''")}'`
+    const executable = join(target, 'DeepSeek Harness.exe')
+    const appProcesses = 'Get-CimInstance Win32_Process -Filter "Name=\'DeepSeek Harness.exe\'" -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -like "$target\\*" }'
+    return [
+      '$ErrorActionPreference = "Continue"',
+      'Start-Sleep -Seconds 6',
+      `$source = ${quote(source)}`,
+      `$target = ${quote(target)}`,
+      `$exe = ${quote(executable)}`,
+      `$log = ${quote(this.applyLog)}`,
+      'function Write-Log([string]$message) { "$(Get-Date -Format o) $message" | Add-Content -Path $log -Encoding utf8 }',
+      'Write-Log "in-place app update started"',
+      `$app = @(${appProcesses})`,
+      '$main = $app | Where-Object { $_.CommandLine -notlike "*--type=*" -and $_.CommandLine -notlike "*dsh-desktop-host*" -and $_.CommandLine -notlike "*dsh-subprocess-local*" } | Select-Object -First 1',
+      'if ($null -ne $main) { Stop-Process -Id $main.ProcessId -Force -ErrorAction SilentlyContinue }',
+      `for ($i = 0; $i -lt 20; $i++) { Start-Sleep -Seconds 1; if (@(${appProcesses}).Count -eq 0) { break } }`,
+      `foreach ($process in @(${appProcesses})) { Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue }`,
+      'Start-Sleep -Seconds 2',
+      'Write-Log "copying $source over $target"',
+      'robocopy $source $target /MIR /R:2 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null',
+      'if (Test-Path -LiteralPath $exe) { Write-Log "starting $exe"; Start-Process -FilePath $exe } else { Write-Log "executable missing: $exe" }',
+      '',
+    ].join('\n')
   }
 
   private async buildRun(run: AppUpgradeRun): Promise<void> {

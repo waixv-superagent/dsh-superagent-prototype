@@ -119,6 +119,8 @@ export interface Api {
   'POST app-upgrade/check': { response: AppUpgradeView }
   /** Build the checked fork commit into a new unsigned installer; the panel polls GET app-upgrade for the steps. */
   'POST app-upgrade/build': { response: AppUpgradeRun }
+  /** Replace the running App's files with the finished build and restart it; the App goes down while the switch runs. */
+  'POST app-upgrade/apply': { response: { started: true } }
   'GET models': { response: ModelCatalog }
   'GET prompts': { query?: { revision?: number; offset?: number }; response: PromptsView }
   'PUT prompts': { body: { config: PromptConfig; baseRevision: number }; response: { revision: number; context_delivery: Delivery } }

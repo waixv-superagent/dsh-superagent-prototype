@@ -603,6 +603,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET app-upgrade': { answer: () => server.appUpgrade ?? NO_APP_UPDATE },
   'POST app-upgrade/check': { answer: () => server.appUpgrade ?? NO_APP_UPDATE },
   'POST app-upgrade/build': { answer: () => server.appUpgrade?.run ?? refuse(409, 'App build refused: disabled', { appUpgrade: 'disabled' }) },
+  'POST app-upgrade/apply': { answer: () => ({ started: true as const }) },
   'GET models': { answer: () => ({ default: { provider: 'host', model: 'default' }, routableProviders: [], failures: [],
     groups: [{ id: 'worker-provider', name: 'Worker provider', models: [{ id: 'worker-model', name: 'Worker model',
       reasoning: { efforts: [{ id: 'high', name: 'High' }] } }] }] }) },
