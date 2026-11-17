@@ -297,6 +297,9 @@ export class EditorScheduler {
     mkdirSync(this.host.logDir, { recursive: true })
     const log = join(this.host.logDir, `${job.id}.log`)
     const out = createWriteStream(log)
+    // A log file that disappears or cannot be written must not crash the host with an unhandled stream error; the job's
+    // outcome is its exit code, and the log is only its evidence.
+    out.on('error', error => { this.host.warn(`editor job ${job.id} log write failed: ${String(error)}`) })
     let tail = ''
     let child: ChildProcess
     try {

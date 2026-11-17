@@ -56,6 +56,11 @@ describe('configuration', () => {
     await expect(run({ op: 'search', query: 'x', limit: 0 })).rejects.toThrow()
   })
   it('refuses every call while the deployment configuration is incomplete', async () => {
+    // The host that builds an update may itself carry the deployment's Sentry variables, which the test runner inherits:
+    // this test is about an incomplete environment, so it clears them instead of reading the host's real configuration.
+    vi.stubEnv('SENTRY_AUTH_TOKEN', '')
+    vi.stubEnv('SENTRY_URL', '')
+    vi.stubEnv('SENTRY_ORG', '')
     await expect(sentryTool().execute({ op: 'search', query: 'is:unresolved' }, signal()))
       .rejects.toThrow('set SENTRY_AUTH_TOKEN, SENTRY_URL and SENTRY_ORG in the deployment environment')
   })
