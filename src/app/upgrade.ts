@@ -318,8 +318,8 @@ export class Upgrade {
     this.cancelled = false
     run.state = 'waiting'
     void this.switchToPrepared(run, force).catch(error => {
-      this.host.warn(`dsh-superagent update failed: ${String(error)}`)
-      this.fail(run, String((error as Error).message ?? error))
+      this.host.warn(`dsh-superagent update restart failed: ${String(error)}`)
+      this.retryPrepared(run, String((error as Error).message ?? error))
     })
     return run
   }
@@ -350,6 +350,19 @@ export class Upgrade {
   private fail(run: UpgradeRun, error: string): void {
     if (run.state === 'cancelled') return
     run.state = 'failed'; run.error = error; run.endedAt = this.iso()
+    const last = run.steps.at(-1)
+    if (last?.state === 'running') Object.assign(last, { state: 'failed', detail: error })
+    this.persist(run)
+    if (this.pausedByUs) { this.pausedByUs = false; void this.host.pause(false).catch(() => {}) }
+  }
+  /**
+   * A restart that never reached the switch leaves the build it was going to install untouched, so the run goes back to
+   * `prepared` with the reason shown and the person may try the restart again without rebuilding.
+   */
+  private retryPrepared(run: UpgradeRun, error: string): void {
+    if (run.state === 'cancelled' || run.state === 'switching') { this.fail(run, error); return }
+    run.state = 'prepared'; run.error = error
+    delete run.endedAt
     const last = run.steps.at(-1)
     if (last?.state === 'running') Object.assign(last, { state: 'failed', detail: error })
     this.persist(run)
@@ -398,14 +411,14 @@ export class Upgrade {
     const deadline = this.now() + this.config.idleTimeoutMin * 60_000
     while (!force && this.host.activeCount() > 0) {
       if (this.cancelled || this.stopped) return
-      if (this.now() > deadline) { this.fail(run, `${this.host.activeCount()} workers were still running after ${this.config.idleTimeoutMin} minutes`); return }
+      if (this.now() > deadline) { this.retryPrepared(run, `${this.host.activeCount()} workers were still running after ${this.config.idleTimeoutMin} minutes`); return }
       this.step(run, 'idle', 'running', String(this.host.activeCount()))
       await new Promise(done => setTimeout(done, 2_000))
     }
     if (this.cancelled) return
     this.step(run, 'idle', 'done', force ? 'forced' : '')
     const url = this.host.url()
-    if (!url) { this.fail(run, 'The management API has no loopback address the switch could check'); return }
+    if (!url) { this.retryPrepared(run, 'The management API has no loopback address the switch could check'); return }
     const plan = { sha: run.sha, from: run.from, source: worktree, install: this.install, stateDir: this.host.stateDir,
       backup: join(this.dir, 'backup'), statusFile: this.statusFile, log: join(this.dir, 'switch.log'), url, pid: process.pid, wasPaused,
       holdFile: this.config.holdFile, start: this.startCommand(), startedAt: run.startedAt, steps: run.steps }

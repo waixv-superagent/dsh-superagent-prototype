@@ -1,4 +1,4 @@
-﻿import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BUILD_INFO, dependenciesChanged, installedCommit, onlyVersionFields, parseCommits, Upgrade, UpgradeRefused, type Runner,
   type UpgradeHost } from '../src/app/upgrade.ts'
 import { NO_UPGRADE } from '../src/deployment.ts'
@@ -156,10 +156,10 @@ describe('update run', () => {
     expect(exit).not.toHaveBeenCalled()
     expect(JSON.parse(files['/state/upgrade/status.json']!)).toMatchObject({ state: 'failed', error: '1 failed' })
   })
-  it('gives up after the idle timeout and resumes the dispatch it paused', async () => {
+  it('keeps the prepared build when the restart gives up waiting, and resumes the dispatch it paused', async () => {
     const { run, detached } = runner(installed(A), GIT)
-    let clock = 0
-    const { value, pause } = host(run, { activeCount: () => 2, now: () => clock, config: { ...NO_UPGRADE, checkout: '/src/fork', install: '/install', idleTimeoutMin: 1 } })
+    let clock = 0, active = 2
+    const { value, pause } = host(run, { activeCount: () => active, now: () => clock, config: { ...NO_UPGRADE, checkout: '/src/fork', install: '/install', idleTimeoutMin: 1 } })
     const upgrade = new Upgrade(value)
     await upgrade.check()
     upgrade.prepare()
@@ -167,9 +167,17 @@ describe('update run', () => {
     upgrade.apply()
     await settle(upgrade, 'waiting')
     clock = 2 * 60_000
-    await settle(upgrade, 'failed')
+    await vi.waitFor(() => { expect(upgrade.view().run?.error).toContain('still running') }, { timeout: 5000 })
+    // The restart never reached the switch: the build is still prepared and dispatch is resumed, so a person may try again.
+    expect(upgrade.view().run).toMatchObject({ state: 'prepared', error: expect.stringContaining('still running') })
+    expect(upgrade.view().prepared).toEqual({ sha: C })
     expect(pause.mock.calls).toEqual([[true], [false]])
     expect(detached).toEqual([])
+    // A later restart uses the same build rather than preparing it again.
+    active = 0
+    upgrade.apply(true)
+    await settle(upgrade, 'switching')
+    expect(detached).toHaveLength(1)
   })
   it('keeps an existing pause in place and tells the switch so', async () => {
     const { run, files } = runner(installed(A), GIT)
