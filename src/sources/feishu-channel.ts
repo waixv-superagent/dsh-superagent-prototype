@@ -39,22 +39,43 @@ const withoutPosition = (url: string): string => {
   const kept = query.split('&').filter(part => part && !/^(?:thread_position|position)=/.test(part))
   return kept.length ? `${base}?${kept.join('&')}` : base
 }
+/** The ids a Feishu thread AppLink names; Feishu's own links carry both the snake_case and the joined spellings. */
+function threadIdsOf(url: string): { chatId?: string; threadId?: string } {
+  // A stored link can carry a raw `%`; an id it cannot decode stays as written rather than failing the view.
+  const decoded = (value: string): string => { try { return decodeURIComponent(value) } catch { return value } }
+  const value = (name: string): string | undefined => {
+    const found = new RegExp(`[?&]${name}=([^&#]+)`, 'i').exec(url)
+    return found?.[1] ? decoded(found[1]) : undefined
+  }
+  return { chatId: value('open_chat_id') ?? value('openchatid'), threadId: value('open_thread_id') ?? value('openthreadid') }
+}
+/** A thread AppLink on the scheme and host the link already used; the client scheme carries no host. */
+const threadAppLink = (scheme: 'https' | 'feishu' | 'lark', brand: 'feishu.cn' | 'larksuite.com', chatId: string, threadId: string): string => {
+  const base = scheme === 'https' ? `https://applink.${brand}` : `${scheme}://applink`
+  return `${base}/client/thread/open?open_chat_id=${encodeURIComponent(chatId)}&open_thread_id=${encodeURIComponent(threadId)}`
+    + `&openchatid=${encodeURIComponent(chatId)}&openthreadid=${encodeURIComponent(threadId)}&thread_position=-1`
+}
 /**
- * The AppLink that opens a Feishu thread at its newest message. Feishu's per-message links carry `thread_position` (a chat
- * link its `position`), which lands in the middle of the conversation; the same link without it opens the topic at the
- * latest message, where the person can read on. A chat link cannot address the topic at all, so the topic is named
- * directly whenever the chat and thread ids are known. Only a card's own link keeps its position (see `questionUrl`).
+ * The AppLink that opens a Feishu topic at its own root message. Feishu's client resolves a topic link through the root
+ * message's `thread_position`, which is -1; a link that names none is read as position 0, and a topic that has no reply
+ * yet has nothing there, so the click silently does nothing. Feishu's own message links therefore carry
+ * `thread_position=-1` and both query spellings, and this rebuilds exactly that. A chat link cannot address the topic at
+ * all, so the topic is named directly whenever the chat and thread ids are known; only a chat link without a topic id
+ * falls back to the conversation at its newest message. A card's own link keeps its position (see `questionUrl`).
  */
 export function feishuTopicLink(input: { chatId?: string; threadId?: string; url?: string }): string | undefined {
   const { chatId, threadId, url } = input
-  // A thread link already names its topic; only the position it points at has to go.
-  const unpositioned = url === undefined ? undefined : withoutPosition(url)
-  if (unpositioned && /\/client\/thread\/open/i.test(unpositioned)) return unpositioned
-  if (chatId && threadId) {
-    const brand = /(?:larksuite\.com|^lark:\/\/)/i.test(url ?? '') ? 'larksuite.com' : 'feishu.cn'
-    return `https://applink.${brand}/client/thread/open?open_chat_id=${encodeURIComponent(chatId)}&open_thread_id=${encodeURIComponent(threadId)}`
-  }
-  return unpositioned
+  if (url === undefined) return chatId && threadId ? threadAppLink('https', 'feishu.cn', chatId, threadId) : undefined
+  const scheme = /^feishu:\/\//i.test(url) ? 'feishu' : /^lark:\/\//i.test(url) ? 'lark' : 'https'
+  const brand = /(?:larksuite\.com|^lark:\/\/)/i.test(url) ? 'larksuite.com' : 'feishu.cn'
+  // A thread link names its topic; a chat link names only the conversation it belongs to.
+  const ids = threadIdsOf(url)
+  const chat = chatId ?? ids.chatId
+  const thread = threadId ?? ids.threadId
+  if (chat && thread) return threadAppLink(scheme, brand, chat, thread)
+  // An unreadable topic link keeps its own position rather than losing the only way into the topic.
+  if (/\/client\/thread\/open/i.test(url)) return url
+  return withoutPosition(url)
 }
 /**
  * True when Feishu permanently rejects a reply because the target message was recalled, withdrawn, not found, or never

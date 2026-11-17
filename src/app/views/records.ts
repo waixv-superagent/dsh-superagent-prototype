@@ -210,7 +210,8 @@ function threadUrl(store: Store, thread: Thread): string | undefined {
   // link. A chat link opens the conversation rather than the message a person asked about.
   const first = store.read.firstTrigger(thread.key)?.url
   const url = isMessageLink(first) ? first : attribute(thread.meta.url) ?? first
-  // A Thread opens at its topic's newest message; only a card's own link keeps the position that lands on it.
+  // A Thread opens at its topic's root message, the one position every topic resolves from; only a card's own link
+  // keeps the position that lands on it.
   const opened = thread.ref.source === 'feishu' ? feishuTopicLink({ ...feishuTopic(store, thread), url }) : url
   return opened ? feishuClientLink(opened) : undefined
 }
