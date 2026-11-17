@@ -1,4 +1,4 @@
-﻿// @vitest-environment jsdom
+// @vitest-environment jsdom
 // The overview: the duty desk.
 import { expect, it } from 'vitest'
 import { en, zh } from '../src/client/locales.ts'
@@ -421,20 +421,44 @@ it('summons the idle drawer from its dock, keeps P3 behind its own count, and se
   await settle()
   expect(all('.dt-idle-pop-level').map(level => level.textContent)).toEqual(['P0 紧急', 'P1 主线', 'P2 闲时', 'P3 暂存'])
   expect(all('.dt-idle-pop button').map(button => button.querySelector('small')?.textContent))
-    .toEqual([zh.poolDropStart, zh.poolDropStart, zh.poolDropPark, zh.poolDropPark])
+    .toEqual([zh.poolDropStart, zh.poolDropStart, zh.priorityToIdle, zh.priorityToParked])
   await click(all('.dt-idle-pop button')[1]!)
   await settle()
   expect(server.requests.some(request => request.path === 'tickets/t2/promote' && request.method === 'POST'
     && (request.body as { level?: string } | undefined)?.level === 'P1')).toBe(true)
-  // Dropping on P2 is level-only: it goes through the priority route and must never start a turn.
+  // A level-only change goes through the priority route and must never start a turn, even deeper into the pool.
   await click(document.querySelector('.dt-idle-menu')!)
   await settle()
-  await click(all('.dt-idle-pop button')[2]!)
+  await click(all('.dt-idle-pop button')[3]!)
   await settle()
   expect(server.requests.some(request => request.path === 'tickets/t2/priority' && request.method === 'POST'
-    && (request.body as { level?: string } | undefined)?.level === 'P2')).toBe(true)
+    && (request.body as { level?: string } | undefined)?.level === 'P3')).toBe(true)
   expect(server.requests.some(request => request.path === 'tickets/t2/promote'
-    && (request.body as { level?: string } | undefined)?.level === 'P2')).toBe(false)
+    && (request.body as { level?: string } | undefined)?.level === 'P3')).toBe(false)
+})
+
+it('puts any open Ticket into the low-priority idle pool from its own level menu, and lifts it back from the same menu', async () => {
+  await mount()
+  await openOverview()
+  // The running lane's Ticket shows its level as a menu: a P1 that should wait for idle is demoted here, not in the drawer.
+  const running = document.querySelector<HTMLElement>('.dt-board-col[data-tone="run"] .dt-run .dt-priority-trigger')!
+  expect(running.textContent).toBe(zh['priorityWord.P1'])
+  await click(running)
+  expect(all('.dt-priority-pop [role="menuitem"] .dt-idle-pop-level').map(level => level.textContent))
+    .toEqual(['P0 紧急', 'P1 主线', 'P2 闲时', 'P3 暂存'])
+  // P2 is the requested low-priority idle-pool entry, and it is a level-only change.
+  expect(all('.dt-priority-pop [role="menuitem"] small').map(hint => hint.textContent))
+    .toEqual([zh.poolDropStart, zh.poolDropStart, zh.priorityToIdle, zh.priorityToParked])
+  await click(all('.dt-priority-pop [role="menuitem"]')[2]!)
+  expect(server.requests.some(request => request.path === 'tickets/t5/priority' && request.method === 'POST'
+    && (request.body as { level?: string } | undefined)?.level === 'P2')).toBe(true)
+  // The same entry sits on a card that waits on a person; P0/P1 there promotes, it never pretends to start a gated turn.
+  const card = document.querySelector<HTMLElement>('.dt-deck-card .dt-priority-trigger')!
+  expect(card.textContent).toBe(zh['priorityWord.P1'])
+  await click(card)
+  await click(all('.dt-priority-pop [role="menuitem"]')[0]!)
+  expect(server.requests.some(request => request.path === 'tickets/t1/promote' && request.method === 'POST'
+    && (request.body as { level?: string } | undefined)?.level === 'P0')).toBe(true)
 })
 
 it('links the verdict figures to the records behind them', async () => {

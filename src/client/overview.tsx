@@ -6,6 +6,7 @@ import { verifyLines } from '../core/verification.ts'
 import { Button, Icon, Input, Tag } from './controls.tsx'
 import { activeAgo, ticketMark } from './marks.ts'
 import { pipelineTrack, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackState } from './pipeline.ts'
+import { PriorityMenu, PriorityTag, startsNow } from './priority.tsx'
 import { useAction, usePanel, usePanelData } from './provider.tsx'
 import { KindTag, ThreadChip } from './rows.tsx'
 import { setupPage, settingsRoute, type BoardFocus, type Route } from './route.ts'
@@ -261,6 +262,7 @@ function DecisionCard({ ticket, onChanged, focused }: { ticket: TicketRow; onCha
     <button type="button" className="dt-deck-card-title" onClick={open}>{ticket.title}</button>
     {body && <p className={ticket.note?.error ? 'dt-deck-card-body dt-deck-card-body-error' : 'dt-deck-card-body'}>{body}</p>}
     <div className="dt-deck-card-facts">
+      <PriorityMenu ticket={ticket} onChanged={onChanged} />
       <KindTag kind={ticket.kind} source={ticket.kindSource} />
       {thread && <ThreadChip thread={thread} />}
       {ticket.undelivered > 0 && <span className="dt-deck-card-fact">{t('ticketUndeliveredLabel')} {ticket.undelivered}</span>}
@@ -285,14 +287,8 @@ function DecisionCard({ ticket, onChanged, focused }: { ticket: TicketRow; onCha
   </article>
 }
 
-/** A ticket's level, so the board can say which work is urgent, which is mainline and which is discretionary. */
-function PriorityTag({ ticket }: { ticket: TicketRow }) {
-  const { t } = usePanel()
-  const tone = ticket.priority.level === 'P0' ? 'danger' : ticket.priority.level === 'P1' ? 'warning' : 'quiet'
-  return <Tag tone={tone} title={ticket.priority.hint}>{t(`priorityWord.${ticket.priority.level}`)}</Tag>
-}
-
-function RunRow({ ticket, focus }: { ticket: TicketRow; focus?: BoardFocus }) {
+/** One Ticket in the running lane: its level menu, what its worker is doing, and how long it has been quiet. */
+function RunRow({ ticket, focus, onChanged }: { ticket: TicketRow; focus?: BoardFocus; onChanged: () => Promise<void> }) {
   const { t, navigate } = usePanel()
   const queued = ticket.stage === 'working' && ticket.action === 'queued'
   const idle = ticket.stage === 'idle'
@@ -305,7 +301,7 @@ function RunRow({ ticket, focus }: { ticket: TicketRow; focus?: BoardFocus }) {
     <div className="dt-run-main">
       <button type="button" className="dt-run-title" onClick={() => navigate(ticketRoute(ticket.id))}>{ticket.title}</button>
       <p className="dt-run-meta">
-        <PriorityTag ticket={ticket} />
+        <PriorityMenu ticket={ticket} onChanged={onChanged} />
         <span className="dt-run-stage">{label}</span>
         {ticket.pool && !idle && !queued && <span className="dt-run-fact">{t('poolIdleRunning')}</span>}
         {ticket.assignments > 0 && <span className="dt-run-fact">{t('boardRunCount', { count: ticket.assignments })}</span>}
@@ -316,12 +312,6 @@ function RunRow({ ticket, focus }: { ticket: TicketRow; focus?: BoardFocus }) {
     </div>
   </li>
 }
-
-/**
- * The levels a pooled Ticket may be dropped on, and what the drop means: `P0`/`P1` lift it into the attention pool and
- * start its work now; `P2`/`P3` only change its level, because a drag must never be a hidden "run now" (docs/019).
- */
-const startsNow = (level: PriorityLevel): level is 'P0' | 'P1' => level === 'P0' || level === 'P1'
 
 /** A waiting duration for a pool row, in the largest unit that still reads precisely. */
 function poolAge(t: T, at: string): string {
@@ -342,7 +332,6 @@ function IdleDock({ pool, parked, onChanged }: { pool: TicketRow[]; parked: Tick
   const [open, setOpen] = useState(false)
   const [showAll, setShowAll] = useState(false)
   const [parkedOpen, setParkedOpen] = useState(false)
-  const [menu, setMenu] = useState<string>()
   const [busy, setBusy] = useState<string>()
   const [failure, setFailure] = useState('')
   const [pressed, setPressed] = useState<string>()
@@ -351,13 +340,14 @@ function IdleDock({ pool, parked, onChanged }: { pool: TicketRow[]; parked: Tick
   const [over, setOver] = useState<PriorityLevel>()
   const start = useRef<{ ticket: TicketRow; x: number; y: number }>()
   const moved = useRef(false)
+  // P0/P1 lift a pooled Ticket into the attention pool and start it; P2/P3 only change the level, so a drag is never a
+  // hidden "run now" (docs/019).
   const apply = async (ticket: TicketRow, level: PriorityLevel) => {
     setBusy(ticket.id); setFailure('')
     try {
       if (startsNow(level)) await call('POST tickets/:id/promote', { id: ticket.id, body: { level } })
       else await call('POST tickets/:id/priority', { id: ticket.id, body: { level } })
       notify(startsNow(level) ? t('poolPromoted') : t('poolParkedLevel', { level: t(`priorityWord.${level}`) }))
-      setMenu(undefined)
       await onChanged()
     } catch (reason) {
       setFailure(t('poolLevelFailed', { reason: errorText(reason) }))
@@ -431,18 +421,7 @@ function IdleDock({ pool, parked, onChanged }: { pool: TicketRow[]; parked: Tick
       <KindTag kind={ticket.kind} source={ticket.kindSource} />
       <span className="dt-idle-age">{poolAge(t, ticket.createdAt)}</span>
     </span>
-    <button type="button" className="dt-idle-menu" aria-expanded={menu === ticket.id} aria-haspopup="menu"
-      aria-label={t('poolMenu')} title={t('poolMenu')} onClick={() => setMenu(menu === ticket.id ? undefined : ticket.id)}>
-      <Icon name="settings" size={13} />
-    </button>
-    {menu === ticket.id && <div className="dt-idle-pop" role="menu" aria-label={t('poolMenu')}>
-      {(['P0', 'P1', 'P2', 'P3'] as const).map(level => <button key={level} type="button" role="menuitem"
-        data-level={level} disabled={busy === ticket.id} onClick={() => { void apply(ticket, level) }}>
-        <span className="dt-idle-pop-level">{t(`priorityWord.${level}`)}</span>
-        <small>{startsNow(level) ? t('poolDropStart') : t('poolDropPark')}</small>
-        {ticket.priority.level === level && <span className="dt-idle-pop-current" aria-hidden="true"><Icon name="check" size={12} /></span>}
-      </button>)}
-    </div>}
+    <PriorityMenu ticket={ticket} onChanged={onChanged} variant="icon" />
   </li>
   return <>
     <div className="dt-idle-dock">
@@ -540,6 +519,7 @@ function VerifyCard({ ticket, onChanged, focused }: { ticket: TicketRow; onChang
   return <article className="dt-verify-card" data-board-focus={focused || undefined}>
     <header className="dt-verify-head">
       <span className="dt-verify-badge"><Icon name="review" size={13} />{t('verifyWorkerBadge')}</span>
+      {!backlog && <PriorityMenu ticket={ticket} onChanged={onChanged} />}
       {backlog && <Tag tone="quiet">{t('verifyHistorical')}</Tag>}
       <span className="dt-verify-age">{t('verifyWaiting', { time: waitedFor(t, ticket.verification?.at ?? ticket.ended?.at
         ?? ticket.updatedAt) })}</span>
@@ -603,6 +583,7 @@ function PipelineCard({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
   return <article className="dt-pipeline-card" data-blocked={blocked || undefined} data-waiting={waiting || undefined}>
     <header className="dt-pipeline-head">
       <Tag tone={waiting ? 'warning' : blocked ? 'danger' : 'info'}>{pipelineStageLabel(t, pipeline)}</Tag>
+      <PriorityMenu ticket={ticket} onChanged={onChanged} />
       <span className="dt-pipeline-age"><When at={pipeline?.at ?? ticket.updatedAt} /></span>
     </header>
     <button type="button" className="dt-pipeline-title" onClick={open}>{ticket.title}</button>
@@ -883,8 +864,8 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
 
         <Lane tone="run" title={t('boardRunning')} count={running} sub={t('boardRunningSub')} empty={t('boardRunningEmpty')}
           action={running ? <button type="button" className="dt-board-more" onClick={openTickets}>{t('boardOpen')} →</button> : undefined}>
-          <ul className="dt-runlist">{working.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}
-            {idle.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} />)}</ul>
+          <ul className="dt-runlist">{working.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} onChanged={reload} />)}
+            {idle.map(ticket => <RunRow key={ticket.id} ticket={ticket} focus={mark} onChanged={reload} />)}</ul>
         </Lane>
 
         <Lane tone="pipeline" title={t('boardPipelineTitle')} count={pipeline.length} sub={t('boardPipelineSub')}
