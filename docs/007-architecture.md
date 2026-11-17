@@ -447,11 +447,12 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/feishu-image.ts` | Reads a Feishu message's image as an attachment for the assessing Session |
 | `src/sources/tapd.ts` | The TAPD kind and plugin entry, exported as `./tapd-watch`: a read-only poll of the open bugs assigned to one person, one Trigger per bug revision, and the bug's ID and link as execution variables |
 | `src/sources/web.ts` | The Web Source: a request a person submits from the panel, as an addressed Trigger of the panel operator with its own Thread, and a Channel that injects the Ticket's replies into the main Session |
-| `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel, the worker Session header actions (open the Ticket, copy the Session id), the child Session model route, and the page in DeepSeek Harness's Plugin Manager |
+| `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel, the worker Session header actions (open the Ticket, copy the Session id), the child Session model route, the active-Tickets dock in the bottom strip (a row opens the worker Session, else the Ticket), and the page in DeepSeek Harness's Plugin Manager |
 | `src/client/session-model.tsx` | The read-only model route a header names on an addressed child Session, where DSH gives the composer's model seat to no subagent Session: the route `provider/model` from the Session's durable model-selection projection, and its reader over the Session list |
 | `src/client/request.tsx` | The panel's request form: the header action and its dialog, which submit one request to the main Session |
 | `src/client/app.tsx` | The panel: header, search, glossary, tabs, the 概览 switch between the editor page and the board, and the page of the current route, which it keeps in browser history so Back/Forward, the mouse side buttons and the macOS trackpad's swipe step through pages, entering each with a short transition; a record opened without history gets its parent menu written behind it, so Back goes up a level |
 | `src/client/boundary.tsx` | The page error boundary: a page that fails to render shows the error with Retry and a way home, instead of the host's blank slot |
+| `src/client/panel-call.ts` | The localized management API caller the panel provider and the active-Tickets dock share |
 | `src/client/provider.tsx` | What every page reads from its host: copy, calls, navigation, notices, the state poll, and `restart`, which reads the state quickly while dsh-superagent restarts |
 | `src/client/api.ts` | Calls and polls of the management API, typed by `src/app/api.ts`, and the Decision filters of the Eval status |
 | `src/client/route.ts` | The tabs, the two views of 概览, the board focus a hero count carries, the settings groups, the typed routes that `parseRoute` reads (including the removed Agent-status tab, which opens the board), the `?view=board` deep link the status card taps, the parent menu a record falls back to, and the route memory with the settings group opened last |
@@ -473,6 +474,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/controls.tsx` | Local copies of DeepSeek Harness's controls, which follow its markup, keyboard behaviour and design tokens, since the bundle does not import `@deepseek-ai/dsh-client-ui-primitives`; they read no context |
 | `src/client/widgets.tsx` | The small components the pages share, which read the panel's context: sections, page heads, load states, times, links, confirmed actions, the setup check and Markdown |
 | `src/client/upgrade.tsx` | The update badge at the sidebar foot beside Settings and its dialog: the commits the installed build lacks, the prepare button that builds without touching the running service, the restart a prepared build waits for, and the steps of a running or the last update |
+| `src/client/dock.tsx` | The active-Tickets dock in DSH's frame-wide bottom strip: the board's six recently active Tickets as one row each, with status, a loud pill for a Ticket waiting on a person and the relative age; it hides with no active Ticket |
 | `src/client/rows.tsx` | The rows the pages share: a Ticket, a Thread and a Decision, a Thread's chip, and the folding of runs of automated messages |
 | `src/client/markdown.ts` | The Markdown subset of reports and questions, and the bare addresses in messages, as blocks and inline parts |
 | `src/client/text.ts` | Copy by key and the wording of domain values, reasons, senders and times |
@@ -480,6 +482,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/locales.ts` | All copy in both languages, and the glossary of [001 Domain model](001-domain.md) |
 | `src/client/client.css`, `css.d.ts` | The panel's stylesheet, loaded as text |
 | `src/client/ticket-link.css` | The Session header actions' stylesheet (the worker Session's ticket and Session id, the child Session's model route), injected globally when the plugin loads |
+| `src/client/dock.css` | The active-Tickets dock's stylesheet, injected globally when the plugin loads since the dock renders outside the panel |
 
 `src/sources/github.ts` and `src/sources/feishu.ts` are also the entries of the two Source plugins, built by `tsdown.config.ts` and exported in `package.json` as `./github-watch` and `./feishu-watch`. The bundle's `cordis.patch.yml` inserts the three plugins, with Feishu disabled.
 
@@ -562,6 +565,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/service-script.spec.ts` | `scripts/dsh-superagent` against fake `ps`, `tmux` and `dsh` |
 | `tests/client.spec.tsx`, `tests/navigation.spec.ts`, `tests/controls.spec.tsx` | The client plugin's registration and polling, Session navigation and route memory, the `?view=board` deep link, the local controls, the child Session model chip (the route from the model-selection projection, and nothing on a root Session), and the panel's imports, which have no cycle |
 | `tests/client-diff.spec.tsx` | The panel's plan diff: the file index and line numbers, token-level marks, the inline/side-by-side switch and the layout it remembers, and a binary file with no hunks |
+| `tests/panel-dock.spec.tsx` | The active-Tickets dock: its rows from the board's active list, its absence without one, and where each control goes |
 | `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx` | Each page of the panel, against a fake management API answered by route |
 | `tests/panel-navigation.spec.tsx` | Panel navigation through browser history: Back/Forward, the mouse side buttons and the page Back button on the same entries, the parent menu behind a page opened without history, filters replacing their entry, each page's entrance, and a crashed page that recovers in place |
 | `tests/panel-graph.spec.tsx` | The 概览 relation view: the timeline lanes, edges and hover title placement, the cloud, the only-related filter, both layouts' geometry, the cloud's frame loop on fake animation frames (no radius breathing, fill opacity, hover lift, hidden-tab pause, reduced motion), hub rings, the frost sheen's inline fill, chevron arrowheads, guessed edges (dotted, no arrow, opacity by strength, the switch, no growth in size, absent from the timeline, the hover reason and its placement, the weak springs), the speck schedule, label placement, node sizing, and a Ticket page's related Tickets |

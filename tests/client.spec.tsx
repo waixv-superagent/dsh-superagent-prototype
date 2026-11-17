@@ -53,13 +53,14 @@ it('registers a localized main panel, sidebar entry, worker-Session ticket link 
   const { entries, dictionaries, main, nav } = fixture([])
   expect(entries.map(entry => entry.options.name)).toEqual(['main', 'sidebar.panellist', 'sidebar.session.row.leading',
     'conversation.session.header.actions', 'conversation.session.header.actions', 'conversation.session.header.actions',
-    'sidebar.footer.action', 'plugins.row.config'])
+    'sidebar.footer.action', 'plugins.row.config', 'shell.bottom'])
   expect(entries[2]!.options).toMatchObject({ id: 'dsh-superagent:ticket', order: 40, locale: 'dshSuperagent' })
   expect(entries[3]!.options).toMatchObject({ id: 'dsh-superagent:ticket', order: 40, locale: 'dshSuperagent' })
   expect(entries[4]!.options).toMatchObject({ id: 'dsh-superagent:copy-session', order: 41, locale: 'dshSuperagent' })
   expect(entries[5]!.options).toMatchObject({ id: 'dsh-superagent:model', order: -5, locale: 'dshSuperagent' })
   expect(entries[6]!.options).toMatchObject({ id: 'dsh-superagent:upgrade', order: 10, locale: 'dshSuperagent' })
   expect(entries[7]!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
+  expect(entries[8]!.options).toEqual({ name: 'shell.bottom', locale: 'dshSuperagent' })
   expect(Object.keys(dictionaries)).toEqual(['dshSuperagent'])
   expect(main.options).toMatchObject({ key: 'dsh-superagent', locale: 'dshSuperagent' })
   expect(nav.options).toMatchObject({ id: 'dsh-superagent', order: 10, locale: 'dshSuperagent' })

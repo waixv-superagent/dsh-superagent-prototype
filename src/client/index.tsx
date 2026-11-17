@@ -14,6 +14,7 @@ import { openKnownSession, SessionNavigationError } from '../navigation.ts'
 import { App } from './app.tsx'
 import { Icon } from './controls.tsx'
 import { PluginConfig, usePageForm } from './deployment.tsx'
+import { ActiveTicketsDock } from './dock.tsx'
 import { en, zh } from './locales.ts'
 import { SessionModel, type SessionModelProps } from './session-model.tsx'
 import type { T } from './text.ts'
@@ -63,10 +64,35 @@ function Mounted({ ctx, t }: { ctx: ClientContext; t: T }) {
 
 /** Shows the Ticket of a worker Session in the panel; the panel reads its route from sessionStorage when it mounts. */
 function openTicket(ctx: ClientContext, ticketId: string): void {
+  openPanelAt(ctx, { page: 'execution', id: ticketId })
+}
+
+/** Opens the panel at a route; the panel reads it from sessionStorage when it mounts. */
+function openPanelAt(ctx: ClientContext, route: object): void {
   try {
-    sessionStorage.setItem(ROUTE_KEY, JSON.stringify({ route: { page: 'execution', id: ticketId }, stack: [] }))
+    sessionStorage.setItem(ROUTE_KEY, JSON.stringify({ route, stack: [] }))
   } catch (failure) { void failure /* Route memory is a convenience. */ }
   ctx.layout.selectPanel(PANEL_ID)
+}
+
+/** Opens the panel's board, the default view of its 概览 tab. */
+function openBoard(ctx: ClientContext): void {
+  openPanelAt(ctx, { page: 'editor' })
+}
+
+/**
+ * Switches the workspace to a Ticket's worker Session, or shows the Ticket page when that Session is not listed (yet) or the
+ * catalog fails. One click supersedes the previous one: a stale click's late answer neither opens a Session nor falls back.
+ */
+export function workerOpener(ctx: ClientContext): (ticketId: string) => void {
+  let pending: AbortController | undefined
+  return ticketId => {
+    pending?.abort()
+    const request = new AbortController(); pending = request
+    openKnownSession(ctx.sessions, `worker-${ticketId}` as SessionId, target => { ctx.uiWorkspace.openSession(target) }, request.signal)
+      .catch(() => { if (!request.signal.aborted) openTicket(ctx, ticketId) })
+      .finally(() => { if (pending === request) pending = undefined })
+  }
 }
 
 /** The Ticket id a worker Session executes, or undefined for any other Session. */
@@ -123,7 +149,7 @@ function TicketMarker({ ctx, sessionId, t }: { ctx: ClientContext; sessionId: Se
 }
 
 export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace', 'layout']
-/** Registers the panel, sidebar icon, worker-Session header actions (its Ticket, its Session id), and Plugin Manager config view; `configForms` is optional (without it, machine settings are read-only). */
+/** Registers the panel, sidebar icon, worker-Session header actions (its Ticket, its Session id), the bottom active-Tickets dock, and Plugin Manager config view; `configForms` is optional (without it, machine settings are read-only). */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-superagent: dictionaries')
   const t = ctx.locale.bind(NS)
@@ -154,4 +180,9 @@ export function apply(ctx: ClientContext): void {
     ((props: { wide: boolean; t: T }) => <UpgradeBadge t={props.t} wide={props.wide} />) as never))
   ctx.slots.inject('plugins.row.config', () => ctx.slots.register({ name: 'plugins.row.config', key: `${ENTRY}#${ENTRY}`, locale: NS },
     (props: PluginConfigViewProps & { t: T }) => <PluginConfig t={props.t} view={props.view} form={props.form} />))
+  // The frame-wide bottom strip stays mounted across panel navigation; the dock renders nothing without active Tickets.
+  const openWorker = workerOpener(ctx)
+  ctx.slots.inject('shell.bottom', () => ctx.slots.register({ name: 'shell.bottom', locale: NS },
+    (props: { t: T }) => <ActiveTicketsDock t={props.t} openWorker={openWorker} openTicket={ticketId => openTicket(ctx, ticketId)}
+      openBoard={() => openBoard(ctx)} />))
 }

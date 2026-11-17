@@ -1,0 +1,58 @@
+/* Always-visible active-Tickets dock in DSH's frame-wide bottom strip. Injected once by dock.tsx; it never relies on client.css. */
+.dt-dock { box-sizing: border-box; container-type: inline-size; border-top: .5px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; line-height: 18px; }
+.dt-dock-bar { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px 0 12px; }
+.dt-dock-label { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
+.dt-dock-count { font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-secondary); }
+.dt-dock-label-text::after { content: '·'; margin-left: 5px; color: var(--dsw-alias-label-caption); }
+
+/* The rows scroll sideways; the scrollbar stays hidden and the wheel scrolls the strip. */
+.dt-dock-list { flex: 1 1 auto; display: flex; align-items: center; gap: 4px; min-width: 0; margin: 0; padding: 2px; list-style: none; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none; }
+.dt-dock-list::-webkit-scrollbar { display: none; }
+.dt-dock-item { flex: none; display: flex; align-items: center; max-width: 320px; border-radius: var(--dsw-radius-sm); }
+.dt-dock-item:hover, .dt-dock-item:focus-within { background: var(--dsw-alias-interactive-bg-hover); }
+.dt-dock-item[data-person] { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 7%, transparent); box-shadow: inset 0 0 0 .5px color-mix(in srgb, var(--dsw-alias-state-warn-primary) 35%, transparent); }
+.dt-dock-item[data-person]:hover, .dt-dock-item[data-person]:focus-within { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent); }
+.dt-dock-row { display: flex; align-items: center; gap: 6px; min-width: 0; height: 28px; padding: 0 6px 0 8px; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; text-align: left; cursor: pointer; }
+.dt-dock-title { min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary); }
+.dt-dock-stage { flex: none; font-size: 11px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
+.dt-dock-age { flex: none; font-size: 11px; color: var(--dsw-alias-label-caption); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* A row that waits on a person reads loud without hovering: an amber pill with its icon and the stage's own words. */
+.dt-dock-pill { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 0 7px 0 5px; border-radius: 999px; background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 16%, transparent); color: var(--dsw-alias-state-warn-primary); font-size: 11px; line-height: 17px; font-weight: 600; white-space: nowrap; }
+.dt-dock-pill[data-tone='danger'] { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent); color: var(--dsw-alias-state-error-primary); }
+
+/* Status glyph: a dot by state, or a small spinner while a worker turn runs. */
+.dt-dock-dot { flex: none; width: 7px; height: 7px; margin: 0 2px; border-radius: 50%; background: var(--dsw-alias-label-caption); }
+.dt-dock-dot[data-state='done'] { background: var(--dsw-alias-state-success-primary); }
+.dt-dock-dot[data-state='warning'] { background: var(--dsw-alias-state-warn-primary); }
+.dt-dock-dot[data-state='error'] { background: var(--dsw-alias-state-error-primary); }
+.dt-dock-spin { flex: none; color: var(--dsw-alias-state-business-primary); }
+.dt-dock-spin g { transform-origin: center; animation: dt-dock-spin 1.2s linear infinite; }
+.dt-dock-spin circle { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; }
+.dt-dock-spin circle:first-child { opacity: .25; }
+.dt-dock-spin circle:last-child { stroke-dasharray: 16 150; }
+@keyframes dt-dock-spin { to { transform: rotate(360deg); } }
+
+/* Secondary icon button that opens the Ticket page; quiet until its row is hovered or focused. */
+.dt-dock-open { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 3px; padding: 0; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-caption); cursor: pointer; }
+.dt-dock-open:hover { background: var(--dsw-alias-fill-l1); color: var(--dsw-alias-label-secondary); }
+.dt-dock-board { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.dt-dock-board:hover { background: var(--dsw-alias-fill-l1); color: var(--dsw-alias-label-secondary); }
+.dt-dock-row:focus-visible, .dt-dock-open:focus-visible, .dt-dock-board:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
+@media (hover: hover) {
+  .dt-dock-open { opacity: 0; }
+  .dt-dock-item:hover .dt-dock-open, .dt-dock-item:focus-within .dt-dock-open, .dt-dock-item[data-person] .dt-dock-open { opacity: 1; }
+}
+
+/* Narrow frames keep every row usable: the label shortens to its count, then quiet words give way to the title and pill. */
+@container (max-width: 720px) {
+  .dt-dock-label-text { display: none; }
+  .dt-dock-title { max-width: 130px; }
+}
+@container (max-width: 480px) {
+  .dt-dock-stage, .dt-dock-age, .dt-dock-board span, .dt-dock-label { display: none; }
+  .dt-dock-title { max-width: 110px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dt-dock-spin g { animation: none; }
+}

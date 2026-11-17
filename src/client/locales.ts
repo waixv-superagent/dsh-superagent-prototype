@@ -482,6 +482,13 @@ const TEXT = {
   boardActiveMinutes: ['{minutes} 分钟前', '{minutes} min ago'],
   boardActiveHours: ['{hours} 小时前', '{hours} h ago'],
   boardActiveDays: ['{days} 天前', '{days} d ago'],
+  // Always-visible active-Tickets dock in DSH's frame-wide bottom strip
+  dockLabel: ['活跃工单', 'Active tickets'],
+  dockRegion: ['活跃工单栏', 'Active tickets bar'],
+  dockBoard: ['看板', 'Board'],
+  dockBoardHint: ['打开 Superagent 看板', 'Open the Superagent board'],
+  dockOpenWorker: ['切到「{title}」的执行会话', 'Switch to the worker Session of "{title}"'],
+  dockOpenTicket: ['打开工单', 'Open ticket'],
   boardRunCount: ['第 {count} 次执行', 'Run {count}'],
   boardVerifyTitle: ['待你验证', 'To verify'],
   boardVerifySub: ['worker 已交付，等你本地确认', 'Delivered; waiting for your local check'],
