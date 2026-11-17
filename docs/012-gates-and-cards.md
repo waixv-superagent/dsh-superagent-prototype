@@ -17,6 +17,7 @@
 | P5 入库 | **人** | 由人 submit；agent 永远不 submit | 已有（p4 包装拦截） |
 
 P1 是这一轮最贵的教训：一个引擎插件改动、40 分钟编译，在任何人看到之前就发生了。P1 门的存在意义就是把这个成本压到 3 分钟的一句话。
+唯一的例外是自迭代单里人已经说定的方案：`kind=self` 的单由人的消息明确要求、且方向已经说定时，方案照常记录但会话直接通过，不发确认卡（见 §2）。
 
 P4 与 P4.5 是两个不同的门，别再混在一起：**P4 确认「可以提交」**（字段 `confirmed`，人自己跑 submit）；**P4.5 确认「我本地真的验过」**（字段 `verification`）。
 worker 自验的文本（编译结果、自动化通过数）只是证据，不是验收；过去的看板把它们当成「已完成」，于是 12 张单全是 `humanConfirmed=no` 却看不出区别。
@@ -52,6 +53,7 @@ design：  问题 / 选项 / 证据 / 推荐
 - 卡片只放摘要（`N 个文件 · +X −Y`、前三个文件、基线），完整 hunk 在工单面板里，可切「内联／并排」；面板把每一行放到旧/新行号、增删底色与行内词级高亮上，未变更大段随 hunk 上下文折叠。
 - 设计型或需求型方案在交卡之前，先在工单的原话题发一份 grill 文档：要人拍板的问题、每个选项的证据与代价、自己的推荐；卡片只承担「现在能不能开工」这一次决定。
 - 人只回三种：**改** / **换方向（附一句）** / **停**。
+- 自迭代单（`kind=self`，即改本部署自己的仓库）如果人在自己的消息里已经明确要求、并且方向已经说定，可以跳过确认卡：`orchestrator_plan` 带 `decided: true`，方案照常按模板记录并记为会话通过，工单直接进 implement，不发卡、不设截止时间。判定不交给 worker 一句话：主机只对「`self` + 明确强度的 Mandate + 首轮方案（人没要求改过方向、方案门没被回退重开）」放行，其余情况仍要人回 1/2/3。
 
 ## 3. P4 门的产物（固定模板）
 
@@ -194,10 +196,11 @@ P1 时工单的工作区还没检出（`ticket.execution.directory` 为空或未
 
 ### 6.3 发送位置与卡片映射
 
-方案卡发到**工单来源的那条飞书话题**：用工单 `channels` 里来源 feishu channel 的 `messageId` 发送
-`im +messages-reply --message-id <来源消息> --reply-in-thread --msg-type interactive --content <json>`，带幂等键，
-这样在话题里工作的人看得到、点得到；没有来源话题（例如非飞书来源的单）才退到 Source 配置里的「介入卡片私聊」，留空则发到工单来源的私聊，
-用 `im +messages-send --msg-type interactive --content <json>`。发送成功后把
+方案卡先发到**工单自己的飞书话题**（`ticket.replyChannel`：飞书 Source 接单时给每张单在话题群里开的那条），用
+`im +messages-reply --message-id <话题根消息> --reply-in-thread --msg-type interactive --content <json>`，带幂等键，
+这样在话题里工作的人看得到、点得到；话题没开成或工单还没有话题时，先回到来源 feishu channel，再退到 Source 配置里的
+「介入卡片私聊」、来源私聊，最后是固定话题群（作为该群的一条新话题）。
+所以面板、GitHub、TAPD 来源的单也有能点的方案卡，而不是只在 Web 端确认。发送成功后把
 `message_id → { ticketId, planAt, url }` 记进 `KV.feishu.cards`（48 小时后清理）；回调没有工单号时靠它反查。
 `url` 来自紧接着的 `im +messages-mget` 的 `message_app_link`（形如
 `https://applink.feishu.cn/client/thread/open?…&thread_position=…`，`thread_position` 让它直接定位到这张卡）。

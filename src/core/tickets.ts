@@ -7,8 +7,8 @@ import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, Li
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { classifyTicket } from './kind.ts'
-import { missingPlanLabels, pendingPlan, phaseRank, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planTemplate, ticketPhase, validPlanOptions, validQuestionSections,
-  type PlanDecision, type PlanOption, type PlanTemplate, type PlanVia, type TicketPhase } from './plan.ts'
+import { missingPlanLabels, pendingPlan, phaseRank, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planSettleable, planTemplate, ticketPhase,
+  validPlanOptions, validQuestionSections, type Plan, type PlanDecision, type PlanOption, type PlanTemplate, type PlanVia, type TicketPhase } from './plan.ts'
 import { parsePlanDiff, type PlanDiff } from './diff.ts'
 import { defaultPriority, priorityAskDeadline, PRIORITY_ASK_MINUTES, priorityAskOverdue, systemPriority, waitsForIdle, type PriorityLevel,
   type PriorityVia } from './priority.ts'
@@ -538,17 +538,14 @@ export class Tickets extends EnginePart {
     return this.require(ticketId)
   }
   /**
-   * A worker's P1 plan, as the fixed template with evidence, now waits for a person: the ticket stays in `plan`, its
-   * attention asks the plan question, and its deadline stops it if nobody answers (see `PLAN_GATE_HOURS`). A worker may
-   * word the card's question and offer 2–4 choices that map to the gate's own decisions, and attach the proposed code
-   * change as a real unified diff (`diffText`, `diffBase`) so a person can read the code before approving.
-   * @throws UserError when the ticket is unknown or ended, its plan was approved already, a template line is missing,
-   * the question or choices are not a card's, or the attached diff is not a unified diff this panel can render.
+   * The plan a worker submits for `ticket`: the fixed template with evidence, its question and choices, its context and
+   * its real unified diff, all checked before anything is recorded. Shared by the waiting gate and the conversation-settled
+   * plan, so skipping the card still records exactly the plan a card would have shown.
+   * @throws UserError when the plan was approved already, a template line is missing, or the question, choices, sections
+   * or diff are not a card's.
    */
-  submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[], template: PlanTemplate = 'fix',
-    diffText?: string, diffBase?: string): Ticket {
-    const ticket = this.require(ticketId)
-    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+  private planOf(ticket: Ticket, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[],
+    template: PlanTemplate = 'fix', diffText?: string, diffBase?: string): Plan {
     if (ticket.plan?.approved) throw new UserError('phaseOutOfOrder', { from: ticketPhase(ticket) })
     const missing = missingPlanLabels(text, template)
     if (missing.length) throw new UserError('planIncomplete', { template, labels: missing.join(', ') })
@@ -570,15 +567,47 @@ export class Tickets extends EnginePart {
       || choices.some(option => !['approve', 'revise', 'stop'].includes(option.decision)))) throw new UserError('planOptions')
     if (sections && !validQuestionSections(sections)) throw new UserError('planSections')
     const context = sections?.map(section => ({ ...section, label: section.label.trim(), text: section.text.trim() }))
-    const at = this.now()
+    return { text, at: this.now(), ...(template !== 'fix' ? { template } : {}), ...(asked ? { question: asked } : {}),
+      ...(choices?.length ? { options: choices } : {}), ...(context?.length ? { sections: context } : {}), ...(diff ? { diff } : {}) }
+  }
+  /**
+   * A worker's P1 plan, as the fixed template with evidence, now waits for a person: the ticket stays in `plan`, its
+   * attention asks the plan question, and its deadline stops it if nobody answers (see `PLAN_GATE_HOURS`). A worker may
+   * word the card's question and offer 2–4 choices that map to the gate's own decisions, and attach the proposed code
+   * change as a real unified diff (`diffText`, `diffBase`) so a person can read the code before approving.
+   * @throws UserError when the ticket is unknown or ended, its plan was approved already, a template line is missing,
+   * the question or choices are not a card's, or the attached diff is not a unified diff this panel can render.
+   */
+  submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[], template: PlanTemplate = 'fix',
+    diffText?: string, diffBase?: string): Ticket {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    const plan = this.planOf(ticket, text, question, options, sections, template, diffText, diffBase)
     const previous = ticket.attention
-    ticket.plan = { text, at, waiting: true, deadline: new Date(Date.parse(at) + PLAN_GATE_HOURS * 3_600_000).toISOString(),
-      ...(template !== 'fix' ? { template } : {}), ...(asked ? { question: asked } : {}), ...(choices?.length ? { options: choices } : {}),
-      ...(context?.length ? { sections: context } : {}), ...(diff ? { diff } : {}) }
+    ticket.plan = { ...plan, waiting: true, deadline: new Date(Date.parse(plan.at) + PLAN_GATE_HOURS * 3_600_000).toISOString() }
     ticket.phase = 'plan'
-    ticket.attention = { id: key('attention', ticketId, PLAN_QUESTION, at), question: PLAN_QUESTION }
+    ticket.attention = { id: key('attention', ticketId, PLAN_QUESTION, plan.at), question: PLAN_QUESTION }
     if (previous && previous.id !== ticket.attention.id) this.replies.withdrawAttention(previous.id)
-    ticket.updatedAt = at
+    ticket.updatedAt = plan.at
+    this.repo.tickets.save(ticket)
+    return ticket
+  }
+  /**
+   * A worker's plan for a self-iteration Ticket whose direction the person's own conversation already decided: it is
+   * recorded and approved at once, with no card, attention or deadline, so the worker implements at once. Other kinds,
+   * proactive (inferred) work, a plan the person asked to revise and a gate they reopened still wait for their answer.
+   * @throws UserError when the ticket is unknown or ended, its plan may not settle in the conversation, or the plan is not
+   * one the gate accepts.
+   */
+  settlePlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[],
+    template: PlanTemplate = 'fix', diffText?: string, diffBase?: string): Ticket {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    if (!planSettleable(ticket)) throw new UserError('planGateRequired')
+    const plan = this.planOf(ticket, text, question, options, sections, template, diffText, diffBase)
+    ticket.plan = { ...plan, approved: { at: plan.at, via: 'session' } }
+    ticket.phase = 'implement'
+    ticket.updatedAt = plan.at
     this.repo.tickets.save(ticket)
     return ticket
   }

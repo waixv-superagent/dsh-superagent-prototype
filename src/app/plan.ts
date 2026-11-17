@@ -1,8 +1,8 @@
 /**
  * Sends a ticket's P1 plan to the person who decides it, in the ticket's Feishu conversation: the topic its replies moved to,
  * else the chat the ticket started in, so a person who works in that thread can see and click it. Without a Feishu
- * conversation it uses the private chat the Feishu Source names for intervention cards. The card itself is built by
- * `sources/feishu-card.ts`.
+ * conversation it uses the private chat the Feishu Source names for intervention cards, or the fixed topic chat, which takes
+ * a ticket from another Source as a new topic. The card itself is built by `sources/feishu-card.ts`.
  */
 import { key, pendingPlan, type Ticket } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
@@ -27,14 +27,19 @@ export function panelLinkOf(host: { sources: Pick<SourceRegistry, 'instance'> },
   const panelUrl = host.sources.instance<{ panelUrl?: string }>('feishu')?.config?.panelUrl?.trim()
   return panelUrl ? ticketPanelLink(panelUrl, ticketId) : undefined
 }
-/** Where intervention cards go: the configured private chat, else the direct chat a trigger came from, else none. */
+/**
+ * Where intervention cards go when the ticket has no Feishu conversation of its own: the configured private chat, else the
+ * direct chat a Feishu trigger came from, else the fixed topic chat, which takes a ticket from another Source as a new
+ * topic. The topic chat is what makes a plan card reach a person for a ticket the panel, GitHub or TAPD started.
+ */
 export function notifyChat(store: Pick<Store, 'settings' | 'triggers'>, ticket: Pick<Ticket, 'origin'>): string | undefined {
   const config = store.settings().sources.feishu?.config ?? {}
   const configured = typeof config.notifyChat === 'string' ? config.notifyChat.trim() : ''
   if (configured) return configured
   const trigger = store.triggers.get(ticket.origin.triggerId)
-  if (trigger?.source !== 'feishu' || trigger.meta.direct !== true) return undefined
-  return trigger.channel?.address.chatId ?? (typeof trigger.meta.chatId === 'string' ? trigger.meta.chatId : undefined)
+  if (trigger?.source === 'feishu' && trigger.meta.direct === true) return trigger.channel?.address.chatId ?? (typeof trigger.meta.chatId === 'string' ? trigger.meta.chatId : undefined)
+  const topicChat = typeof config.topicChat === 'string' ? config.topicChat.trim() : ''
+  return topicChat || undefined
 }
 /**
  * Sends a ticket's waiting plan as a card, and its text when Feishu refuses the card.
@@ -44,12 +49,12 @@ export async function notifyPlan(host: PlanHost, ticket: Ticket): Promise<string
   const plan = pendingPlan(ticket)
   if (!plan) return undefined
   if (!host.sources.instance('feishu')?.enabled) { host.warn(`Ticket ${ticket.id}: its plan card needs the Feishu Source, which is off`); return undefined }
-  // The ticket's own conversation first: the topic its replies moved to, else the Feishu chat it started in. The private
-  // chat is only for a ticket with no Feishu conversation at all.
+  // The ticket's own conversation first: the topic its replies moved to, which the Feishu Source opens for every ticket,
+  // else the Feishu chat it started in. The private or fixed topic chat is only for a ticket with no conversation at all.
   const channel = ticket.replyChannel ?? ticket.channels?.find(item => item.source === 'feishu')
   const chat = channel?.address.chatId ?? notifyChat(host.store, ticket)
   const replyTo = channel?.address.messageId
-  if (!chat) { host.warn(`Ticket ${ticket.id}: no Feishu conversation for its plan card; set a private chat in the Feishu Source`); return undefined }
+  if (!chat) { host.warn(`Ticket ${ticket.id}: no Feishu conversation for its plan card; set the Topic chat or a private chat in the Feishu Source`); return undefined }
   try {
     const message = await sendCard(host, chat, planCard(ticket, plan, panelLinkOf(host, ticket.id)), `plan-${key('plan', ticket.id, plan.at)}`, replyTo)
     // Remember which plan the card asks about, so its buttons can decide without matching a chat thread, and drop old entries.

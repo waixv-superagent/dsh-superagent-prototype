@@ -102,7 +102,7 @@ export interface SourceKind<C extends Record<string, unknown> = Record<string, u
   channel?: SourceChannel<C>
   /** Bounded context reader for assessments; assessments of a kind without `threadContext` read none. */
   threadContext?: ThreadContext<C>
-  /** Opens the Source's own conversation for a ticket, such as a topic, and moves the ticket's replies there; the Engine calls it after creating a ticket. */
+  /** Opens the Source's own conversation for a ticket, such as a topic, and moves the ticket's replies there; the Engine asks every installed Source after creating a ticket. */
   opened?(ctx: SourceContext, ticket: Ticket): void | Promise<void>
   /** Maps a search query to candidate Thread keys (such as `github:12`) and Trigger search terms (such as a Feishu `om_` ID). */
   find?(query: string): { threads: string[]; terms: string[] }

@@ -30,6 +30,14 @@ describe('where a plan card goes', () => {
     expect(notifyChat(store(trigger({ meta: { direct: false } })), ticket)).toBeUndefined()
     expect(notifyChat(store(trigger({ source: 'github' })), ticket)).toBeUndefined()
   })
+  it('uses the fixed topic chat for a ticket from another Source, after the private chats', () => {
+    const store = (config: Record<string, unknown>, source = trigger({ source: 'github' })) =>
+      ({ settings: () => ({ sources: { feishu: { config } } }), triggers: { get: () => source } }) as never
+    expect(notifyChat(store({ topicChat: 'oc_topic' }), ticket)).toBe('oc_topic')
+    expect(notifyChat(store({ notifyChat: 'oc_named', topicChat: 'oc_topic' }), ticket)).toBe('oc_named')
+    // A Feishu request in a direct chat keeps its own conversation before the fixed topic chat.
+    expect(notifyChat(store({ topicChat: 'oc_topic' }, trigger()), ticket)).toBe('oc_dm')
+  })
 })
 describe('notifying a waiting plan', () => {
   const plan = { text: '现象：x\n代码线：y', at: '2026-09-23T00:00:00Z', waiting: true as const }
@@ -68,6 +76,11 @@ describe('notifying a waiting plan', () => {
     expect(args.slice(0, 4)).toEqual(['im', '+messages-reply', '--message-id', 'om_topic'])
     expect(args).toContain('--reply-in-thread')
     expect(args).not.toContain('--chat-id')
+  })
+  it('sends a ticket from another Source to the fixed topic chat, where the card is answerable', async () => {
+    const { host, send } = makeHost({ config: { topicChat: 'oc_topic' }, source: trigger({ source: 'github' }) })
+    expect(await notifyPlan(host, { ...ticket, plan })).toBe('om_9')
+    expect((send.mock.calls[0]![0] as string[]).slice(0, 4)).toEqual(['im', '+messages-send', '--chat-id', 'oc_topic'])
   })
   it('does nothing for an approved plan, and says why when a ticket has no chat or the Source is off', async () => {
     const { host: approvedHost, send } = makeHost()

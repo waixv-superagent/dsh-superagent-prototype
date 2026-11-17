@@ -257,6 +257,15 @@ export class Engine {
     return this.repo.atomic(() => this.tickets.submitPlan(ticketId, text, question, options, sections, template, diff, diffBase))
   }
   /**
+   * A worker's plan for a self-iteration Ticket whose direction the person's own message already decided: recorded and
+   * approved at once, with no confirmation card, so the worker implements. Every other plan keeps the gate.
+   * @throws UserError when the ticket may not settle its plan in the conversation, or the plan is incomplete.
+   */
+  settlePlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[],
+    template: PlanTemplate = 'fix', diff?: string, diffBase?: string): Ticket {
+    return this.repo.atomic(() => this.tickets.settlePlan(ticketId, text, question, options, sections, template, diff, diffBase))
+  }
+  /**
    * A person's decision on a ticket's waiting plan: `1` approves it and moves the ticket to implement, `2` asks for another
    * direction, `3` stops the ticket. `option` is the card choice's label, recorded with the decision.
    * @throws UserError when the ticket is unknown or no plan of it waits for a decision.
@@ -471,7 +480,7 @@ export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
   | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'reply'
-  | 'submitPlan' | 'advancePhase' | 'resetPhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch' | 'startIdleAnalysis'
+  | 'submitPlan' | 'settlePlan' | 'advancePhase' | 'resetPhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch' | 'startIdleAnalysis'
   | 'authorizeModelFromPerson' | 'dropUnstartedIdle'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>

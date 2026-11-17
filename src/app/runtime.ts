@@ -288,10 +288,12 @@ export class Runtime extends Service implements SourceHost {
           const followup = followed && !gate ? followupNotice(store, sources, triggerId) : undefined
           if (followup) sessions.relay(followup.id, followup.text)
           // A Source may open its own conversation for the new ticket, such as a Feishu topic, and move its replies there.
+          // Every installed Source is asked, not only the ticket's origin: a ticket another Source accepted has no Feishu
+          // conversation of its own, and its plan cards and replies would otherwise never reach Feishu.
           if (event.type === 'ticket.created') {
             const ticket = store.tickets.get(event.data.ticketId)
-            const kind = ticket ? sources.kind(store.triggers.get(ticket.origin.triggerId)?.source ?? '') : undefined
-            if (ticket && kind?.opened) {
+            if (ticket) for (const kind of sources.sourceKinds()) {
+              if (!kind.opened || !sources.instance(kind.kind)?.enabled) continue
               void Promise.resolve(kind.opened(this.context(kind), ticket)).catch(error => {
                 ctx.logger.warn('dsh-superagent: could not open a conversation for ticket %s: %s', ticket.id, String(error))
               })

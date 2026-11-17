@@ -1,8 +1,9 @@
 /**
  * Sends a TAPD ticket's priority question to the person who decides it, in the ticket's Feishu conversation: the topic its
- * replies moved to, else the chat it started in, else the Source's intervention chat (a TAPD ticket has no Feishu
- * conversation of its own). The card itself is built by `sources/feishu-card.ts`; this module resolves where it goes,
- * records the mapping its buttons need, and answers with the message it went out as.
+ * replies moved to, else the chat it started in, else the Source's intervention chat or fixed topic chat (a TAPD ticket has
+ * no Feishu conversation of its own until the Feishu Source opens one). The card itself is built by
+ * `sources/feishu-card.ts`; this module resolves where it goes, records the mapping its buttons need, and answers with the
+ * message it went out as.
  */
 import { key, tapdSuggestion } from '../core/index.ts'
 import type { Ticket } from '../core/index.ts'
@@ -41,11 +42,11 @@ export async function notifyPriority(host: PriorityHost, ticket: Ticket): Promis
   if (ask?.state !== 'pending') return undefined
   if (!host.sources.instance('feishu')?.enabled) { host.warn(`Ticket ${ticket.id}: its priority card needs the Feishu Source, which is off`); return undefined }
   // The ticket's own conversation first: the topic its replies moved to, else the Feishu chat it started in. A TAPD ticket
-  // has neither, so the Source's intervention chat is the only place its question can reach a person.
+  // has neither until the topic opens, so the intervention chat or the fixed topic chat carries its question.
   const channel = ticket.replyChannel ?? ticket.channels.find(item => item.source === 'feishu')
   const chat = channel?.address.chatId ?? notifyChat(host.store, ticket)
   const replyTo = channel?.address.messageId
-  if (!chat) { host.warn(`Ticket ${ticket.id}: no Feishu conversation for its priority card; set a private chat in the Feishu Source`); return undefined }
+  if (!chat) { host.warn(`Ticket ${ticket.id}: no Feishu conversation for its priority card; set the Topic chat or a private chat in the Feishu Source`); return undefined }
   try {
     // The bug's Trigger is the ticket's origin, so its meta (short id, status and TAPD priority) gives the card its facts.
     const origin = host.store.triggers.get(ticket.origin.triggerId)

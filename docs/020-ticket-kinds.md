@@ -11,8 +11,9 @@ nobody could say how much of the day was bugs, features or the agent's own work.
 | `self` | The agent's own iteration: work in this deployment's own git repository. |
 | `inquiry` | An answer, analysis, assessment or review rather than a change. |
 
-A kind is a label for reading the work. It grants nothing, changes no gate, and it is separate from **priority**
-(docs/019), which decides when the work runs.
+A kind is a label for reading the work. It grants nothing and changes no gate, with one exception the plan gate's
+conversation shortcut needs: a `self` ticket whose direction the person's own messages already decided may record its plan
+and skip the confirmation card (docs/012). It is separate from **priority** (docs/019), which decides when the work runs.
 
 ## How a ticket gets its kind
 

@@ -21,7 +21,7 @@ import type { EditorScheduler } from '../editor-scheduler.ts'
 import type { EditorGatekeeper } from '../editor-gatekeeper.ts'
 
 export interface ExecutorToolsHost {
-  readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'submitPlan' | 'advancePhase'
+  readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'submitPlan' | 'settlePlan' | 'advancePhase'
     | 'resetPhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'authorizeModelFromPerson'>
   readonly store: Pick<Store, 'tickets' | 'settings' | 'replyStatus' | 'atomic'>
   readonly sessions: Pick<Sessions, 'relay' | 'notify' | 'prompt'>
@@ -187,11 +187,13 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
     }),
     tool({
       name: 'orchestrator_plan',
-      description: 'Submit the P1 plan before any code change: fix uses 现象/代码线/资产线/配置线/修复锚点/影响面/验证方案/预算; analysis uses 问题/结论/依据/建议; design uses 问题/选项/证据/推荐. One label per line with evidence. A person answers 1 (approve), 2 (change direction) or 3 (stop); the card question and 2–4 choices may use your own wording. Pass the change as a real unified diff (`diff`) so the person reads code. Files and shells stay refused until 1.',
+      description: 'Submit the P1 plan before any code change: fix uses 现象/代码线/资产线/配置线/修复锚点/影响面/验证方案/预算; analysis uses 问题/结论/依据/建议; design uses 问题/选项/证据/推荐. One label per line with evidence. A person answers 1 (approve), 2 (change direction) or 3 (stop); the card question and 2–4 choices may use your own wording. Pass the change as a real unified diff (`diff`) so the person reads code. Files and shells stay refused until 1, or until `decided` settles a self-iteration plan whose direction the person already decided.',
       schema: z.object({
         plan: z.string().trim().min(40).max(6000).describe('The plan as label：content lines, in the chosen template order, each with evidence; a long line is broken into points on the card.'),
         template: z.enum(['fix', 'analysis', 'design']).optional()
           .describe('fix (default) for bug fixes; analysis for an investigation; design for a choice, which needs 2–4 described options.'),
+        decided: z.boolean().optional()
+          .describe('Record the plan as already decided by the person\'s conversation and implement without a card: only for a self-iteration Ticket (kind self) from an explicit request whose messages settled the approach; an open direction, a revision they asked for, and a gate they moved back to plan still need their answer.'),
         question: z.string().trim().min(1).max(200).optional().describe('The card question in your own words, from the conversation; the standard wording when omitted.'),
         options: z.array(z.object({ label: z.string().trim().min(1).max(24), decision: z.enum(['approve', 'revise', 'stop']),
           note: z.string().trim().max(200).optional(), description: z.string().trim().min(1).max(160).optional() }).strict()).min(2).max(4).optional()
@@ -205,9 +207,13 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           .describe('What the diff compares against, such as `origin/main`; shown above the diff.'),
       }).strict(),
       execute: async args => {
-        const updated = host.engine.submitPlan(ticketId, args.plan, args.question, args.options, args.sections, args.template, args.diff, args.diff_base)
-        const message = await host.notifyPlan(updated)
-        return { submitted: true, phase: ticketPhase(updated), notified: message !== undefined }
+        // A decided plan records the same plan the card would show, approved at once: no card goes out and the worker
+        // implements without waiting. Every other plan takes the gate.
+        const updated = args.decided
+          ? host.engine.settlePlan(ticketId, args.plan, args.question, args.options, args.sections, args.template, args.diff, args.diff_base)
+          : host.engine.submitPlan(ticketId, args.plan, args.question, args.options, args.sections, args.template, args.diff, args.diff_base)
+        const message = args.decided ? undefined : await host.notifyPlan(updated)
+        return { submitted: true, phase: ticketPhase(updated), ...args.decided ? { settled: true } : { notified: message !== undefined } }
       },
     }),
     tool({

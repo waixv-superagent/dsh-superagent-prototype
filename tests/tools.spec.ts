@@ -590,3 +590,15 @@ it('hands back a request typed into the worker\'s Session as one Web request the
     acknowledgement: '收到，另开一单。' })
   expect(accepted.ticket).toMatchObject({ ticket_id: expect.any(String) })
 })
+it('records a decided self-iteration plan without a card and implements at once', async () => {
+  const { ticket, sessionId } = await h.acceptedTicket(feishu('1', '@bot 按刚才说定的方案改'))
+  expect(h.runtime.store.tickets.get(ticket.id)!.kind).toBe('self')
+  const plan = '现象：面板上的方案确认太慢\n代码线：src/app/plan.ts\n资产线：无\n配置线：无\n修复锚点：改两处\n影响面：只有飞书投递\n验证方案：单测 + 本地假 CLI\n预算：1 小时'
+  expect(await h.runTool(sessionId, 'orchestrator_plan', { plan, decided: true }))
+    .toEqual({ submitted: true, phase: 'implement', settled: true })
+  const stored = h.runtime.store.tickets.get(ticket.id)!
+  expect(stored.phase).toBe('implement')
+  expect(stored.plan).toMatchObject({ text: plan, approved: { via: 'session' } })
+  expect(stored.plan!.waiting).toBeUndefined()
+  expect(stored.attention).toBeUndefined()
+})

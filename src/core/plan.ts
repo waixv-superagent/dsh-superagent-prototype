@@ -1,5 +1,6 @@
 /** The P1 plan gate (docs/012): a ticket's phases, the worker's fixed plan template, and the person's one-word decision. */
 import type { PlanDiff } from './diff.ts'
+import { ticketKind } from './kind.ts'
 import { liveTicket, type QuestionSection, type Ticket } from './model.ts'
 
 /** The phases a ticket passes, from the P1 plan gate to delivery; the submit after delivery stays a person's (P5). */
@@ -15,7 +16,7 @@ export interface Plan {
   at: string
   /** The template the text follows; absent means `fix`, so plans stored before templates stay readable. */
   template?: PlanTemplate
-  /** A person's approval, which moves the ticket to implement. */
+  /** A person's approval, which moves the ticket to implement; a settled plan is approved `via: 'session'` without a card. */
   approved?: { at: string; via?: PlanVia; option?: string }
   /** What a person asked to change instead of approving, oldest first; the worker revises and submits again. */
   feedback?: { text: string; at: string; via?: PlanVia; option?: string }[]
@@ -145,3 +146,15 @@ export const missingPlanLabels = (text: string, template: PlanTemplate = 'fix'):
   const found = new Set(planLines(text, template).map(line => line.label))
   return PLAN_TEMPLATES[template].filter(label => !found.has(label))
 }
+/**
+ * Whether a plan may be recorded as already decided by the conversation, with no confirmation card. Only the agent's own
+ * iteration (`self`) that a person asked for explicitly may settle this way, and only while the plan is the first one:
+ * a plan the person asked to revise, a gate they reopened for added scope, and proactive (inferred) work all still wait
+ * for their answer. This is the one gate a ticket kind takes part in (docs/012, docs/020).
+ */
+export const planSettleable = (ticket: Pick<Ticket, 'kind' | 'kindSource' | 'category' | 'mandate' | 'execution' | 'title' | 'plan' | 'planHistory'>): boolean =>
+  ticket.mandate.strength === 'explicit'
+  && ticketKind(ticket).kind === 'self'
+  && !ticket.plan?.feedback?.length
+  && !ticket.plan?.waiting
+  && !ticket.planHistory?.length
