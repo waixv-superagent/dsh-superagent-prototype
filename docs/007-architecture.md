@@ -400,6 +400,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/tools/tool.ts` | The `Tool` type, `readTool`, the `orchestrator_read` of both roles, and `AcknowledgementSchema` |
 | `src/app/tools/main.ts` | The main Session's tools |
 | `src/app/tools/executor.ts` | An Executor Session's tools, including the read-only pipeline check that keeps the Jenkins token on the host |
+| `src/app/tools/sentry.ts` | The read-only Sentry tool of an Executor Session: issue search by text, stack or event GUID, and one issue or event with its stack, crash GUID and tags; the token stays in the host |
 | `src/app/http.ts` | The `/orchestrator/api` routes: the same-origin check, request limits and one status per kind of failure; a Ticket page carries the local cases its verification package names |
 | `src/app/api.ts` | `Api`, every route with its parameters, query, body and response, and the filters of the lists; it imports only types, so the panel bundles it |
 | `src/app/views/text.ts` | The two forms of a view's text: `preview`, plain text on one line, and `markdown` without HTML; `plain` and `readable` |
@@ -524,6 +525,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/invariants.spec.ts` | I4 reprojection: relaunching a pending Assignment whose launch effect is gone, restarting a running one with no live worker, re-queuing delivery, the repair limit, and the trace on the ticket row |
 | `tests/session-recovery.spec.ts` | Session store recovery: bounded reopen retries, a blocked report that keeps the history when the store stays unreadable, and a shutdown that tolerates a failed flush |
 | `tests/tools.spec.ts` | The Sessions' tools: what `orchestrator_read` reads for each role, and the shapes and checks of the other main Session tools |
+| `tests/sentry.spec.ts` | The read-only Sentry tool: its environment configuration, the issue query it builds from text, stack and window, event-id and short-id resolution, the stack and crash facts it shapes, and its refusals |
 | `tests/runtime-concurrency.spec.ts` | Work that overlaps: Triggers during a pass, Tickets that change during deliveries and launches |
 | `tests/http.spec.ts` | The same-origin and loopback checks, the status of each kind of failure, the body limit, path parameters and queries |
 | `tests/settings.spec.ts` | Settings saves that race a model or account check, a Policy sync that a save outran, and the refusals of the pause, a sync and a block |
@@ -669,6 +671,7 @@ Each Executor has these application tools:
 | `orchestrator_ticket_link` | Record that its Ticket supersedes, blocks or relates to another Ticket, once per kind and target |
 | `orchestrator_trigger_handback` | Hand back a message once, with a reason carried by its candidate |
 | `orchestrator_editor` | Acquire, heartbeat and release the shared editor's lease, have the host run a build, restart or test, or read the schedule (docs/021) |
+| `sentry` | Search the team's Sentry for crash issues by text, stack or event GUID; read one issue or event with its stack, crash GUID and tags. Read-only, and refused while the deployment's Sentry variables are unset |
 
 A hand-back returns `queued: false` if another Ticket still owns the message, or this Ticket never owned it. For example, a bot message went to Eval independently.
 
