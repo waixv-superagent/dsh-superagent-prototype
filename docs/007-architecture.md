@@ -387,6 +387,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/provider-failover.ts` | `ProviderFailover` (docs/003): an exhausted account quota's failure codes, the same model on another provider, the provider a new Session avoids while its quota is used up, and one switch per provider in a failure chain |
 | `src/app/billing.ts` | The board's billing strip: replays each billed `assistant/message` into a minute-granular rolling hour, prices it from the route's published `/v1/models` list, persists the aggregate, proves the route that is charging now, and reads the gateway account's settled hour and period quota |
 | `src/app/role-models.ts` | Resolves the Eval and Executor models, and seeds a new Session with its role's model |
+| `src/app/model-routes.ts` | `routableModels`: the deployment catalog's routes, as the host compares them with the routes a person's message names |
 | `src/app/assessment.ts` | The MasterAssessor, the assessment schema and the window `orchestrator_eval` answers |
 | `src/app/card-images.ts` | `candidateImages`: the images a candidate's own message carries, downloaded for the card within the attachment service's per-message count and byte limits |
 | `src/app/execution-environment.ts` | The execution environment: its variables, a Ticket's values, the directory root and the lines of the prompt section, which `src/app/prompts.ts` fills into its template |
