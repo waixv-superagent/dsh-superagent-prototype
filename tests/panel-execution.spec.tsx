@@ -60,6 +60,19 @@ it('stops an open Ticket from its page after confirmation', async () => {
   expect(server.requests.some(request => request.path === 'tickets/t1/stop' && request.method === 'POST')).toBe(true)
 })
 
+it('sets a live Ticket level by hand from its own page, including dropping it into the idle pool', async () => {
+  await mount()
+  await click('修复回归')
+  const trigger = document.querySelector<HTMLElement>('.dt-page-head .dt-priority-trigger')!
+  expect(trigger.textContent).toBe(zh['priorityWord.P1'])
+  await click(trigger)
+  expect(all('.dt-priority-pop [role="menuitem"] .dt-idle-pop-level').map(level => level.textContent))
+    .toEqual(['P0 紧急', 'P1 主线', 'P2 闲时', 'P3 暂存'])
+  await click(all('.dt-priority-pop [role="menuitem"]')[2]!)
+  expect(server.requests.some(request => request.path === 'tickets/t1/priority' && request.method === 'POST'
+    && (request.body as { level?: string } | undefined)?.level === 'P2')).toBe(true)
+})
+
 it('shows a Ticket with its stage, its Mandate details with the Trigger and Decision behind it, its Threads, and the rest behind disclosures', async () => {
   await mount()
   await click(all('.dt-deck-card-title').find(button => button.textContent === '修复回归')!)

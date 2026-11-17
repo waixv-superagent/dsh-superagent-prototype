@@ -465,6 +465,13 @@ const TEXT = {
   poolParkedLevel: ['已设为 {level}；不会开跑。', 'Set to {level}; it does not start.'],
   poolLevelFailed: ['设置优先级失败：{reason}', 'Could not set the priority: {reason}'],
   poolMenuHint: ['P0/P1 会立即开跑；P2/P3 只改级别，不会开跑。', 'P0/P1 starts the work now; P2/P3 only changes the level.'],
+  /** The hand-set level control on every live Ticket: a lane card, a running row, the pool drawer and the Ticket page. */
+  priorityAdjust: ['调整优先级', 'Adjust priority'],
+  prioritySet: ['优先级已设为 {level}。', 'Priority set to {level}.'],
+  prioritySetIdle: ['优先级已设为 {level}；之后按闲时窗口安排。', 'Priority set to {level}; later turns wait for an idle window.'],
+  priorityToIdle: ['放入低优先闲时池', 'Move to the low-priority idle pool'],
+  priorityToParked: ['移入 P3 暂存', 'Park at P3'],
+  priorityMenuHint: ['P0/P1 提到注意力池；P2/P3 放入闲时池，只改级别。', 'P0/P1 lift into attention; P2/P3 move to the idle pool and change the level only.'],
   poolPromote: ['提到注意力池', 'Pick into attention'],
   poolPromoted: ['已提到注意力池，工单立即开跑。', 'Lifted into the attention pool; the ticket starts now.'],
   poolWaits: ['等闲时窗口', 'Waiting for idle'],

@@ -6,6 +6,7 @@ import { Button, DisclosureRow, Dot, Icon, Tag, type IconName } from './controls
 import { decisionMark, reportDot, ticketMark } from './marks.ts'
 import { PlanDiffView } from './diff.tsx'
 import { pipelineTrack, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackLabel, pipelineTrackState, type PipelineView } from './pipeline.ts'
+import { PriorityMenu } from './priority.tsx'
 import { usePanel } from './provider.tsx'
 import { STATE_TONE, reportHref } from './repro.tsx'
 import { settingsRoute } from './route.ts'
@@ -759,6 +760,7 @@ export function TicketPage({ id }: { id: string }) {
   })()
   return <>
     <PageHead title={data.title}>
+      {data.state === 'open' && <PriorityMenu ticket={data} onChanged={reload} />}
       {opening?.url && <ActionLink href={opening.url}>{t('openThread', { source: valueLabel(t, 'source', opening.source) })}</ActionLink>}
       {data.actions.retry && <ConfirmButton variant="outline" icon="refresh" label={t('retry')} title={t('retryTitle')}
         message={t('retryConfirm', { title: data.title })}
