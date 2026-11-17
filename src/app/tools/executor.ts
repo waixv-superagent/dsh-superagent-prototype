@@ -1,4 +1,4 @@
-/** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, checking a delivered change's pipeline, approving a subagent model or agent team, and reporting status. */
+/** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, checking a delivered change's pipeline, searching the team's Sentry, approving a subagent model or agent team, and reporting status. */
 import { z } from 'zod'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { LINKED_RELATION_KINDS, analysisRunning, liveTicket, missingVerifyLabels, modelRoute, PLAN_DIFF_LIMITS, TEAM_ROLE_CHARS, TEAM_ROLES_MAX,
@@ -15,6 +15,7 @@ import type { Store } from '../store.ts'
 import { reportRelay, threadFollowedNotice } from '../notices.ts'
 import type { Sessions } from '../sessions.ts'
 import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
+import { sentryTool } from './sentry.ts'
 import { EDITOR_JOB_KINDS, EDITOR_PURPOSES, MAX_LEASE_MS, ordered } from '../editor-schedule.ts'
 import type { EditorCapture } from '../editor-capture.ts'
 import type { EditorScheduler } from '../editor-scheduler.ts'
@@ -99,6 +100,7 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
   return [
     readTool('Read one page of a resource of this ticket that the resource parameter lists. Follow next_offset, and next_resource where a page names one.',
       true, (resource, offset, limit, signal) => readResource(host.resources, resource, offset, limit, ticketId, signal)),
+    sentryTool(),
     tool({
       name: 'orchestrator_ack',
       description: 'Acknowledge one original human request before substantial work, as the replies section says; it posts as a reply to that message.',

@@ -68,7 +68,9 @@ interface Skill { name: string; description: string; content: string }
 // 57,639, so the budget grows to 57,800.
 // The plan gate's conversation shortcut adds the `decided` option with its rule and one worker prompt line (docs/012); the
 // combined worker surface measures about 58,600, so the budget grows to 58,700.
-const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 58_700 }
+// The Sentry search tool (docs/032) adds its description, the search query/stack/GUID fields and the issue/event reads; the
+// combined worker surface measures 61,120, so the budget grows to 61,200.
+const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 61_200 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'
@@ -393,7 +395,7 @@ it('collects both roles\' tools, prompts, skills and inputs', () => {
   expect([...toolsOf('worker').keys()].sort()).toEqual(['orchestrator_ack', 'orchestrator_editor', 'orchestrator_phase',
     'orchestrator_pipeline', 'orchestrator_pipeline_check', 'orchestrator_pipeline_rerun', 'orchestrator_plan',
     'orchestrator_read', 'orchestrator_redispatch', 'orchestrator_report', 'orchestrator_thread_follow',
-    'orchestrator_thread_unrelated', 'orchestrator_ticket_link', 'orchestrator_trigger_handback'])
+    'orchestrator_thread_unrelated', 'orchestrator_ticket_link', 'orchestrator_trigger_handback', 'sentry'])
   expect([...toolsOf('orchestrator').keys()]).toEqual(expect.arrayContaining(['orchestrator_route', 'orchestrator_eval_decide', 'orchestrator_reply']))
   // The one routing tool takes the place of four.
   for (const name of ['orchestrator_ticket_accept', 'orchestrator_ticket_attach', 'orchestrator_ticket_stop', 'orchestrator_trigger_ignore']) {
@@ -454,3 +456,5 @@ it('lists in the main Session\'s Policy section exactly the enabled rules, as th
   // The drive disabled the visual rule and changed the copy rule's instruction.
   expect(listed).toEqual([expect.stringMatching(/^- .* \(copy\): .*Keep the wording short\.$/)])
 })
+
+
