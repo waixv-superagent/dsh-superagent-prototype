@@ -4,8 +4,9 @@
  * person asks. Renders outside the panel, so the badge carries its own stylesheet and the dialog mounts the panel provider only
  * while open.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { UpgradeRun, UpgradeStep, UpgradeView } from '../app/upgrade.ts'
+import type { AppUpgradeRun, AppUpgradeView } from '../app/app-upgrade.ts'
 import { caller, type ApiMessages } from './api.ts'
 import { Button, Icon, Modal } from './controls.tsx'
 import { PanelProvider, useAction, usePanel } from './provider.tsx'
@@ -18,6 +19,19 @@ const DIALOG_POLL_MS = 2_000
 /** The prepare and restart phases in progress; a prepared build waits for a person and is not active. */
 const ACTIVE: readonly UpgradeRun['state'][] = ['preparing', 'waiting', 'switching']
 const short = (sha: string | null | undefined) => sha ? sha.slice(0, 7) : '—'
+
+/** Whether the badge shows for the desktop app track: a build is available, running, or needs a person. */
+export function appBadgeShown(app: AppUpgradeView | undefined): boolean {
+  if (!app?.enabled) return false
+  const state = app.run?.state
+  return app.available || state === 'preparing' || state === 'failed' || state === 'interrupted'
+}
+
+/** The badge's tone when only the desktop app track has news. */
+function appBadgeTone(app: AppUpgradeView): 'update' | 'running' | 'problem' {
+  const state = app.run?.state
+  return state === 'preparing' ? 'running' : state === 'failed' || state === 'interrupted' ? 'problem' : 'update'
+}
 
 /** Whether the badge shows: an update is available, one runs, one is prepared, or the last one needs a person's eye. */
 export function badgeShown(view: UpgradeView | undefined): boolean {
@@ -40,6 +54,7 @@ const plainMessages = (t: T): ApiMessages => ({ offline: t('offline'), notRunnin
 /** The footer action: a small dot-and-label button that opens the update dialog. */
 export function UpgradeBadge({ t, wide }: { t: T; wide: boolean }) {
   const [view, setView] = useState<UpgradeView>()
+  const [app, setApp] = useState<AppUpgradeView>()
   const [open, setOpen] = useState(false)
   useEffect(() => {
     const call = caller(() => plainMessages(t))
@@ -47,13 +62,15 @@ export function UpgradeBadge({ t, wide }: { t: T; wide: boolean }) {
     let timer: ReturnType<typeof setTimeout> | undefined
     const load = () => {
       call('GET upgrade').then(next => { if (active) setView(next) }, () => { /* Restarting or an older host: keep the last view. */ })
+      call('GET app-upgrade').then(next => { if (active) setApp(next) }, () => { /* An older host has no desktop app track. */ })
         .finally(() => { if (active) timer = setTimeout(load, open ? DIALOG_POLL_MS : BADGE_POLL_MS) })
     }
     load()
     return () => { active = false; clearTimeout(timer) }
   }, [t, open])
-  if (!badgeShown(view) && !open) return null
-  const tone = view ? badgeTone(view) : 'update'
+  const pluginShown = badgeShown(view)
+  if (!pluginShown && !appBadgeShown(app) && !open) return null
+  const tone = pluginShown && view ? badgeTone(view) : app ? appBadgeTone(app) : 'update'
   const label = tone === 'running' ? t('upgradeBadgeRunning') : tone === 'problem' ? t('upgradeBadgeProblem')
     : tone === 'ready' ? t('upgradeBadgeReady') : t('upgradeBadge')
   return <>
@@ -77,6 +94,25 @@ export function UpgradeDialog({ view, onClose, onView }: { view: UpgradeView | u
   const prepare = useAction(async () => { await call('POST upgrade/prepare') }, { reload })
   const apply = useAction(async (force: boolean) => { await call('POST upgrade/apply', { body: { force } }) }, { reload })
   const cancel = useAction(async () => { await call('POST upgrade/cancel') }, { reload })
+  const [app, setApp] = useState<AppUpgradeView>()
+  const appRef = useRef<AppUpgradeView>()
+  const buildApp = useAction(async () => { await call('POST app-upgrade/build') }, { reload: async () => { setApp(await call('GET app-upgrade')) } })
+  useEffect(() => {
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const load = (): void => {
+      void call('GET app-upgrade').then((next) => {
+        if (!active) return
+        appRef.current = next
+        setApp(next)
+      }, () => { /* An older host has no app track; the section stays hidden. */ })
+        .finally(() => {
+          if (active) timer = setTimeout(load, appRef.current?.run?.state === 'preparing' ? 2_000 : 15_000)
+        })
+    }
+    load()
+    return () => { active = false; clearTimeout(timer) }
+  }, [call])
   const run = view?.run ?? null
   const active = !!run && ACTIVE.includes(run.state)
   const prepared = view?.prepared ?? null
@@ -116,6 +152,7 @@ export function UpgradeDialog({ view, onClose, onView }: { view: UpgradeView | u
       </ul>}
       {!view.available && !run && <p className="dt-hint">{t('upgradeCurrent')}</p>}
       {run && <RunSteps run={run} />}
+      <AppUpgradeSection view={app} building={buildApp.busy} onBuild={() => { void buildApp.run() }} />
     </div>}
   </Modal>
 }
@@ -134,6 +171,62 @@ function RunSteps({ run }: { run: UpgradeRun }) {
         <Icon name={step.state === 'done' ? 'check' : step.state === 'failed' ? 'alert' : step.state === 'running' ? 'running' : 'minus'} size={14} />
         <span>{t(`upgradeStep.${step.name}` as never)}</span>
         {step.name === 'idle' && step.state === 'running' && step.detail && <span className="dt-hint">{t('upgradeIdleWaiting', { count: step.detail })}</span>}
+      </li>)}
+    </ol>
+  </div>
+}
+
+/** The desktop app track below the plugin update: fork/official versions, the build button, its steps and installer. */
+function AppUpgradeSection({ view, building, onBuild }: { view: AppUpgradeView | undefined; building: boolean; onBuild: () => void }) {
+  const { t } = usePanel()
+  if (!view) return null
+  const blocked = view.blocked
+  const blockedText = blocked === 'dirty' ? t('appUpgradeBlockedDirty')
+    : blocked === 'out-of-sync' ? t('appUpgradeBlockedOutOfSync', { sha: short(view.fork.sha) })
+    : blocked === 'unchecked' ? t('appUpgradeBlockedUnchecked')
+    : blocked === 'current' ? t('appUpgradeBlockedCurrent') : undefined
+  const running = view.run?.state === 'preparing'
+  const ready = view.ready
+  return <section className="dt-app-upgrade">
+    <h3>{t('appUpgradeTitle')}</h3>
+    {!view.enabled ? <p className="dt-hint">{t('appUpgradeDisabled')}</p> : <>
+      <p className="dt-upgrade-versions">
+        <span>{t('appUpgradeInstalled')} <code className="dt-mono">{short(view.installed.commit)}</code></span>
+        <span>{t('appUpgradeFork')} <code className="dt-mono">{view.fork.ref}@{short(view.fork.sha)}</code></span>
+        <span>{t('appUpgradeOfficial')} <code className="dt-mono">{view.official.ref}@{short(view.official.sha)}</code></span>
+      </p>
+      {view.fork.error && <p className="dt-error" role="alert">{t('upgradeFetchFailed')}: {view.fork.error}</p>}
+      {!view.installed.commit && <p className="dt-hint">{t('upgradeUnknownInstalled')}</p>}
+      {view.officialAhead.count !== null && view.officialAhead.count > 0
+        && <p className="dt-hint">{t('appUpgradeOfficialAhead', { count: view.officialAhead.count })}</p>}
+      {view.available ? <p className="dt-hint">{t('appUpgradeAvailable')}</p> : <p className="dt-hint">{t('appUpgradeCurrent')}</p>}
+      {view.available && (blockedText !== undefined
+        ? <p className="dt-hint">{blockedText}</p>
+        : <Button variant="primary" disabled={building || running} onClick={onBuild}>{ready ? t('appUpgradeRebuild') : t('appUpgradeBuild')}</Button>)}
+      {running && <p className="dt-hint">{t('appUpgradeRunning')}</p>}
+      {view.run && <AppRunSteps run={view.run} />}
+      {ready && <>
+        <p className="dt-upgrade-outcome">{t('appUpgradeReady')}</p>
+        <p><code className="dt-mono">{ready.artifact}</code></p>
+        <p className="dt-hint">{t('appUpgradeInstallHint')}</p>
+      </>}
+    </>}
+  </section>
+}
+
+/** The build steps and outcome of one desktop app build. */
+function AppRunSteps({ run }: { run: AppUpgradeRun }) {
+  const { t } = usePanel()
+  const outcome = run.state === 'done' ? t('appUpgradeDone') : run.state === 'failed' ? t('appUpgradeFailed')
+    : run.state === 'interrupted' ? t('appUpgradeInterrupted') : t('appUpgradeRunning')
+  return <div className="dt-upgrade-run" data-state={run.state === 'interrupted' ? 'failed' : run.state}>
+    <p className="dt-upgrade-outcome" role="status">{outcome}</p>
+    {run.error && <pre className="dt-upgrade-error">{run.error}</pre>}
+    <ol className="dt-upgrade-steps">
+      {run.steps.map(step => <li key={step.name} data-state={step.state}>
+        <Icon name={step.state === 'done' ? 'check' : step.state === 'failed' ? 'alert' : 'running'} size={14} />
+        <span>{t(`appUpgradeStep.${step.name}` as never)}</span>
+        {step.detail && <span className="dt-hint">{step.detail}</span>}
       </li>)}
     </ol>
   </div>

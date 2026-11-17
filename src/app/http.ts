@@ -38,6 +38,7 @@ import type { Outbox } from './outbox.ts'
 import type { Sessions } from './sessions.ts'
 import type { Watchdog } from './watchdog.ts'
 import { UpgradeRefused, type Upgrade } from './upgrade.ts'
+import { AppUpgradeRefused, type AppUpgrade } from './app-upgrade.ts'
 import type { StallWatch } from './stall-watch.ts'
 import type { Store } from './store.ts'
 import type { TextCache } from './cache.ts'
@@ -84,6 +85,8 @@ export interface HttpHost {
   readonly billing?: Pick<Billing, 'view'>
   /** The one-click update the sidebar badge offers; absent on a host built before it. */
   readonly upgrade?: Pick<Upgrade, 'view' | 'check' | 'prepare' | 'apply' | 'cancel'>
+  /** The desktop app track: fork/official checks and the local installer build; absent on an older host. */
+  readonly appUpgrade?: Pick<AppUpgrade, 'view' | 'check' | 'build'>
   readonly health: Record<string, Health>
   readonly machine: Machine
   readonly masterId: string
@@ -139,6 +142,7 @@ function failure(error: unknown): [number, Record<string, unknown>] {
   if (error instanceof SetupError) return [400, { error: error.message, setup: error.problem }]
   if (error instanceof RouteError) return [error.status, { error: error.message }]
   if (error instanceof UpgradeRefused) return [409, { error: error.message, upgrade: error.code }]
+  if (error instanceof AppUpgradeRefused) return [409, { error: error.message, appUpgrade: error.code }]
   if (error instanceof UserError) return [error.missing ? 404 : 400, { error: error.message, code: error.code, values: error.values }]
   if (error instanceof SettingsConflict || error instanceof PromptConflict) return [409, { error: error.message }]
   return [500, { error: error instanceof Error ? error.message : String(error) }]
@@ -290,6 +294,7 @@ function routes(runtime: HttpHost): Routes {
   const executor = () => ({ ...executorLoad(store, runtime.executor.activeCount()),
     maxWorkers: store.settings().executor.maxWorkers })
   const upgrade = () => { if (!runtime.upgrade) throw new RouteError(404, 'This host has no update'); return runtime.upgrade }
+  const appUpgrade = () => { if (!runtime.appUpgrade) throw new RouteError(404, 'This host has no desktop app update'); return runtime.appUpgrade }
   const promptBody = (input: { body: (maxBytes?: number) => Promise<unknown> }) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096)
   return {
     'GET state': () => stateView(runtime),
@@ -535,6 +540,9 @@ function routes(runtime: HttpHost): Routes {
     'POST upgrade/prepare': () => upgrade().prepare(),
     'POST upgrade/apply': async ({ body }) => upgrade().apply(UpgradeRequest.parse(await body(1_024)).force ?? false),
     'POST upgrade/cancel': async () => ({ cancelled: await upgrade().cancel() }),
+    'GET app-upgrade': () => appUpgrade().view(),
+    'POST app-upgrade/check': async () => { await appUpgrade().check(); return appUpgrade().view() },
+    'POST app-upgrade/build': () => appUpgrade().build(),
     'GET models': () => runtime.models(),
     'GET prompts': ({ query }) => { const { revision, offset } = PromptsQuery.parse(query); return promptsView(runtime, revision, offset) },
     'PUT prompts': async input => {

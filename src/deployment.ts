@@ -32,7 +32,16 @@ export const Config = s.object({
     pnpm: s.string().default('pnpm').description('The pnpm command used to install, check and build.'),
     intervalMin: s.number().min(1).max(1440).step(1).default(10).description('Minutes between update checks.'),
     idleTimeoutMin: s.number().min(1).max(240).step(1).default(30).description('Minutes an update waits for running workers before it gives up.'),
-  }).default({} as never).description('One-click update from the fork: check, build in a separate worktree, wait for running workers, switch and roll back on failure.'),
+    appCheckout: s.string().default('').description('Absolute path of the DSH fork checkout whose desktop app this host can build; empty turns app updates off.'),
+    appRemote: s.string().pattern(/^[A-Za-z0-9_.\/-]+$/).default('fork').description('The fork remote of the DSH checkout to check.'),
+    appBranch: s.string().pattern(/^[A-Za-z0-9_.\/-]+$/).default('master').description('The fork branch whose desktop app is built.'),
+    appOfficialRemote: s.string().pattern(/^[A-Za-z0-9_.\/-]+$/).default('origin').description('The official upstream remote of the DSH checkout, shown for comparison.'),
+    appOfficialBranch: s.string().pattern(/^[A-Za-z0-9_.\/-]+$/).default('master').description('The official upstream branch shown for comparison.'),
+    appBuildScript: s.string().default('package:desktop:win:x64:unsigned').description('The workflow-run script in the DSH checkout that builds an installer.'),
+    appArtifacts: s.string().default('').description('Directory holding the built installer; empty uses the desktop unsigned-artifacts directory.'),
+    appPnpm: s.string().default('').description('The pnpm command used to build the app; empty uses the upgrade pnpm.'),
+    appIntervalMin: s.number().min(1).max(1440).step(1).default(60).description('Minutes between desktop app update checks.'),
+  }).default({} as never).description('One-click update from the fork, plus the local desktop app build from the DSH fork.'),
 })
 export type DeploymentConfig = ReturnType<typeof Config>
 /** The machine's update settings; `checkout` empty means the panel neither checks for nor offers updates. */
@@ -46,9 +55,21 @@ export interface UpgradeConfig {
   pnpm: string
   intervalMin: number
   idleTimeoutMin: number
+  /** Empty turns desktop app updates off. */
+  appCheckout: string
+  appRemote: string
+  appBranch: string
+  appOfficialRemote: string
+  appOfficialBranch: string
+  appBuildScript: string
+  appArtifacts: string
+  appPnpm: string
+  appIntervalMin: number
 }
 export const NO_UPGRADE: UpgradeConfig = { checkout: '', remote: 'origin', branch: 'main', install: '', startCommand: '', holdFile: '',
-  pnpm: 'pnpm', intervalMin: 10, idleTimeoutMin: 30 }
+  pnpm: 'pnpm', intervalMin: 10, idleTimeoutMin: 30, appCheckout: '', appRemote: 'fork', appBranch: 'master',
+  appOfficialRemote: 'origin', appOfficialBranch: 'master', appBuildScript: 'package:desktop:win:x64:unsigned',
+  appArtifacts: '', appPnpm: '', appIntervalMin: 60 }
 export interface Machine {
   stateDir: string
   promptMaxChars: Volatile<number>
@@ -72,6 +93,9 @@ export function machineOf(config: DeploymentConfig): Machine {
   const upgrade = { ...NO_UPGRADE, ...(config.upgrade ?? {}) } as UpgradeConfig
   for (const key of ['checkout', 'install', 'holdFile'] as const) {
     if (upgrade[key] && !isAbsolute(upgrade[key])) throw new Error(`dsh-superagent configuration upgrade.${key} must be an absolute path`)
+  }
+  if (upgrade.appCheckout && !isAbsolute(upgrade.appCheckout)) {
+    throw new Error('dsh-superagent configuration upgrade.appCheckout must be an absolute path')
   }
   return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, pipelineSkill, upgrade }
 }

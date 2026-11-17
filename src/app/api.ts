@@ -17,6 +17,7 @@ import type { ReproPageView } from './views/repro.ts'
 import type { BuildPageView } from './views/build.ts'
 import type { TicketListView, TicketSearchView } from './views/tickets.ts'
 import type { UpgradeRun, UpgradeView } from './upgrade.ts'
+import type { AppUpgradeRun, AppUpgradeView } from './app-upgrade.ts'
 
 export const TICKET_FILTERS = ['open', 'person', 'verify', 'unverified', 'working', 'idle', 'pipeline', 'ended'] as const
 export const THREAD_FILTERS = ['subscribed', 'evaluating', 'recent', 'all'] as const
@@ -112,6 +113,12 @@ export interface Api {
   'POST upgrade/apply': { body: { force?: boolean }; response: UpgradeRun }
   /** Give up an update that has not reached the switch. */
   'POST upgrade/cancel': { response: { cancelled: boolean } }
+  /** The desktop app track: installed build, fork and official branches, the last build, and its installer. */
+  'GET app-upgrade': { response: AppUpgradeView }
+  /** Fetch the fork and official upstream now. */
+  'POST app-upgrade/check': { response: AppUpgradeView }
+  /** Build the checked fork commit into a new unsigned installer; the panel polls GET app-upgrade for the steps. */
+  'POST app-upgrade/build': { response: AppUpgradeRun }
   'GET models': { response: ModelCatalog }
   'GET prompts': { query?: { revision?: number; offset?: number }; response: PromptsView }
   'PUT prompts': { body: { config: PromptConfig; baseRevision: number }; response: { revision: number; context_delivery: Delivery } }

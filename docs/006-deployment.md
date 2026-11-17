@@ -360,6 +360,12 @@ The switch replaces only the plugin's own files and keeps the profile's `node_mo
 
 If an external watchdog restarts the service while it is down, point `upgrade.holdFile` at the file that holds the watchdog off. The switch creates that file for the duration of the update and removes it afterwards, unless it already existed.
 
+### Desktop app build from the DSH fork
+
+The same update dialog has a **桌面 App** (Desktop app) track for the standalone Desktop application built from a DSH fork checkout. Set `upgrade.appCheckout` to that checkout. The other fields default to `appRemote`/`appBranch` `fork`/`master`, `appOfficialRemote`/`appOfficialBranch` `origin`/`master`, `appBuildScript` `package:desktop:win:x64:unsigned`, an empty `appArtifacts` (the unsigned build's artifact directory), an empty `appPnpm` (the `upgrade.pnpm` command), and `appIntervalMin` 60. The panel shows the commit the installed app recorded in its packaged manifest (`dshBuildCommit`), the fork head with the commits the installed build lacks, and how far the official branch is ahead of the fork.
+
+**构建新安装包** (Build installer) runs `appBuildScript` in the checkout with that pnpm. It requires the checkout to be clean and exactly at the checked fork commit: it never pulls, switches branches or touches the running application. The build runs in the host process and can take a long time; its steps and the resulting installer path appear in the dialog and stay in `<stateDir>/app-upgrade/status.json`. A host restart during the build marks it interrupted. When the installer is ready, quit the App (the quit dialog can also stop the Host), run the installer, then use the launch window to connect to the still-running Host or start a new one. The unsigned installer runs like the initial build.
+
 ### Agent presets
 
 The worker and router presets move shell commands to the background after 5 seconds. A Session cannot load without its preset. Keep the `dsh-superagent-worker` and `dsh-superagent-router` rows in `cordis.patch.yml` while their Sessions are in use; otherwise resume fails with `agent-preset/not-found`.
