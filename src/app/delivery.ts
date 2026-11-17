@@ -1,6 +1,7 @@
 /** Idempotent message delivery to DSH agents across Session restarts. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { freezeMessage, MessageId, type ContextFormed, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
@@ -64,7 +65,7 @@ export class AgentDelivery {
   }
   /** Delivers once to the selected inbox, or injects into history without waking the agent, and flushes Session persistence before acknowledging the producer. */
   async send(agent: Agent, requestId: string, text: string, mode: 'queue' | 'steer' | { inject: string }, signal: AbortSignal, authorize?: () => void,
-    accepted?: () => void): Promise<void> {
+    accepted?: () => void, images: readonly ImageAttachmentRef[] = []): Promise<void> {
     signal.throwIfAborted()
     const seen = await this.history(agent)
     signal.throwIfAborted()
@@ -75,7 +76,9 @@ export class AgentDelivery {
     if (!seen.ids.has(id) && !pending) {
       const source = typeof mode === 'object' ? { kind: 'dsh-superagent' as const, form: 'notice' as const, summary: mode.inject }
         : { kind: 'dsh-superagent' as const, form: 'relay' as const }
-      const message = freezeMessage({ id, role: 'user' as const, content: [{ type: 'text' as const, text }], source })
+      // Images ride the message as content blocks, so the Session's model receives them natively with the text.
+      const content = [{ type: 'text' as const, text }, ...images.map(attachment => ({ type: 'image' as const, attachment }))]
+      const message = freezeMessage({ id, role: 'user' as const, content, source })
       if (typeof mode === 'object') { agent.inject(message); seen.ids.add(id) }
       else if (mode === 'steer') agent.steer(message)
       else agent.followup(message)

@@ -1,6 +1,7 @@
 /** Main-session assessor per-eval state and context loading. */
 import { expect, it, vi } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { AssessmentSchema, EvalReadSchema, MasterAssessor, type AssessorHost } from '../src/app/assessment.ts'
 import { mainAdmissionPolicy } from '../src/app/context.ts'
 import { Engine, MemoryRepositories, type Executor, type Policy, type Trigger } from '../src/core/index.ts'
@@ -9,6 +10,7 @@ import { SettingsSchema } from '../src/policy.ts'
 import { testDeployment } from './fixtures/deployment.ts'
 import { deferred } from './fixtures/async.ts'
 import { githubKind } from '../src/sources/github.ts'
+import type { TriggerContext } from '../src/sources/kind.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 
 /** Assessor fixture backed by in-memory repositories and fake GitHub Issue and file reads. */
@@ -36,10 +38,14 @@ function setup(strength: 'explicit' | 'inferred' = 'inferred', bodies = Array.fr
   const sources = new SourceRegistry(() => SettingsSchema.parse({}))
   sources.register(githubKind)
   let engine!: Engine
+  const handlers: Partial<{ assessment: (payload: { triggerId: string }, evalId: string) => Promise<void> }> = {}
+  const delivered: { text: string; images?: readonly ImageAttachmentRef[] }[] = []
   const host: AssessorHost = {
     get engine() { return engine }, commands, deployment: testDeployment(), settings: () => SettingsSchema.parse({}),
     threadContext: threadContext ?? (trigger => sources.threadContext(trigger)),
-    effects: { enqueue: () => {}, handle: () => {} }, paused: () => false, deliver: async () => {}, candidateCard: async candidate => ({ eval_id: candidate.evalId }),
+    effects: { enqueue: () => {}, handle: (kind, run) => { if (kind === 'assessment') handlers.assessment = run as never } },
+    paused: () => false, agent: () => undefined, deliver: async (_id, text, images) => { delivered.push({ text, images }) },
+    candidateCard: async candidate => ({ eval_id: candidate.evalId }),
   }
   const assessor = new MasterAssessor(host)
   const policy: Policy = { version: 'v1', paused: false, evalTimeoutMs: 600_000, gate: () => ({ admissible: true, strength, basis: { via: 'followup' } }),
@@ -57,7 +63,7 @@ function setup(strength: 'explicit' | 'inferred' = 'inferred', bodies = Array.fr
   // Per-Eval state retained by the assessor and released when the Eval ends.
   const kept = assessor as unknown as { evals: Map<string, unknown> }
   const size = () => kept.evals.size
-  return { repo, engine, assessor, tools, size, gate }
+  return { repo, engine, assessor, tools, size, gate, host, handlers, delivered }
 }
 const issue = (n: number): Trigger => ({ id: `issue-${n}`, source: 'github', threads: [{ source: 'github', id: String(n) }], actor: { source: 'github', id: 'bob' }, human: true,
   at: new Date(Date.UTC(2026, 8, 9, 0, 0, n)).toISOString(), text: `issue ${n}`, url: `https://github.com/acme/widgets/issues/${n}`, meta: { number: n } })
@@ -120,6 +126,27 @@ it('routes an explicit candidate instead of assessing it: each eval tool names t
   const direction = { implementation_requested: false, target_basis: 'undetermined', requires_design_decision: false, evidence: 'chatter' }
   const decision = { trigger_id: 'issue-1', decision: 'ignore', rule_assessments: [], direction, title: 't', scope: 's', reason: 'r' }
   await expect(s.tools.orchestrator_eval_decide!(decision, signal)).rejects.toThrow(routed)
+})
+
+it('delivers the card with its own message images attached, and names any image it cannot read', async () => {
+  const image = { attachmentId: 'image-id', mediaType: 'image/png' as const, bytes: 4, width: 1, height: 1 }
+  const context = (read: () => Promise<unknown>): TriggerContext => ({ messageId: 'm0', read: async () => ({ messages: [], body: {} }),
+    images: () => ['img_a', 'img_b'], image: vi.fn(read) as unknown as TriggerContext['image'] })
+  const s = setup('inferred', undefined, () => context(async () => ({ image })))
+  s.host.agent = () => ({ ctx: { get: () => ({ imageLimits: { maxImageBytes: 100, maxImagesPerMessage: 4, maxMessageImageBytes: 100 } }) } }) as unknown as Agent
+  s.engine.receive(issue(1)); s.engine.evaluateDue()
+  const evalId = s.repo.threads.get('github:1')!.evaluating!.id
+  await s.handlers.assessment!({ triggerId: 'issue-1' }, evalId)
+  expect(s.delivered).toHaveLength(1)
+  expect(JSON.parse(s.delivered[0]!.text)).toMatchObject({ kind: 'candidate', eval_id: evalId })
+  expect(s.delivered[0]!.images).toEqual([image, image])
+  // An unreadable image is a line in the card, not a failed delivery: the main Session still gets the message.
+  const failed = setup('inferred', undefined, () => context(async () => { throw new Error('Resource permission denied') }))
+  failed.host.agent = () => ({ ctx: { get: () => ({ imageLimits: { maxImageBytes: 100, maxImagesPerMessage: 4, maxMessageImageBytes: 100 } }) } }) as unknown as Agent
+  failed.engine.receive(issue(2)); failed.engine.evaluateDue()
+  await failed.handlers.assessment!({ triggerId: 'issue-2' }, failed.repo.threads.get('github:2')!.evaluating!.id)
+  expect(JSON.parse(failed.delivered[0]!.text)).toMatchObject({ images_unreadable: ['img_a: Resource permission denied', 'img_b: Resource permission denied'] })
+  expect(failed.delivered[0]!.images).toEqual([])
 })
 
 it('asks the assessment only for decisions its tool accepts, which no longer include reopen or stop', () => {

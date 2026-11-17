@@ -1,5 +1,6 @@
 /** Proactive candidate assessment for the main Session: relays candidate cards, serves bounded context reads, and records outcomes. */
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { z } from 'zod'
 import { reasonText, threadKey, type Assessor, type AssessmentOutcome, type Candidate, type EngineForMainSession,
   type Trigger } from '../core/index.ts'
@@ -11,6 +12,7 @@ import { admissionContext } from '../sources/admission-context.ts'
 import { readRepositoryPath } from '../sources/github-read.ts'
 import type { TriggerContext } from '../sources/kind.ts'
 import { relatedTickets } from './cards.ts'
+import { candidateImages } from './card-images.ts'
 import { textPage } from './context.ts'
 import { AcknowledgementSchema } from './tools/tool.ts'
 import type { Effects } from './effects.ts'
@@ -78,8 +80,10 @@ export interface AssessorHost {
   paused(): boolean
   /** Thread context reader for `trigger`'s Source, or `undefined` when the Source has none. */
   threadContext(trigger: Trigger): TriggerContext | undefined
-  /** Delivers a candidate card to the main Session once per request ID, resolving after the Session receives it. */
-  deliver(requestId: string, text: string): Promise<void>
+  /** The live main Session, which receives a card's images as attachments; `undefined` before it is ensured. */
+  agent(): Agent | undefined
+  /** Delivers a candidate card to the main Session once per request ID, with the images its own message carries. */
+  deliver(requestId: string, text: string, images?: readonly ImageAttachmentRef[]): Promise<void>
   candidateCard(candidate: Candidate): Promise<Record<string, unknown>>
 }
 
@@ -103,7 +107,7 @@ export type EvalRead = z.infer<typeof EvalReadSchema>
 
 /**
  * Implements the `Engine` `Assessor` port for proactive candidate evaluation in the main Session.
- * Relays each evaluation's candidate card to the main Session through the durable `assessment` effect, serves bounded `TriggerContext` and repository reads while the evaluation runs, and converts the main Session's assessment into an `AssessmentOutcome` for `Engine.decide`.
+ * Relays each evaluation's candidate card, with the images its own message carries, to the main Session through the durable `assessment` effect; serves bounded `TriggerContext` and repository reads while the evaluation runs; and converts the main Session's assessment into an `AssessmentOutcome` for `Engine.decide`.
  * Depends on `SourceRegistry` (via `AssessorHost`) for source-specific thread context and on `Sessions` for deduplicated candidate delivery; the main Session's `orchestrator_eval*` tools call `context`, `read`, and `decide`.
  */
 export class MasterAssessor implements Assessor {
@@ -116,9 +120,30 @@ export class MasterAssessor implements Assessor {
     host.effects.handle('assessment', async ({ triggerId }, evalId) => {
       const candidate = this.host.engine.candidate(triggerId)
       if (candidate?.evalId !== evalId) return
-      await this.host.deliver(`candidate:${evalId}`, JSON.stringify({ kind: 'candidate', ...await this.host.candidateCard(candidate) }))
+      const card: Record<string, unknown> = { kind: 'candidate', ...await this.host.candidateCard(candidate) }
+      const { images, unreadable } = await this.cardImages(candidate)
+      if (unreadable.length) card.images_unreadable = unreadable
+      await this.host.deliver(`candidate:${evalId}`, JSON.stringify(card), images)
       this.host.engine.candidateDelivered(evalId)
     }, { limit: () => host.paused() ? 0 : 4 })
+  }
+  /**
+   * Reads the images of the candidate's own message, the one its card renders first, so the main Session sees a
+   * screenshot natively instead of only its key. Bounded by the card timeout; a failure there never blocks the card.
+   */
+  private async cardImages(candidate: Candidate) {
+    const trigger = candidate.triggers.at(-1)!
+    const source = this.host.threadContext(trigger)
+    const agent = this.host.agent()
+    if (!source || !agent) return { images: [], unreadable: [] }
+    const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(this.host.deployment.admissionContextTimeoutMs.get())])
+    try {
+      return await candidateImages({ agent, source, trigger, commands: this.host.commands.withSignal(signal),
+        stateDir: this.host.deployment.stateDir, signal })
+    } catch (error) {
+      this.controller.signal.throwIfAborted()
+      return { images: [], unreadable: [`the card's images could not be read: ${String(error).slice(0, 300)}`] }
+    }
   }
   /** Enqueues an `assessment` effect to deliver `candidate`'s card to the main Session. */
   request(candidate: Candidate): void { this.host.effects.enqueue('assessment', candidate.evalId, { triggerId: candidate.triggers[0]!.id }) }
