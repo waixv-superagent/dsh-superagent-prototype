@@ -4,7 +4,7 @@ import { usePoll, type BillingView, type EditorRow, type Problem, type RecentAct
 import type { PriorityLevel } from '../core/priority.ts'
 import { verifyLines } from '../core/verification.ts'
 import { Button, Icon, Input, Tag } from './controls.tsx'
-import { ticketMark } from './marks.ts'
+import { activeAgo, ticketMark } from './marks.ts'
 import { pipelineTrack, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackState } from './pipeline.ts'
 import { useAction, usePanel, usePanelData } from './provider.tsx'
 import { KindTag, ThreadChip } from './rows.tsx'
@@ -213,15 +213,6 @@ function staleLabel(t: T, at: string): string {
   const hours = Math.round(minutes / 60)
   if (hours < 48) return t('boardNoUpdateHours', { hours })
   return t('boardNoUpdateDays', { days: Math.round(hours / 24) })
-}
-/** How long ago a Ticket's newest activity was, in the largest unit that still reads precisely. */
-function activeAgo(t: T, at: string): string {
-  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(at)) / 60_000))
-  if (minutes < 1) return t('boardActiveNow')
-  if (minutes < 60) return t('boardActiveMinutes', { minutes })
-  const hours = Math.round(minutes / 60)
-  if (hours < 48) return t('boardActiveHours', { hours })
-  return t('boardActiveDays', { days: Math.round(hours / 24) })
 }
 /**
  * The band above the lanes: the open Tickets whose newest real event is the most recent, whatever stage each one is in,

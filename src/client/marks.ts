@@ -30,6 +30,18 @@ export function ticketMark(t: T, ticket: TicketStage & Pick<TicketSummary, 'ende
     default: return { label: t('stage.idle'), tone: 'neutral', dot: 'idle', icon: 'clock' }
   }
 }
+/**
+ * How long ago a Ticket's newest activity was, in the largest unit that still reads precisely. Shared by the board's
+ * 最近活跃 band and the always-visible active-Tickets dock so the two never word the same age differently.
+ */
+export function activeAgo(t: T, at: string): string {
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(at)) / 60_000))
+  if (minutes < 1) return t('boardActiveNow')
+  if (minutes < 60) return t('boardActiveMinutes', { minutes })
+  const hours = Math.round(minutes / 60)
+  if (hours < 48) return t('boardActiveHours', { hours })
+  return t('boardActiveDays', { days: Math.round(hours / 24) })
+}
 export const reportDot = (report: string | undefined): DotState => report === 'failed' ? 'error'
   : report === 'blocked' || report === 'waiting' ? 'warning' : report === 'ready' ? 'done' : 'ongoing'
 
