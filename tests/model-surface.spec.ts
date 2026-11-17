@@ -66,7 +66,9 @@ interface Skill { name: string; description: string; content: string }
 // The phase rollback and the Session hand-back add the back-move `reason`/`basis` and the `request` schema, and the rule that a
 // new ticket opens from the conversation through orchestrator_trigger_handback (docs/031); the combined worker surface measures
 // 57,639, so the budget grows to 57,800.
-const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 57_800 }
+// The plan gate's conversation shortcut adds the `decided` option with its rule and one worker prompt line (docs/012); the
+// combined worker surface measures about 58,600, so the budget grows to 58,700.
+const BUDGET: Record<Role, number> = { orchestrator: 68_000, worker: 58_700 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

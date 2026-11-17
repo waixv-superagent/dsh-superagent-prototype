@@ -1483,6 +1483,7 @@ const TEXT = {
   'userError.planIncomplete': ['方案必须保留{template}模板的每一行并写明依据；缺少：{labels}。', USER_ERRORS.planIncomplete[1]],
   'userError.planTemplate': ['设计型方案需要 2–4 个选项，每个选项说明选它意味着什么、代价是什么。', USER_ERRORS.planTemplate[1]],
   'userError.planNotPending': ['这个工单没有等待决定的方案。', USER_ERRORS.planNotPending[1]],
+  'userError.planGateRequired': ['这个工单不能按会话里已明确的决策跳过方案确认：只有人明确要求、且没有改过方向、没有回退重开方案门的自迭代单可以这样直接开工；请把方案交给人在卡片上回答。', USER_ERRORS.planGateRequired[1]],
   'userError.planOptions': ['方案的选项是 2–4 个不重复的短标签，每个都要映射到 approve、revise 或 stop；设计型选项还要写明选它的后果（≤160 字）。', USER_ERRORS.planOptions[1]],
   'userError.planQuestion': ['方案的问题是单行非空文本，最多 200 字。', USER_ERRORS.planQuestion[1]],
   'userError.planSections': ['方案卡的语境分块是 1–6 块，每块一个简短不重复的标题和一段正文。', USER_ERRORS.planSections[1]],

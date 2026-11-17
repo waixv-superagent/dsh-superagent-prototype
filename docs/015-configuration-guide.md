@@ -60,19 +60,19 @@ The Feishu Source needs a bot app whose version is published, and a `lark-cli` c
    - **All** (全部消息) also receives the group's other messages, from which Eval may infer work under the admission rules; the bot needs permission to read all messages in that group.
 3. **Other chats** (其他群): groups the bot has joined but that are not listed above. **@ only** receives mentions there; **Not received** ignores them.
 4. **Direct messages** (接收私聊): whether people may message the bot directly.
-5. **Intervention card chat** (介入卡片私聊): an optional private chat. Normally a plan card goes to the Ticket's own Feishu conversation, which is its topic after one opens, else the chat the request came from; this chat is only the fallback for a Ticket that has no Feishu conversation at all.
+5. **Intervention card chat** (介入卡片私聊): an optional private chat. Normally a plan card goes to the Ticket's own Feishu conversation, which is its topic after one opens, else the chat the request came from; this chat is only the fallback for a Ticket that has no Feishu conversation at all. The **Topic chat** below is the other fallback, and it gives every Ticket a conversation of its own.
 6. **Topic chat** (话题群): see below.
 
 ### Topic chat: one topic per accepted Ticket
 
-A topic group is one group in which every message starts a topic. Each accepted Feishu Ticket gets its own topic there whose title is the Ticket brief; this gives a chat a Ticket-shaped list without creating a group per Ticket.
+A topic group is one group in which every message starts a topic. Each accepted Ticket, whatever Source it came from, gets its own topic there whose title is the Ticket brief; this gives a chat a Ticket-shaped list without creating a group per Ticket, and it is how a Ticket the panel, GitHub or TAPD started still reaches Feishu: its plan card, questions and replies live in that topic.
 
 1. In Feishu, create a group and switch its mode to topics, then add the bot to it.
 2. In **Chats**, add that group with **Receive** set to **All**. The bot reads every message of the group to follow the topics in it.
 3. Paste the group's `oc_…` id into **Topic chat**. A save is refused when the id is not listed in Chats with **All**.
-4. Save. Nothing changes for existing Tickets.
+4. Save. Nothing changes for existing Tickets; a Ticket accepted later gets its topic.
 
-When a Feishu Ticket is accepted, the bot posts a root message named `「<Ticket brief>」· 工单 <short id>` with a link to the original request. The Ticket's later replies and cards go to that topic, and the bot posts the topic link back in the original thread. Empty **Topic chat** keeps replies in the chat where the request arrived.
+When a Ticket is accepted, the bot posts a root message named `「<Ticket brief>」· 工单 <short id>`, with a link to the original request for a Feishu one, else the Ticket's panel page when **Panel address** is set. The Ticket's later replies and cards go to that topic; a Feishu request's own thread also gets the topic link posted back, since the person now answers there. Empty **Topic chat** keeps replies in the chat where the request arrived, and a Ticket from another Source keeps its replies in that Source.
 
 ### Advanced Feishu fields
 

@@ -102,6 +102,44 @@ describe('Feishu ticket topics', () => {
     expect(retarget).not.toHaveBeenCalled()
   })
 
+  it('opens a topic for a ticket from another Source too, so its plan cards reach Feishu', async () => {
+    const lark = vi.fn(async (args: string[]) => args[1] === '+messages-send'
+      ? { message_id: 'om_topic', thread_id: 'omt_topic' }
+      : { data: { messages: [{ message_id: 'om_topic', thread_id: 'omt_topic',
+        message_app_link: 'https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic' }] } })
+    const retarget = vi.fn()
+    const notify = vi.fn()
+    const github = { ...trigger, source: 'github', channel: { source: 'github', thread: 'github:7', address: { number: '7' } },
+      url: 'https://github.com/waixv-superagent/dsh-superagent-prototype/pull/7' }
+    const ctx = { ...context(lark, retarget, vi.fn(), vi.fn(), notify), triggers: { get: () => github } } as unknown as SourceContext
+    await openFeishuTopic(ctx, ticket())
+    expect(retarget).toHaveBeenCalledWith(ticket().id, {
+      source: 'feishu', thread: 'feishu:oc_topic', address: { chatId: 'oc_topic', messageId: 'om_topic' },
+    }, { source: 'feishu', id: 'oc_topic:om_topic' })
+    // A GitHub ticket has no Feishu thread to point back to; the topic itself is the way in.
+    expect(notify).not.toHaveBeenCalled()
+    const args = lark.mock.calls[0]![0] as string[]
+    const content = JSON.parse(args[args.indexOf('--content') + 1]!)
+    expect(content.zh_cn.content[0][0].text).toContain(github.url)
+  })
+
+  it('links the panel page in the topic root when the request has no page of its own', async () => {
+    const lark = vi.fn(async (args: string[]) => args[1] === '+messages-send'
+      ? { message_id: 'om_topic', thread_id: 'omt_topic' }
+      : { data: { messages: [{ message_id: 'om_topic', thread_id: 'omt_topic',
+        message_app_link: 'https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic' }] } })
+    const retarget = vi.fn()
+    const describe = vi.fn()
+    const web = { ...trigger, source: 'web', url: undefined, channel: { source: 'web', thread: 'web:t', address: { session: 's1' } } }
+    const ctx = { ...context(lark, retarget, describe), config: () => ({ topicChat: 'oc_topic', panelUrl: 'https://panel.example' }),
+      triggers: { get: () => web } } as unknown as SourceContext
+    await openFeishuTopic(ctx, ticket())
+    const link = `https://panel.example/?ticket=${ticket().id}`
+    const args = lark.mock.calls[0]![0] as string[]
+    expect(JSON.parse(args[args.indexOf('--content') + 1]!).zh_cn.content[0][0].text).toContain(link)
+    expect(describe).toHaveBeenCalledWith('feishu:oc_topic:om_topic', expect.objectContaining({ url: link }))
+  })
+
   it('keeps the ticket brief short and uses the original message link on the second line', () => {
     expect(shortTicketId(ticket())).toBe('8b4722eb')
     expect(topicText(ticket(), trigger.url)).toBe('「把话题改成工单简述」· 工单 8b4722eb\nhttps://applink.feishu.cn/client/message/open?message_id=om_1')

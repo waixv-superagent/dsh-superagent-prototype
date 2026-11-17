@@ -55,6 +55,7 @@ export const USER_ERRORS = {
   planIncomplete: ['refused', 'The plan must keep every {template} template line with its evidence; missing: {labels}'],
   planTemplate: ['refused', 'A design plan needs 2 to 4 options, each with a description stating what choosing it means'],
   planNotPending: ['refused', 'No plan of this ticket waits for a person\'s decision'],
+  planGateRequired: ['refused', 'This ticket may not settle its plan in the conversation: only a self-iteration Ticket that a person asked for explicitly, with no earlier plan feedback and no reopened gate, skips the confirmation card; submit the plan for a person to answer'],
   planOptions: ['refused', 'Plan choices are 2 to 4 unique labels, each mapped to approve, revise, or stop; a design choice also needs a description of at most 160 characters'],
   planQuestion: ['refused', 'A plan question is one non-empty line of at most 200 characters'],
   planSections: ['refused', 'A plan card\'s context sections are 1 to 6 blocks, each with a short unique label and its own text'],

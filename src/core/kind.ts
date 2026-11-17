@@ -1,7 +1,8 @@
 /**
  * What kind of work a ticket is — a feature, a bug, the agent's own iteration, or an inquiry — decided when it is
- * accepted, so a day's work can be counted and filtered by kind (docs/020). It is a label for reading the work, never
- * an authority: it grants nothing and changes no gate.
+ * accepted, so a day's work can be counted and filtered by kind (docs/020). It is a label for reading the work, and it
+ * changes no gate except the plan gate's conversation shortcut: only a `self` ticket may settle its plan without a card
+ * (see `planSettleable`).
  */
 import type { Ticket } from './model.ts'
 

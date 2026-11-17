@@ -2498,6 +2498,44 @@ describe('P1 plan gate', () => {
     expect(h.repo.tickets.get(ticketId)!.ended).toMatchObject({ by: 'executor', outcome: 'stopped', reason: expect.stringContaining('timed out') })
     expect(h.repo.tickets.get(ticketId)!.plan!.waiting).toBeUndefined()
   })
+  it('settles a self-iteration plan in the conversation, with no card or deadline, when a person asked for it explicitly', () => {
+    const h = harness({}, { prepareTicket: ticket => ({ ...ticket, execution: { name: 'w', directory: '/w', assignment: '', backend: 'git' } }) })
+    const ticketId = accepted(h).ticketId!
+    h.tick(1)
+    const ticket = h.engine.settlePlan(ticketId, PLAN)
+    expect(ticket.phase).toBe('implement')
+    expect(ticket.plan).toMatchObject({ text: PLAN, approved: { at: '2026-09-23T00:00:01.000Z', via: 'session' } })
+    expect(ticket.plan!.waiting).toBeUndefined()
+    expect(ticket.plan!.deadline).toBeUndefined()
+    expect(ticket.attention).toBeUndefined()
+    // It is still the gate's plan: the fixed template is checked before anything is recorded.
+    const other = accepted(h, '2', 't2').ticketId!
+    h.tick(1)
+    expect(() => h.engine.settlePlan(other, '现象：x')).toThrowError(expect.objectContaining({ code: 'planIncomplete' }))
+  })
+  it('refuses to settle other work, a plan already waiting, or a plan the person asked to revise', () => {
+    const plain = harness()
+    const feature = accepted(plain).ticketId!
+    expect(() => plain.engine.settlePlan(feature, PLAN)).toThrowError(expect.objectContaining({ code: 'planGateRequired' }))
+    const h = harness({}, { prepareTicket: ticket => ({ ...ticket, execution: { name: 'w', directory: '/w', assignment: '', backend: 'git' } }) })
+    const ticketId = accepted(h).ticketId!
+    h.tick(1); h.engine.submitPlan(ticketId, PLAN)
+    // A plan already waiting for a person is not the worker's to settle.
+    expect(() => h.engine.settlePlan(ticketId, PLAN)).toThrowError(expect.objectContaining({ code: 'planGateRequired' }))
+    h.tick(1); h.engine.decidePlan(ticketId, 'revise', '换个方向')
+    // The person asked to revise: the next plan is theirs to see.
+    expect(() => h.engine.settlePlan(ticketId, PLAN)).toThrowError(expect.objectContaining({ code: 'planGateRequired' }))
+  })
+  it('keeps the gate after a person reopened it, even for self-iteration work', () => {
+    const h = harness({}, { prepareTicket: ticket => ({ ...ticket, execution: { name: 'w', directory: '/w', assignment: '', backend: 'git' } }) })
+    const ticketId = accepted(h).ticketId!
+    h.tick(1); h.engine.submitPlan(ticketId, PLAN)
+    h.tick(1); h.engine.receive(trigger('2', { text: '1' }))
+    h.tick(1); h.engine.receive(trigger('3', { text: '再加一个范围' }))
+    h.tick(1); h.engine.resetPhase(ticketId, 'plan', 'conversation', 'add scope', '3')
+    expect(h.repo.tickets.get(ticketId)!.planHistory).toHaveLength(1)
+    expect(() => h.engine.settlePlan(ticketId, PLAN)).toThrowError(expect.objectContaining({ code: 'planGateRequired' }))
+  })
   it('moves one phase forward only, and deliver needs verification recorded', () => {
     const h = harness()
     const ticketId = accepted(h).ticketId!
