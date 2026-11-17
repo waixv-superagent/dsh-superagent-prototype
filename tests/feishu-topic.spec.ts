@@ -48,6 +48,9 @@ const context = (lark: ReturnType<typeof vi.fn>, retarget: ReturnType<typeof vi.
     state,
   }) as unknown as SourceContext
 const stateOf = (value: Memory) => value as unknown as Parameters<typeof takeTopicLink>[0]
+/** The topic link Feishu's client resolves: the root message's own position, carried in both query spellings. */
+const topicLink = 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_topic&open_thread_id=omt_topic'
+  + '&openchatid=oc_topic&openthreadid=omt_topic&thread_position=-1'
 
 describe('Feishu ticket topics', () => {
   it('opens a topic named after the ticket and moves its replies there', async () => {
@@ -80,7 +83,7 @@ describe('Feishu ticket topics', () => {
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({
       id: 'topic-link-8b4722eb84a73a17d2b889adf1b7d43f',
       channel: trigger.channel,
-      text: '已开话题：[「把话题改成工单简述」](https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic)',
+      text: `已开话题：[「把话题改成工单简述」](${topicLink})`,
       kind: 'reply',
       ticketId: ticket().id,
     }))
@@ -97,7 +100,7 @@ describe('Feishu ticket topics', () => {
     const opening = openFeishuTopic(context(lark, vi.fn(), vi.fn(), vi.fn(), notify, state), carried, receipt)
     // The receipt is the message already queued for the accept; it waits for the topic instead of a second notice.
     expect(await takeTopicLink(stateOf(state), carried.id)).toEqual({
-      url: 'https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic', title: '把话题改成工单简述',
+      url: topicLink, title: '把话题改成工单简述',
     })
     await opening
     expect(notify).not.toHaveBeenCalled()
@@ -120,7 +123,7 @@ describe('Feishu ticket topics', () => {
     await opening
     // The receipt went out without the link; the notice still tells the person where the conversation continues.
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({
-      text: '已开话题：[「把话题改成工单简述」](https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic)',
+      text: `已开话题：[「把话题改成工单简述」](${topicLink})`,
     }))
   })
 
@@ -134,7 +137,7 @@ describe('Feishu ticket topics', () => {
     await openFeishuTopic(context(lark, retarget, vi.fn(), vi.fn(), notify), ticket())
     expect(retarget).toHaveBeenCalled()
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({
-      text: '已开话题：[「把话题改成工单简述」](https://applink.feishu.cn/client/thread/open?open_chat_id=oc_topic&open_thread_id=omt_topic)',
+      text: `已开话题：[「把话题改成工单简述」](${topicLink})`,
     }))
   })
 

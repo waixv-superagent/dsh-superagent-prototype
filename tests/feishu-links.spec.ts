@@ -85,20 +85,35 @@ describe('Feishu message links', () => {
 })
 
 describe('Feishu topic links', () => {
+  // Feishu's own topic link: the root message's position, which a client resolves even before the topic has a reply.
   const topic = 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1'
-  it('opens a topic at its newest message instead of the message a link names', () => {
+    + '&openchatid=oc_1&openthreadid=omt_1&thread_position=-1'
+  it('opens a topic at its root message instead of the message a link names', () => {
     expect(feishuTopicLink({ url: message })).toBe(topic)
     // A chat link names no topic, so the topic is built from the chat and thread ids.
     expect(feishuTopicLink({ chatId: 'oc_1', threadId: 'omt_1', url: chat })).toBe(topic)
+    expect(feishuTopicLink({ chatId: 'oc_1', threadId: 'omt_1' })).toBe(topic)
     // Lark keeps its own host.
     expect(feishuTopicLink({ chatId: 'oc_1', threadId: 'omt_1',
       url: 'https://applink.larksuite.com/client/chat/open?openChatId=oc_1' }))
-      .toBe('https://applink.larksuite.com/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1')
+      .toBe('https://applink.larksuite.com/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1'
+        + '&openchatid=oc_1&openthreadid=omt_1&thread_position=-1')
+    // Feishu's own topic link (both spellings, root position) is already what a person's client resolves.
+    expect(feishuTopicLink({ chatId: 'oc_1', threadId: 'omt_1',
+      url: 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1'
+        + '&openchatid=oc_1&openthreadid=omt_1&thread_position=-1' })).toBe(topic)
     // Without a topic id a chat link still drops its position, so it opens the conversation at its newest message.
     expect(feishuTopicLink({ url: `${chat}&position=8` })).toBe(chat)
     // The client scheme is accepted too, so a link already converted by another view stays usable.
+    expect(feishuTopicLink({ url: 'feishu://applink/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1&thread_position=9' }))
+      .toBe('feishu://applink/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1'
+        + '&openchatid=oc_1&openthreadid=omt_1&thread_position=-1')
+    // A topic link whose chat id is unknown keeps the position it came with rather than losing the way in.
     expect(feishuTopicLink({ url: 'feishu://applink/client/thread/open?open_thread_id=omt_1&thread_position=2' }))
-      .toBe('feishu://applink/client/thread/open?open_thread_id=omt_1')
+      .toBe('feishu://applink/client/thread/open?open_thread_id=omt_1&thread_position=2')
+    // A stored link with a malformed escape still names its ids, so it is rebuilt instead of failing the view.
+    expect(feishuTopicLink({ url: 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1&thread_position=2%' }))
+      .toBe(topic)
     expect(feishuTopicLink({})).toBeUndefined()
   })
 })
