@@ -44,6 +44,57 @@ export interface Plan {
    * model route, so the worker dispatches a team instead of asking for a roster card. Absent on the standard flow.
    */
   phases?: PlanPhase[]
+  /**
+   * The workspace-relative write paths the plan expects to change. Approving the plan merges them into the ticket's lease,
+   * so a person's one approval also places the work in its shared workspace instead of asking again which paths it may write.
+   */
+  paths?: string[]
+}
+/** How many write paths a plan may declare, and how long each may be; the same bounds a lease request uses. */
+export const PLAN_PATH_LIMITS = { max: 20, chars: 400 } as const
+/** Uses forward slashes without leading or trailing separators, so two spellings of one path compare the same. */
+export const normalizeWritePath = (path: string): string => path.trim().replaceAll('\\', '/').replace(/^\/+|\/+$/g, '')
+/**
+ * The problem a declared write path has, worded for its refusal, or undefined when it is a safe workspace-relative prefix:
+ * non-empty, at most 400 characters, not absolute (POSIX, drive or UNC) and without a `..` segment that would leave the workspace.
+ */
+export function writePathProblem(path: string): string | undefined {
+  const trimmed = path.trim()
+  if (!trimmed) return 'a path is empty'
+  if (Array.from(trimmed).length > PLAN_PATH_LIMITS.chars) return `"${trimmed.slice(0, 40)}…" is longer than ${PLAN_PATH_LIMITS.chars} characters`
+  if (/^[\\/]/.test(trimmed) || /^[a-z]:/i.test(trimmed)) return `"${trimmed}" is absolute; name it relative to the ticket's workspace`
+  const normalized = normalizeWritePath(trimmed)
+  const segments = normalized.split('/')
+  if (!normalized || segments.some(segment => !segment)) return `"${trimmed}" has an empty path segment`
+  if (segments.includes('..')) return `"${trimmed}" leaves the workspace`
+  if (segments.includes('.')) return `"${trimmed}" is not a plain relative prefix`
+  return undefined
+}
+/** The problem a plan's declared write paths have, or undefined when they are 1–20 safe, unique prefixes. */
+export function writePathsProblem(paths: readonly string[]): string | undefined {
+  if (!paths.length) return 'it declares no path'
+  if (paths.length > PLAN_PATH_LIMITS.max) return `it declares ${paths.length} paths, more than ${PLAN_PATH_LIMITS.max}`
+  const seen = new Set<string>()
+  for (const path of paths) {
+    const problem = writePathProblem(path)
+    if (problem) return problem
+    const normalized = normalizeWritePath(path)
+    if (seen.has(normalized)) return `"${path}" appears twice`
+    seen.add(normalized)
+  }
+  return undefined
+}
+/**
+ * A lease with `additions` merged in: a path another one already covers is skipped, so declaring a plan's files twice, or
+ * re-requesting one, never grows the lease with redundant entries.
+ */
+export function mergeLease(lease: readonly string[], additions: readonly string[]): string[] {
+  const merged = lease.map(normalizeWritePath).filter(Boolean)
+  for (const addition of additions.map(normalizeWritePath).filter(Boolean)) {
+    if (merged.some(path => path === addition || addition.startsWith(`${path}/`))) continue
+    merged.push(addition)
+  }
+  return merged
 }
 /**
  * One phase of a phased ticket's plan: the job it owns, the files it writes, the earlier phases it waits for, and the

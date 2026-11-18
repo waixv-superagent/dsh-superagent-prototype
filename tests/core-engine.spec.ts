@@ -2563,9 +2563,11 @@ describe('P1 plan gate', () => {
     const h = harness({}, { prepareTicket: ticket => ({ ...ticket, execution: { name: 'w', directory: '/w', assignment: '', backend: 'git' } }) })
     const ticketId = accepted(h).ticketId!
     h.tick(1)
-    const ticket = h.engine.settlePlan(ticketId, PLAN)
+    const ticket = h.engine.settlePlan(ticketId, PLAN, undefined, undefined, undefined, 'fix', undefined, undefined, undefined,
+      ['Source/UI/AvatarList.cpp'])
     expect(ticket.phase).toBe('implement')
     expect(ticket.plan).toMatchObject({ text: PLAN, approved: { at: '2026-09-23T00:00:01.000Z', via: 'session' } })
+    expect(ticket.execution!.lease).toEqual(['Source/UI/AvatarList.cpp'])
     expect(ticket.plan!.waiting).toBeUndefined()
     expect(ticket.plan!.deadline).toBeUndefined()
     expect(ticket.attention).toBeUndefined()
@@ -2573,6 +2575,39 @@ describe('P1 plan gate', () => {
     const other = accepted(h, '2', 't2').ticketId!
     h.tick(1)
     expect(() => h.engine.settlePlan(other, '现象：x')).toThrowError(expect.objectContaining({ code: 'planIncomplete' }))
+  })
+  it('merges an approved plan\'s declared write paths into the lease, so a lease is not a later question for a person', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    const stored = h.repo.tickets.get(ticketId)!
+    h.repo.tickets.save({ ...stored, execution: { ...stored.execution!, lease: ['Source/Other'] } })
+    h.tick(1)
+    // Only safe workspace-relative prefixes: an absolute path or one leaving the workspace is refused before the card.
+    expect(() => h.engine.submitPlan(ticketId, PLAN, undefined, undefined, undefined, 'fix', undefined, undefined, undefined, ['/abs/path']))
+      .toThrowError(expect.objectContaining({ code: 'planPaths' }))
+    expect(() => h.engine.submitPlan(ticketId, PLAN, undefined, undefined, undefined, 'fix', undefined, undefined, undefined, ['Source/../Other']))
+      .toThrowError(expect.objectContaining({ code: 'planPaths' }))
+    const waiting = h.engine.submitPlan(ticketId, PLAN, undefined, undefined, undefined, 'fix', undefined, undefined, undefined,
+      ['Source\\UI\\AvatarList.cpp', 'Source/UI/AvatarListTest.cpp'])
+    expect(waiting.plan!.paths).toEqual(['Source/UI/AvatarList.cpp', 'Source/UI/AvatarListTest.cpp'])
+    h.tick(1)
+    const decided = h.engine.decidePlan(ticketId, 'approve')
+    expect(decided.execution!.lease).toEqual(['Source/Other', 'Source/UI/AvatarList.cpp', 'Source/UI/AvatarListTest.cpp'])
+    const approved = decided.inputs.at(-1)
+    expect(approved?.kind === 'text' && approved.text).toContain('方案声明的写入路径已并入本单租约')
+    expect(approved?.kind === 'text' && approved.text).toContain('不要再向人确认租约或工作区')
+  })
+  it('applies a worker\'s lease re-request itself, without turning it into a person\'s question', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    expect(() => h.engine.widenLease(ticketId, ['../escape'])).toThrowError(expect.objectContaining({ code: 'leasePaths' }))
+    const widened = h.engine.widenLease(ticketId, ['Source/UI/AvatarList.cpp'])
+    expect(widened.execution!.lease).toEqual(['Source/UI/AvatarList.cpp'])
+    expect(widened.attention).toBeUndefined()
+    // A path an existing entry already covers changes nothing; the ticket keeps its timestamp.
+    const again = h.engine.widenLease(ticketId, ['Source/UI/AvatarList.cpp'])
+    expect(again.execution!.lease).toEqual(['Source/UI/AvatarList.cpp'])
+    expect(again.updatedAt).toBe(widened.updatedAt)
   })
   it('refuses to settle other work, a plan already waiting, or a plan the person asked to revise', () => {
     const plain = harness()

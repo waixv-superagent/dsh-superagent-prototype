@@ -87,7 +87,10 @@ interface Skill { name: string; description: string; content: string }
 // The update track adds the accept's `ticket_update`, the report's `update_track`, and one delivery line about a hot change
 // being deployed after its merge (docs/020); the main Session's surface measures 70,924 and the worker's 65,955, so the
 // budgets grow to 71,000 and 66,000.
-const BUDGET: Record<Role, number> = { orchestrator: 71_000, worker: 66_000 }
+// A plan declares its write paths and an approved plan widens the lease, and a worker's lease re-request is applied by the
+// host instead of becoming a question (docs/011); the handoff/work rules and the plan's `paths` and report's `lease` fields
+// measure 71,096 on the main Session and 67,694 on the worker, so the budgets grow to 71,100 and 67,800.
+const BUDGET: Record<Role, number> = { orchestrator: 71_100, worker: 67_800 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'
