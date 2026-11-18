@@ -17,13 +17,25 @@ A lease is a promise, not a sandbox: nothing stops a worker from writing outside
 
 ## 2. Placement
 
-A Ticket is placed when it is accepted, from the leases it declares. A Ticket whose assessment named no paths never enters the pool at all: it runs in its own `work/<name>` directory, read-only toward the shared tree, so an analysis Ticket neither waits for a slot nor blocks a code Ticket that needs the tree.
+A Ticket's Execution pins the workspace it works in. Under the `p4` backend that is the task centre's **default
+workspace** — the first one configured in `executor.workspaces` — so Sun source Tickets implement and verify in the
+mainline tree and client a person already uses, instead of in a private copy of it whose per-ticket client the prepare
+command would have to create. A Ticket with no configured workspace, such as a `git` Ticket, keeps its own `work/<name>`
+directory.
 
-1. Prefer a workspace with a free slot and no lease overlap. Its own lease then joins that workspace's active set.
-2. If every free slot overlaps, wait. A queued ticket is launched when a peer delivers or stops, exactly like a ticket waiting for a slot does today.
-3. If a second workspace exists and only it can take the lease, the Executor uses it. That is the escape hatch for work that genuinely cannot share: a second physical project with the same shared engine, not a second copy of everything.
+A Ticket's lease then decides what runs beside it: an empty lease is the whole workspace, so a Ticket that named no paths
+waits for that workspace to be free and runs alone, while a Ticket that named paths may run beside peers whose leases do
+not overlap it. A `git` Ticket that named no paths never enters the pool: it runs in its own directory, read-only toward
+the shared tree.
 
-Lease overlap is a prefix test in both directions: `Source/A/` overlaps `Source/A/B.cpp`, and `Source/` overlaps everything under it. An empty lease means the whole workspace and would exclude every other ticket, which is why the Executor keeps such a Ticket out of the pool instead of placing it.
+1. The pinned workspace must have a free slot and no running lease overlapping this ticket's; otherwise wait. A queued
+   ticket is launched when a peer delivers or stops, exactly like a ticket waiting for a slot does today.
+2. Without a pinned workspace, prefer the first workspace with a free slot and no lease overlap. Its own lease then joins
+   that workspace's active set.
+3. A second workspace is the escape hatch for work that genuinely cannot share: a second physical project with the same
+   shared engine, not a second copy of everything. A pinned Ticket never moves to it.
+
+Lease overlap is a prefix test in both directions: `Source/A/` overlaps `Source/A/B.cpp`, and `Source/` overlaps everything under it. An empty lease means the whole workspace and would exclude every other ticket, which is why a `git` Ticket that named no paths stays out of the pool instead of serializing it.
 
 ## 3. Where a lease comes from
 
@@ -31,7 +43,7 @@ The assessment that accepts a Ticket also records the paths it expects the chang
 
 - a bug that names a file or a test gives the directory of that file;
 - a bug that names a subsystem without a file gives the subsystem's directory when the assessment is confident, otherwise nothing;
-- nothing named, or not confident, is an empty lease: that Ticket runs outside the pool, in its own directory, and never claims the shared tree. Two workers in one file is not acceptable; an analysis Ticket does not need the tree to begin with.
+- nothing named, or not confident, is an empty lease: a p4 Ticket still works in its pinned default workspace, but waits for the workspace and runs alone there, because an empty lease is the whole workspace. A Ticket with no pinned workspace stays in its own directory and never claims the shared tree. Two workers in one file is not acceptable.
 
 The lease is stored on the Ticket (`execution.lease`), so the panel, the follow-up turns and a resumed assignment all see the same set.
 
@@ -41,7 +53,7 @@ Every worker's environment names its lease, and its launch message names its pee
 
 | Where | Value |
 | --- | --- |
-| `DSH_SUPERAGENT_LEASE` (environment) | The Ticket's leased paths, space-separated; empty means the Ticket is outside the pool and writes only in its own directory |
+| `DSH_SUPERAGENT_LEASE` (environment) | The Ticket's leased paths, space-separated; empty means the whole workspace: a Ticket with a pinned workspace waits for it and runs alone there, and a Ticket without one writes only in its own directory |
 | `peers` (launch message) | One entry per peer: `{ ticket_id, title, lease }`, the tickets running in the same workspace right now |
 
 A worker that needs a file outside its lease does not take it: it reports the need in its result, and the assessment either widens the lease (when the peer holding the path delivers first) or splits the work into another ticket. A worker may read anything in the workspace; the lease governs writes.
@@ -50,6 +62,7 @@ A worker that needs a file outside its lease does not take it: it reports the ne
 
 A workspace has one p4 client, created once, not one per ticket:
 
+- the client is the workspace's configured `p4Client` (for this installation's `sun` workspace, `wanghuaiyang_sun_mainline`), so a person's own P4V client lists the Tickets' pending changelists, and the edits in the tree are the ones a build or the editor sees; a workspace without a configured client uses the template and its id;
 - a Ticket's edits go into its own changelist: `p4 change -i`, `p4 reopen -c <CL> <its files>`, `p4 shelve -c <CL>`;
 - after shelving, the Ticket keeps its files and edits in the workspace instead of reverting them, so a person can test the change and the next round continues from the same edits; the lease, not a clean tree, keeps peers off those paths;
 - a worker never runs a whole-workspace `p4 sync`, `p4 submit`, or a `p4 revert` without `-c`: those are the commands that would disturb a peer. Once its changelist has been submitted, it syncs only its own files to the new revision and opens a new changelist for follow-up work.
@@ -61,14 +74,15 @@ The engine stays shared: it is mounted in the workspace as the same directory ev
 | Part | Status |
 | --- | --- |
 | Lease overlap and placement, as pure logic (`src/executor/workspace.ts`) | Implemented and tested (`tests/workspace.spec.ts`) |
-| Workspace pool in settings (`executor.workspaces`), slots per workspace | Implemented |
+| Workspace pool in settings (`executor.workspaces`), slots per workspace | Implemented; the first workspace is the default one |
+| A p4 Ticket's execution pins the default workspace, so it works in the mainline tree and client instead of a private copy | Implemented: `ticketExecution()` records the workspace and its directory, and registers the ticket's environment against them |
 | Lease declared by the assessment (`paths` on the accept outcome, `execution.lease`) | Implemented, and told to the worker as `DSH_SUPERAGENT_LEASE` |
 | Placement wired into the Executor's launch path, waiting when it cannot place | Implemented: a launch that cannot place throws `Later` and is re-queued |
-| A Ticket that named no paths stays out of the pool | Implemented: `claimsWorkspace()` keeps it in its own directory, with no slot and no p4 client |
+| A Ticket that named no paths | A p4 Ticket runs alone in its pinned workspace, waiting for it first; a Ticket with no pinned workspace stays in its own directory with no slot and no p4 client (`claimsWorkspace()`) |
 | Peers in the launch message (`peers`) | Implemented |
-| One p4 client per workspace, created once, rooted at the workspace directory | Implemented: `workspaceClient()` names it, and the p4 prepare runs only for a pooled workspace whose directory does not exist yet |
+| One p4 client per workspace, created once, rooted at the workspace directory | Implemented: `workspaceClient()` takes the workspace's configured client, else the template and its id; the p4 prepare runs only for a workspace whose directory does not exist yet |
 | A ticket keeps its own changelist in the shared tree and leaves its edits in place after shelving | Instructed in the assignment; not enforced by a shim |
-| Second physical workspace with a shared engine | Configurable in the pool, not yet exercised on this machine |
+| Second physical workspace with a shared engine | Configurable in the pool, but a p4 Ticket is pinned to the default one; not yet exercised on this machine |
 
 A queued placement is re-tried by the queue's retry, not by an immediate wake-up when a peer delivers; that delay is acceptable because launches are already serialized by worker slots.
 

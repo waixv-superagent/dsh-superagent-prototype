@@ -1,6 +1,6 @@
 /** Placement of Tickets into workspaces: slots, lease overlap, and the conflicts a queued Ticket reports. */
 import { describe, expect, it } from 'vitest'
-import { claimsWorkspace, conflicts, LeaseSchema, normalizePath, overlap, place, running, workspaceClient, WorkspaceSchema, type Active, type Workspace } from '../src/executor/workspace.ts'
+import { claimsWorkspace, conflicts, LeaseSchema, normalizePath, overlap, place, placeTicket, running, workspaceClient, WorkspaceSchema, type Active, type Workspace } from '../src/executor/workspace.ts'
 import { ticketExecution } from '../src/executor/dsh.ts'
 import { SettingsSchema } from '../src/policy.ts'
 
@@ -63,10 +63,23 @@ describe('placement', () => {
     const active: Active[] = [{ workspace: 'one', lease: ['Source/A/'] }, { workspace: 'one', lease: ['Source/B/'] }]
     expect(conflicts(active, ['Source/A/x.cpp'])).toEqual([{ workspace: 'one', lease: ['Source/A/'] }])
   })
+  it('places a pinned ticket in its own workspace, waiting for it rather than moving elsewhere', () => {
+    const spaces = [workspace('one'), workspace('two')]
+    // A pinned ticket ignores a free second workspace: it belongs in the default one.
+    const active: Active[] = [{ workspace: 'one', lease: ['Source/A/'] }]
+    expect(placeTicket(spaces, active, ['Source/B/'], 'one')).toBe(undefined)
+    expect(placeTicket(spaces, [], ['Source/B/'], 'one')?.id).toBe('one')
+    // An empty lease is the whole workspace, so any peer in it makes the pinned ticket wait.
+    expect(placeTicket(spaces, active, [], 'one')).toBe(undefined)
+    // A pin this installation no longer configures falls back to the pool, so a stale record cannot wedge a ticket.
+    expect(placeTicket(spaces, [], ['Source/B/'], 'gone')?.id).toBe('one')
+    // Without a pin, the first free workspace with no overlap is chosen, as before.
+    expect(placeTicket(spaces, active, ['Source/B/'])?.id).toBe('two')
+  })
 })
 
 describe('pool membership', () => {
-  it('keeps a ticket that named no paths out of the pool, so it runs on its own', () => {
+  it('counts a leased path as a claim: only a Ticket with no pinned workspace needs one to enter the pool', () => {
     expect(claimsWorkspace([])).toBe(false)
     expect(claimsWorkspace(['Source/A/'])).toBe(true)
   })
@@ -100,10 +113,34 @@ describe('ticket execution', () => {
   it('keeps no lease when the assessment names no paths, which serializes the ticket', () => {
     expect(ticketExecution(ticket, accept(), SettingsSchema.parse({}), '/state').lease).toEqual([])
   })
-  it('tells a worker in a shared workspace to stay inside its lease', () => {
+  it('pins a p4 ticket to the default workspace and leases its paths there', () => {
+    const settings = SettingsSchema.parse({ executor: { backend: 'p4', workspaces: [
+      { id: 'sun', directory: 'E:/sun_mainline', p4Client: 'wanghuaiyang_sun_mainline' },
+      { id: 'other', directory: 'E:/other' }] } })
+    const execution = ticketExecution(ticket, accept(['Source/A']), settings, '/state')
+    expect(execution.workspace).toBe('sun')
+    expect(execution.directory).toBe('E:/sun_mainline')
+    expect(execution.lease).toEqual(['Source/A'])
+    expect(execution.assignment).toContain('DSH_SUPERAGENT_LEASE')
+  })
+  it('pins a p4 ticket that named no paths too, so it works in the shared tree alone', () => {
+    const settings = SettingsSchema.parse({ executor: { backend: 'p4', workspaces: [{ id: 'sun', directory: 'E:/sun_mainline' }] } })
+    const execution = ticketExecution(ticket, accept(), settings, '/state')
+    expect(execution.workspace).toBe('sun')
+    expect(execution.directory).toBe('E:/sun_mainline')
+    expect(execution.lease).toEqual([])
+    expect(execution.assignment).toContain('DSH_SUPERAGENT_LEASE')
+  })
+  it('keeps a git ticket in its own directory, without a pinned workspace', () => {
     const settings = SettingsSchema.parse({ executor: { workspaces: [{ id: 'main', directory: '/work/main' }] } })
-    expect(ticketExecution(ticket, accept(['Source/A']), settings, '/state').assignment).toContain('DSH_SUPERAGENT_LEASE')
-    expect(ticketExecution(ticket, accept(['Source/A']), SettingsSchema.parse({}), '/state').assignment).not.toContain('DSH_SUPERAGENT_LEASE')
+    const execution = ticketExecution(ticket, accept(['Source/A']), settings, '/state')
+    expect(execution.workspace).toBeUndefined()
+    expect(execution.directory).toContain('fix-typo')
+  })
+  it('does not tell a ticket that works nowhere shared about a shared workspace', () => {
+    const settings = SettingsSchema.parse({ executor: { workspaces: [{ id: 'main', directory: '/work/main' }] } })
+    expect(ticketExecution(ticket, accept(), settings, '/state').assignment).not.toContain('DSH_SUPERAGENT_LEASE')
+    expect(ticketExecution(ticket, accept(), SettingsSchema.parse({}), '/state').assignment).not.toContain('DSH_SUPERAGENT_LEASE')
   })
 })
 

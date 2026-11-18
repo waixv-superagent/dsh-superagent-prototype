@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { join } from 'node:path'
-import { EXECUTOR_VARIABLES, environmentOf, p4Client, p4Prepare } from '../src/app/execution-environment.ts'
+import { EXECUTOR_VARIABLES, environmentOf, p4Client, p4Prepare, ticketEnvironment } from '../src/app/execution-environment.ts'
 import { baseAssignment, deliveryInstructions, sharingInstructions, ticketExecution } from '../src/executor/dsh.ts'
 import { ExecutorConfigSchema, SettingsSchema } from '../src/policy.ts'
 import type { SourceRegistry } from '../src/sources/registry.ts'
@@ -64,6 +64,30 @@ describe('p4 execution variables', () => {
       settings: settingsWith({ backend: 'p4' }), ticket: { id: 't1', name: 'fix-thing', directory: '/work/fix-thing' } })
     expect(valueOf(variables, 'DSH_SUPERAGENT_P4_CL')).toBe('')
     expect(valueOf(variables, 'DSH_SUPERAGENT_SWARM_REVIEW')).toBe('')
+  })
+  it('names the task center workspace and its client for a ticket pinned there', () => {
+    const settings = settingsWith({ backend: 'p4', p4: { depot: '//depot/mainline', clientTemplate: 'dsh-<name>' },
+      workspaces: [{ id: 'sun', directory: 'E:/sun_mainline', p4Client: 'wanghuaiyang_sun_mainline' }] })
+    const variables = ticketEnvironment({ deployment: testDeployment(), sources: noSources, settings, stateDir: '/state',
+      ticket: { id: 't1', execution: { name: 'fix-thing', directory: 'E:/sun_mainline', assignment: '', workspace: 'sun',
+        lease: [], backend: 'p4', target: '//depot/mainline' } } as never })
+    expect(valueOf(variables, 'DSH_SUPERAGENT_DIR')).toBe('E:/sun_mainline')
+    expect(valueOf(variables, 'DSH_SUPERAGENT_P4_CLIENT')).toBe('wanghuaiyang_sun_mainline')
+    expect(valueOf(variables, 'DSH_SUPERAGENT_LEASE')).toBe('')
+  })
+  it('keeps the ticket client of a workspace that configures none, from the template and its id', () => {
+    const settings = settingsWith({ backend: 'p4', p4: { clientTemplate: 'dsh-<name>' },
+      workspaces: [{ id: 'sun', directory: 'E:/sun_mainline' }] })
+    const variables = ticketEnvironment({ deployment: testDeployment(), sources: noSources, settings,
+      ticket: { id: 't1', execution: { name: 'fix-thing', directory: 'E:/sun_mainline', assignment: '', workspace: 'sun' } } as never })
+    expect(valueOf(variables, 'DSH_SUPERAGENT_P4_CLIENT')).toBe('dsh-sun')
+  })
+  it('keeps the per-ticket client and directory of a ticket with no workspace', () => {
+    const settings = settingsWith({ backend: 'p4', p4: { clientTemplate: 'dsh-<name>' } })
+    const variables = ticketEnvironment({ deployment: testDeployment(), sources: noSources, settings,
+      ticket: { id: 't1', execution: { name: 'fix-thing', directory: '/work/fix-thing', assignment: '' } } as never })
+    expect(valueOf(variables, 'DSH_SUPERAGENT_DIR')).toBe('/work/fix-thing')
+    expect(valueOf(variables, 'DSH_SUPERAGENT_P4_CLIENT')).toBe('dsh-fix-thing')
   })
   it('take the backend a ticket records over the deployment default', () => {
     // A ticket whose work belongs in the deployment's git source is launched with the git backend even when the

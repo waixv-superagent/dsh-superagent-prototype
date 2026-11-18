@@ -14,7 +14,7 @@ import type { Store } from '../app/store.ts'
 import { Later, type Effects } from '../app/effects.ts'
 import { deliveryKey, resolveDelivery } from '../app/delivery-targets.ts'
 import { quotaExhausted, routeText, type FailoverSwitch } from '../app/provider-failover.ts'
-import { claimsWorkspace, conflicts, normalizePath, place, workspaceClient, type Active, type Peer, type Workspace } from './workspace.ts'
+import { claimsWorkspace, conflicts, normalizePath, placeTicket, workspaceClient, type Active, type Peer, type Workspace } from './workspace.ts'
 import { executionRoot, p4Prepare, type Variable } from '../app/execution-environment.ts'
 import type { Sessions } from '../app/sessions.ts'
 import { MissingWorkerTools } from '../app/worker-tools.ts'
@@ -145,6 +145,10 @@ export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutco
   stateDir: string, backend: Backend = settings.executor.backend, target?: string): Execution {
   // escalation 建的单可能没有英文短名：按类别取一个，目录名仍由票号后缀保证唯一。
   const name = ticketWorktreeName(outcome.name ?? (ticket.category === 'bug' ? 'fix' : 'feature'), ticket.id)
+  // A p4 Ticket works in the task centre's default workspace — the first one configured — rather than in a private copy of
+  // the mainline: Sun source work builds and verifies in the tree and client a person already uses (docs/011). Without a
+  // configured workspace the Ticket keeps its own directory, whose client the prepare command creates.
+  const workspace = backend === 'p4' ? settings.executor.workspaces[0] : undefined
   const source = ticket.origin.triggerId
   const note = outcome.note ? `\nRouting note (not the source request): ${outcome.note}` : ''
   const ruleIds = ticket.mandate.basis.rules
@@ -155,12 +159,12 @@ export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutco
   const assignment = ticket.mandate.strength === 'inferred' && ruleIds
     ? `Proactively accepted under ${ruleIds.join(', ')}. Scope: ${outcome.scope}.${precedence}${note}`
     : note.trim()
-  // Shared workspaces are the task center's, so the worker learns its lease from its environment and its peers from the
-  // launch message (see 011 Task center).
-  const sharing = sharingInstructions(settings, backend)
   const lease = (outcome.paths ?? []).map(normalizePath).filter(Boolean)
-  return { name, directory: join(executionRoot(settings, stateDir), name), assignment: assignment + sharing, lease, backend,
-    ...(target ? { target } : {}), ...(outcome.mode ? { mode: outcome.mode } : {}) }
+  // Shared workspaces are the task center's, so the worker learns its lease from its environment and its peers from the
+  // launch message (see 011 Task center). Only a Ticket that works in one — pinned there, or placed by a lease — is told so.
+  const sharing = workspace || claimsWorkspace(lease) ? sharingInstructions(settings, backend) : ''
+  return { name, directory: workspace?.directory ?? join(executionRoot(settings, stateDir), name), assignment: assignment + sharing, lease, backend,
+    ...(workspace ? { workspace: workspace.id } : {}), ...(target ? { target } : {}), ...(outcome.mode ? { mode: outcome.mode } : {}) }
 }
 /**
  * The delivery instructions a worker gets for its ticket's environment, composed at each launch so a ticket moved to
@@ -647,27 +651,31 @@ export class DshExecutor implements Executor {
   private relay({ id, text }: { id: string; text: string }): void { this.host.sessions.relay(id, text) }
   /**
    * Where a ticket's worker runs, who else runs there, and — under the p4 backend — the one client that workspace owns.
-   * Without a task-center pool that is the ticket's own directory and no peers; with one, the first workspace that has a free
-   * slot and no running lease overlapping this ticket's lease (see 011 Task center), and the peers already working in it.
+   * Without a task-center pool that is the ticket's own directory and no peers; with one, the workspace the ticket's
+   * execution pinned — the task centre's default for a p4 Ticket — or the first workspace that has a free slot and no running
+   * lease overlapping this ticket's lease (see 011 Task center), and the peers already working in it.
    * A pooled ticket works directly in the workspace's tree, not in a subdirectory of it, because that tree is the p4 client
-   * root its peers share; what keeps them apart is the lease and their own changelists. A ticket that named no paths never
-   * enters the pool and keeps its own directory, so an analysis ticket neither holds the tree nor waits for it.
+   * root its peers share; what keeps them apart is the lease and their own changelists. A Ticket with no pinned workspace
+   * that named no paths keeps its own directory, so an analysis ticket never holds the tree or waits for it.
    * @throws Later when every free slot conflicts, which re-queues the launch until a peer delivers or stops.
    */
   private placeWorkspace(ticket: Ticket, fallback: string): { directory: string; workspace?: Workspace; peers: Peer[] } {
     const pool = this.host.store.settings().executor.workspaces
     if (!pool.length) return { directory: fallback, peers: [] }
     const lease = ticket.execution?.lease ?? []
-    // A Ticket that named no paths is read-only toward the shared tree: it runs in its own directory, so it never waits
-    // for a workspace slot and never makes a code Ticket wait for it (011 Task center).
-    if (!claimsWorkspace(lease)) return { directory: fallback, peers: [] }
+    const pinned = ticket.execution?.workspace
+    // Without a pinned workspace, a Ticket that named no paths is read-only toward the shared tree: it runs in its own
+    // directory, so it never waits for a workspace slot and never makes a code Ticket wait for it (011 Task center).
+    if (!pinned && !claimsWorkspace(lease)) return { directory: fallback, peers: [] }
     // A peer holds its lease while an assignment runs, from the placement until delivery ends it, so a ticket that is still
     // starting is seen as a peer and two launches cannot claim one slot of a one-slot workspace at the same time.
     const active: Active[] = this.host.store.tickets.open()
       .filter(other => other.id !== ticket.id && this.placements.has(other.id) && runningAssignment(other))
       .map(other => ({ workspace: this.placements.get(other.id)!, lease: other.execution?.lease ?? [] }))
-    const chosen = place(pool, active, lease)
+    const chosen = placeTicket(pool, active, lease, pinned)
     if (!chosen) {
+      // An empty lease is the whole workspace, so it waits for that one workspace rather than for a free slot in any.
+      if (pinned && !lease.length) throw new Later('Waiting for the workspace to be free')
       const waiting = conflicts(active, lease).length
       throw new Later(waiting ? `Waiting for ${waiting} ticket(s) writing the same paths` : 'Waiting for a free workspace slot')
     }

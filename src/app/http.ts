@@ -44,7 +44,7 @@ import type { Store } from './store.ts'
 import type { TextCache } from './cache.ts'
 import type { LinkTarget, ViewHost } from './views/records.ts'
 import type { Variable } from './execution-environment.ts'
-import { p4Client } from './execution-environment.ts'
+import { executionClient } from './execution-environment.ts'
 import { policyHistory } from './settings-history.ts'
 import { editorPage } from './views/editor.ts'
 import { overview } from './views/overview.ts'
@@ -200,7 +200,7 @@ function ticketAcceptance(runtime: HttpHost, ticket: Ticket) {
   return {
     workspace: { directory: execution.directory, ...execution.target ? { target: execution.target } : {},
       ...execution.backend ? { backend: execution.backend } : {},
-      ...p4 ? { client: p4Client(settings.executor.p4.clientTemplate, execution.name) } : {} },
+      ...p4 ? { client: executionClient(settings, execution) } : {} },
     editor: deliveryEditor({ deliveredAt: ticket.verification?.at ?? ticket.ended?.at, directory: execution.directory,
       editor: runtime.editor.read(), jobs: runtime.editorScheduler?.read().jobs ?? [] }),
   }

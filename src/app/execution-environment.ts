@@ -1,21 +1,22 @@
 /** Execution environment variables exposed to prepare commands and documented in worker Session instructions; never contains credentials. */
 import { join } from 'node:path'
-import type { Backend, ExecutionMode, Ticket, Trigger } from '../core/index.ts'
+import type { Backend, Execution, ExecutionMode, Ticket, Trigger } from '../core/index.ts'
 import type { Deployment } from '../deployment.ts'
+import { workspaceClient, type Workspace } from '../executor/workspace.ts'
 import type { Settings } from '../policy.ts'
 import type { Localized, VariableSpec } from '../sources/kind.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 
 /** Variables registered by the Executor; `ticket` entries are populated only when a ticket is present. */
 export const EXECUTOR_VARIABLES: readonly (VariableSpec & { ticket?: true })[] = [
-  { key: 'DSH_SUPERAGENT_DIR', ticket: true, description: { zh: '这个工单的执行目录；执行器 Session 在其中工作', en: 'This ticket\'s directory; the executor Session works in it' } },
+  { key: 'DSH_SUPERAGENT_DIR', ticket: true, description: { zh: '这个工单的工作目录：任务中心的工作区，或没有工作区时工单自己的目录；执行器 Session 在其中工作', en: 'This ticket\'s working directory: a task center workspace or its own directory' } },
   { key: 'DSH_SUPERAGENT_NAME', ticket: true, description: { zh: '工单的短名，也是执行目录的名字', en: 'The ticket\'s short name, also its directory\'s name' } },
   { key: 'DSH_SUPERAGENT_TICKET', ticket: true, description: { zh: '工单 id', en: 'The ticket id' } },
   { key: 'DSH_SUPERAGENT_EVIDENCE', ticket: true, description: { zh: '这个工单的只读分析产物目录（在所有工作区之外）；P1 方案门禁允许在其中写文件并从那里上传', en: 'This ticket\'s read-only analysis artifact directory, outside every workspace; the P1 plan gate allows writing files there and uploading them from it' } },
   { key: 'DSH_SUPERAGENT_MODE', ticket: true, description: { zh: '这个工单的执行模式：standard（一个 worker 自己做到底）或 phased（先过 P1 方案门，再把方案里的 2–4 个 phase 派给 sub agent）', en: 'How this ticket\'s worker executes: standard (one worker end to end) or phased (a P1 plan gate, then the plan\'s 2–4 phases dispatched to subagents)' } },
   { key: 'DSH_SUPERAGENT_BLOCKED_COMMANDS', description: { zh: '这个执行环境禁止调用的命令，以空格分隔；不要运行它们', en: 'Commands blocked in this execution environment, separated by spaces; never run them' } },
   { key: 'DSH_SUPERAGENT_BACKEND', description: { zh: '交付后端：git（GitHub 拉取请求）或 p4（Perforce CL + Swarm review）', en: 'Delivery backend: git (GitHub pull request) or p4 (Perforce changelist shelved for a Swarm review)' } },
-  { key: 'DSH_SUPERAGENT_P4_CLIENT', ticket: true, description: { zh: '这个工单的 Perforce 工作区名；p4 后端下由准备命令创建', en: 'This ticket\'s Perforce workspace name, created by the prepare command under the p4 backend' } },
+  { key: 'DSH_SUPERAGENT_P4_CLIENT', ticket: true, description: { zh: '这个工单使用的 Perforce 工作区名：任务中心工作区的 client，或没有工作区时按模板为工单创建的那个', en: 'This ticket\'s Perforce workspace: a task center workspace\'s client or its own' } },
   { key: 'DSH_SUPERAGENT_P4_PORT', description: { zh: 'Perforce 服务器地址；为空时用安装环境的 P4PORT', en: 'Perforce server address; empty keeps the installation\'s P4PORT' } },
   { key: 'DSH_SUPERAGENT_P4_DEPOT', description: { zh: '工作区映射的 depot 路径', en: 'Depot path the workspace maps' } },
   { key: 'DSH_SUPERAGENT_P4_STREAM', description: { zh: '工作区所属的 stream，如 //sun/mainline；stream depot 用它代替手写 view', en: 'Stream the workspace is a client of, such as //sun/mainline; a stream depot needs it instead of a hand-written view' } },
@@ -27,6 +28,21 @@ export const EXECUTOR_VARIABLES: readonly (VariableSpec & { ticket?: true })[] =
 ]
 /** Workspace name for a Ticket under the p4 backend, from the configured template and the Ticket's short name. */
 export const p4Client = (template: string, name: string): string => template.replaceAll('<name>', name)
+
+/** The task center workspace a Ticket's Execution names, when this installation still configures it. */
+export function executionWorkspace(settings: Settings, execution: Pick<Execution, 'workspace'> | undefined): Workspace | undefined {
+  const id = execution?.workspace
+  return id ? settings.executor.workspaces.find(workspace => workspace.id === id) : undefined
+}
+
+/**
+ * The p4 client a Ticket's edits belong to: its task center workspace's client, or the per-ticket client named from the
+ * template when it has no workspace.
+ */
+export function executionClient(settings: Settings, execution: Pick<Execution, 'workspace' | 'name'>): string {
+  const workspace = executionWorkspace(settings, execution)
+  return workspace ? workspaceClient(workspace, settings.executor.p4.clientTemplate) : p4Client(settings.executor.p4.clientTemplate, execution.name)
+}
 
 /**
  * Prepare command used under the p4 backend when no custom `prepare` command is configured.
@@ -75,7 +91,7 @@ export function declaredVariables(sources: SourceRegistry, settings?: Settings):
 }
 
 export function environmentOf(input: { deployment: Deployment; sources: SourceRegistry; settings: Settings; stateDir?: string;
-  ticket?: { id: string; name: string; directory: string; workspace?: string; lease?: string[]; backend?: Backend; mode?: ExecutionMode }; trigger?: Trigger }): Variable[] {
+  ticket?: { id: string; name: string; directory: string; workspace?: string; p4Client?: string; lease?: string[]; backend?: Backend; mode?: ExecutionMode }; trigger?: Trigger }): Variable[] {
   const { deployment, sources, settings, stateDir, ticket, trigger } = input
   const { backend: configured, p4 } = settings.executor
   // A ticket records the delivery environment its work belongs in; without one the deployment's configured backend applies.
@@ -94,7 +110,7 @@ export function environmentOf(input: { deployment: Deployment; sources: SourceRe
     ...ticket ? { DSH_SUPERAGENT_DIR: ticket.directory, DSH_SUPERAGENT_NAME: ticket.name, DSH_SUPERAGENT_TICKET: ticket.id,
       DSH_SUPERAGENT_EVIDENCE: stateDir ? join(stateDir, 'evidence', ticket.id) : '',
       DSH_SUPERAGENT_MODE: ticket.mode ?? 'standard',
-      DSH_SUPERAGENT_P4_CLIENT: p4Client(p4.clientTemplate, ticket.name),
+      DSH_SUPERAGENT_P4_CLIENT: ticket.p4Client ?? p4Client(p4.clientTemplate, ticket.name),
       DSH_SUPERAGENT_LEASE: (ticket.lease ?? []).join(' ') } : {},
   }
   const result: Variable[] = EXECUTOR_VARIABLES.filter(spec => !spec.ticket || ticket).map(spec => ({ key: spec.key, value: executor[spec.key] ?? '', description: spec.description, owner: 'executor' }))
@@ -105,11 +121,18 @@ export function environmentOf(input: { deployment: Deployment; sources: SourceRe
   return result
 }
 
-/** Combines a ticket's fixed directory, name, and origin trigger with the deployment's current settings. */
+/**
+ * Combines a ticket's fixed directory, name, and origin trigger with the deployment's current settings. A Ticket whose
+ * Execution names a task center workspace works in that workspace's tree with its client, whichever directory the
+ * workspace was configured with or has since moved to.
+ */
 export function ticketEnvironment(input: { deployment: Deployment; sources: SourceRegistry; settings: Settings; stateDir?: string; ticket: Ticket; trigger?: Trigger }) {
   const { ticket, trigger, ...rest } = input
-  const values = { id: ticket.id, name: ticket.execution?.name ?? '', directory: ticket.execution?.directory ?? '',
-    workspace: ticket.execution?.workspace, lease: ticket.execution?.lease, backend: ticket.execution?.backend, mode: ticket.execution?.mode }
+  const execution = ticket.execution
+  const workspace = executionWorkspace(input.settings, execution)
+  const values = { id: ticket.id, name: execution?.name ?? '', directory: workspace?.directory ?? execution?.directory ?? '',
+    ...(workspace ? { p4Client: workspaceClient(workspace, input.settings.executor.p4.clientTemplate) } : {}),
+    workspace: execution?.workspace, lease: execution?.lease, backend: execution?.backend, mode: execution?.mode }
   return environmentOf({ ...rest, ticket: values, ...trigger ? { trigger } : {} })
 }
 export function environmentLines(variables: Variable[]): string {
