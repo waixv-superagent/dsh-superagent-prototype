@@ -17,6 +17,7 @@ import { PluginConfig, usePageForm } from './deployment.tsx'
 import { ActiveTicketsDock } from './dock.tsx'
 import { en, zh } from './locales.ts'
 import { goInPanel } from './navigate.ts'
+import { deepLinkRoute } from './route.ts'
 import { SessionModel, type SessionModelProps } from './session-model.tsx'
 import type { T } from './text.ts'
 import TICKET_LINK_STYLES from './ticket-link.css?raw'
@@ -156,8 +157,27 @@ export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace', 'layout']
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-superagent: dictionaries')
   const t = ctx.locale.bind(NS)
-  ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL_ID, locale: NS, inject: () => ({}) },
-    (props: { t: T }) => <Mounted ctx={ctx} t={props.t} />))
+  let openedDeepLink = false
+  ctx.slots.inject('main', () => {
+    const dispose = ctx.slots.register({ name: 'main', key: PANEL_ID, locale: NS, inject: () => ({}) },
+      (props: { t: T }) => <Mounted ctx={ctx} t={props.t} />)
+    // DSH starts on the Conversation; a fresh page load with a Feishu deep link (`?ticket=` or `?view=board`) opens the
+    // panel it names, which otherwise only the sidebar could select. The registration above must exist before selectPanel
+    // accepts the key, so this runs in the same inject callback; a layout that is not ready yet retries briefly.
+    if (!openedDeepLink) {
+      const route = deepLinkRoute()
+      if (route) {
+        openedDeepLink = true
+        const open = (attempts: number): void => {
+          try { openPanelAt(ctx, route) } catch {
+            if (attempts > 0) setTimeout(() => { open(attempts - 1) }, 50)
+          }
+        }
+        open(20)
+      }
+    }
+    return dispose
+  })
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 10, label: () => t('panel'), locale: NS }, HammerIcon))
   ctx.slots.inject('sidebar.session.row.leading', () => ctx.slots.register({
     name: 'sidebar.session.row.leading', id: `${ENTRY}:ticket`, order: 40, locale: NS,
