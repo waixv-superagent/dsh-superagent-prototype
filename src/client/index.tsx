@@ -16,6 +16,7 @@ import { Icon } from './controls.tsx'
 import { PluginConfig, usePageForm } from './deployment.tsx'
 import { ActiveTicketsDock } from './dock.tsx'
 import { en, zh } from './locales.ts'
+import { goInPanel } from './navigate.ts'
 import { SessionModel, type SessionModelProps } from './session-model.tsx'
 import type { T } from './text.ts'
 import TICKET_LINK_STYLES from './ticket-link.css?raw'
@@ -62,9 +63,11 @@ function Mounted({ ctx, t }: { ctx: ClientContext; t: T }) {
   return <App t={t} openSession={openSession} deploymentForm={form} />
 }
 
-/** Shows the Ticket of a worker Session in the panel; the panel reads its route from sessionStorage when it mounts. */
+/** Shows the Ticket of a worker Session in the panel; a mounted panel moves in place, else the panel opens at the route. */
 function openTicket(ctx: ClientContext, ticketId: string): void {
-  openPanelAt(ctx, { page: 'execution', id: ticketId })
+  const route = { page: 'execution' as const, id: ticketId }
+  if (goInPanel(route)) { ctx.layout.selectPanel(PANEL_ID); return }
+  openPanelAt(ctx, route)
 }
 
 /** Opens the panel at a route; the panel reads it from sessionStorage when it mounts. */

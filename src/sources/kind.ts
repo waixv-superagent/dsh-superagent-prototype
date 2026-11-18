@@ -47,8 +47,11 @@ export interface SourcePolicyPart<P extends Record<string, unknown>> {
 /** UI link for a channel address; `triggerId` names the Trigger whose own deep link is preferred when available. */
 export interface ChannelLink { url: string; label: Localized; triggerId?: string }
 export type ChannelLinks = Partial<Pick<Deployment, 'repository' | 'feishu'>>
-/** What a Channel sends with: the bot's CLI, and the Source's own records, such as the receipt reaction a reply releases. */
-export type ChannelHost = Pick<SourceContext, 'commands' | 'state'>
+/** What a Channel sends with: the bot's CLI, the Source's own records, and the panel address a link may use. */
+export type ChannelHost = Pick<SourceContext, 'commands' | 'state'> & {
+  /** The configured panel address, or the browser origin the panel last reported; empty adds no link. */
+  panelBase?(configured: string): string
+}
 /** Outbound messaging adapter for a source kind's threads. */
 export interface SourceChannel<C> {
   /** Whether a reply may still go to `address`; without it, every address may receive replies. */

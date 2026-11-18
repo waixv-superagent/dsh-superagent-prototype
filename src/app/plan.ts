@@ -9,7 +9,8 @@ import type { Commands } from '../infra/commands.ts'
 import { KV } from '../kv.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import { planCard, messageLink, sendCard } from '../sources/feishu-card.ts'
-import { ticketPanelLink } from '../sources/feishu-sent.ts'
+import { ticketOpenLink } from '../sources/feishu-sent.ts'
+import type { SurfaceState } from './surface.ts'
 import type { Store } from './store.ts'
 
 /** How long a plan card's message id is remembered for its button callback; the card's delayed-update token lasts 30 minutes. */
@@ -18,14 +19,18 @@ export interface PlanHost {
   readonly store: Pick<Store, 'tickets' | 'settings' | 'triggers' | 'get' | 'set'>
   readonly sources: Pick<SourceRegistry, 'instance'>
   readonly commands: Pick<Commands, 'lark'>
+  /** Reports the panel address a browser was last seen at, so a card links an address nobody configured by hand. */
+  readonly surfaces: Pick<SurfaceState, 'panelBase'>
   /** Reports a card that could not be sent, so the failure appears in the log rather than nowhere. */
   warn(message: string): void
 }
 
-/** The ticket's panel page when the Feishu Source names a panel address, for the link a card carries back to its ticket. */
-export function panelLinkOf(host: { sources: Pick<SourceRegistry, 'instance'> }, ticketId: string): string | undefined {
-  const panelUrl = host.sources.instance<{ panelUrl?: string }>('feishu')?.config?.panelUrl?.trim()
-  return panelUrl ? ticketPanelLink(panelUrl, ticketId) : undefined
+/** The panel page of the ticket: the configured address, else the origin the browser last used, else none. */
+export function panelLinkOf(host: { sources: Pick<SourceRegistry, 'instance'>; surfaces: Pick<SurfaceState, 'panelBase'> },
+  ticketId: string): string | undefined {
+  const configured = host.sources.instance<{ panelUrl?: string }>('feishu')?.config?.panelUrl ?? ''
+  const base = host.surfaces.panelBase(configured)
+  return base ? ticketOpenLink(base, ticketId) : undefined
 }
 /**
  * Where intervention cards go when the ticket has no Feishu conversation of its own: the configured private chat, else the

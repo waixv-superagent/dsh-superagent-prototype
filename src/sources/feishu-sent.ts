@@ -4,15 +4,24 @@
  * Imported by the web panel's views, so it must stay free of Node-only modules.
  */
 import type { Key } from '../kv.ts'
+import { browserLink } from './feishu-text.ts'
 
 /** One message the bot sent for a ticket: the chat it went to, the topic (thread) it sits in when Feishu named one, and when. */
 export interface FeishuSent { ticketId: string; chatId: string; at: string; threadId?: string }
-/** The panel page of one ticket; `?ticket=` opens it before the page the browser remembered. */
+/** The panel page of one ticket in a browser; `?ticket=` opens it before the page the browser remembered. */
 export const ticketPanelLink = (panelUrl: string, ticketId: string): string =>
   `${panelUrl.trim().replace(/\/+$/, '')}/?ticket=${encodeURIComponent(ticketId)}`
+/**
+ * The link a bot message carries to its ticket: the panel's handoff route, which opens the browser page or, when the
+ * person is using the desktop app, hands the Ticket to the app's panel and brings it forward. Both clients are the same
+ * panel, so there is one address: the configured panel address or the browser origin the panel last reported. Feishu is
+ * asked to open it in the system browser, where the panel's login and the app's protocol launch both work.
+ */
+export const ticketOpenLink = (panelUrl: string, ticketId: string): string =>
+  browserLink(`${panelUrl.trim().replace(/\/+$/, '')}/orchestrator/ticket/${encodeURIComponent(ticketId)}`)
 /** The footer line a ticket's bot message ends with; empty when no panel address is configured. */
 export const ticketFooter = (panelUrl: string, ticketId: string): string =>
-  panelUrl.trim() ? `[工单 ${ticketId.slice(0, 8)} ↗](${ticketPanelLink(panelUrl, ticketId)})` : ''
+  panelUrl.trim() ? `[工单 ${ticketId.slice(0, 8)} ↗](${ticketOpenLink(panelUrl, ticketId)})` : ''
 /**
  * `text` with the ticket footer on its own last line. The footer is added after the message text was checked against the IM
  * limit, so it never takes words from what the worker or orchestrator wrote.

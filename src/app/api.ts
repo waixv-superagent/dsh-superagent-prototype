@@ -29,6 +29,10 @@ type Delivery = 'injected' | 'pending'
 
 export interface Api {
   'GET state': { response: StateView }
+  /** The panel reports which client its page runs in, so a ticket link can open where the person is working. */
+  'POST surface': { body: { surface: 'app' | 'web'; focused: boolean; visible: boolean; origin?: string }; response: { ok: true } }
+  /** The desktop app's panel takes the one Ticket a Feishu handoff asked it to show; a browser never gets one. */
+  'GET app-open': { query: { surface: 'app' | 'web' }; response: { ticketId?: string } }
   'GET overview': { response: OverviewView }
   /** Who holds the editor and for what, the queue and the host-run jobs, ue-mcp's view, the working Tickets, and what waits on a person. */
   'GET editor': { response: EditorPageView }

@@ -55,7 +55,7 @@ describe('Feishu outbound replies', () => {
     expect(lark).toHaveBeenCalledTimes(1)
     expect(JSON.parse(args[args.indexOf('--content') + 1]!).zh_cn.content[0][0].text).toBe(
       '收到，排查登录。\n已开话题：[「修好登录」](https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1)'
-      + '\n[工单 t-topic ↗](https://panel.example/?ticket=t-topic)')
+      + '\n[工单 t-topic ↗](https://panel.example/orchestrator/ticket/t-topic?lk_jump_to_browser=true&lk_mobile_jump_to_browser=true)')
   })
   it('answers inside the ticket\'s own topic without a link back to it, since the person is already there', async () => {
     const state = memory()
