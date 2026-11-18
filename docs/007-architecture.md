@@ -394,7 +394,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/delivery-targets.ts` | `deliveryTargets`, the repository and depot this installation delivers to, and `resolveDelivery`, which turns a Ticket's target or Source into its backend |
 | `src/app/source-context.ts` | `sourceContextOf`: each Source kind's `SourceContext` |
 | `src/app/links.ts` | `sourceLink`, the page of a Trigger's message, and `candidateCard` |
-| `src/app/cards.ts` | Compact cards of Triggers, Tickets, Threads and Decisions for models, the closed set of ticket card states `TICKET_STATES`, and `textPage` |
+| `src/app/cards.ts` | Compact cards of Triggers, Tickets, Threads and Decisions for models, the conversation a Ticket's own replies go to (`reply_channel`), the closed set of ticket card states `TICKET_STATES`, and `textPage` |
 | `src/app/pipeline.ts` | Read-only checks for a delivered change: the review's state and versions, Swarm testruns and review comments, Jenkins console errors, and the changelist state after a submit, summarized for the Ticket's pipeline gate |
 | `src/app/pipeline-watch.ts` | The host's automatic pipeline follow-up: polls every open delivered p4 Ticket, turns a new failure into a worker Input, a green review or an approval into one queued message, and the submit into the Ticket's completion |
 | `src/app/watchdog.ts` | The host's recovery from a passing model or network outage: retries a stopped Ticket on a growing backoff, keeps the main Session alive and retries its failed turn, and mirrors what waits into the `watchdog` health entry |

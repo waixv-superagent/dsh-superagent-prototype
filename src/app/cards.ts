@@ -33,6 +33,9 @@ export function ticketCard(ticket: Ticket) {
     ...ticket.plan.question ? { question: ticket.plan.question } : {}, ...ticket.plan.options?.length ? { options: ticket.plan.options } : {} } : undefined
   return { ticket_id: ticket.id, title: ticket.title, state: cardState(ticket), phase: ticketPhase(ticket), strength: ticket.mandate.strength,
     ...(ticket.category ? { category: ticket.category } : {}), kind: ticketKind(ticket).kind,
+    // Where the ticket's own replies go, such as the Feishu topic a Source opened for it: a worker delivering a long report
+    // replies to that message, never to the source thread, which keeps only the acceptance receipt that links the topic.
+    ...(ticket.replyChannel ? { reply_channel: ticket.replyChannel } : {}),
     // Who the ticket waits for and what it is doing, so a reader does not have to translate a stage word into an action.
     next: waitingOf(ticket),
     // Where the ticket stands in the queue: its level and who set it, a question nobody answered yet, and whether it waits for idle.

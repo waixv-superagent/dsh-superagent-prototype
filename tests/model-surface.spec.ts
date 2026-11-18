@@ -81,7 +81,10 @@ interface Skill { name: string; description: string; content: string }
 // A ticket accepted in the phased flow adds the `execution_mode` accept field and the rule that never infers it, the
 // `DSH_SUPERAGENT_MODE` variable line, and the worker's phased-planning, dispatch and verifier rules (docs/003); the
 // main Session's surface measures 69,963 and the worker's 64,799, so the budgets grow to 70,100 and 64,900.
-const BUDGET: Record<Role, number> = { orchestrator: 70_100, worker: 64_900 }
+// A ticket's later replies go to the conversation its Source opened for it — the ticket card's `reply_channel` — and a
+// worker posts an inquiry's report there rather than in the source thread (docs/015). The worker surface measures
+// 65,053, so the budget grows to 65,100.
+const BUDGET: Record<Role, number> = { orchestrator: 70_100, worker: 65_100 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

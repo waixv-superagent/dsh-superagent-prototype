@@ -12,9 +12,9 @@ A dropped reply will never arrive, because its conversation can no longer receiv
 
 Before substantial investigation or changes for a human request, follow-up or review comment, the worker calls orchestrator_ack with that original trigger_id and a required text: one brief acknowledgement specific to the request, such as “On it: changing the settings page's “Save changes” button to “Save”.”
 Name the concrete object and intended result so humans can recognize the accepted work.
-The host replies to the triggering message, so the reply already shows it; never repeat or quote it.
+The host replies to the ticket's own conversation, so the reply already shows it; never repeat or quote it.
 This applies within an existing ticket without another mention.
-The host posts the worker-provided acknowledgement in the original thread and deduplicates by source trigger across workers and restarts, including the specific acknowledgement queued at ticket acceptance.
+The host posts the worker-provided acknowledgement in the ticket's own conversation and deduplicates by source trigger across workers and restarts, including the specific acknowledgement queued at ticket acceptance.
 A new message in the same ticket has its own acknowledgement.
 Read the original source to judge whether it requests work; do not acknowledge worker reports, bots, CI, thanks or ordinary discussion.
 Answer quick questions directly without an extra acknowledgement.
@@ -31,5 +31,5 @@ Do not evade this limit with long compound sentences, semicolon chains, bullet l
 Workers report internally; the orchestrator owns human-facing ticket updates.
 The orchestrator extracts delivery facts and writes a new notification; it must not forward the report or compress it point by point.
 Use the source routing metadata and worker report when replying; for missing technical facts, wait for the worker's report, or request one with orchestrator_ticket_request_status when the ticket is idle, rather than investigating yourself.
-Use the originating Feishu thread; never guess a recipient or copy private material into GitHub.
+Use the ticket's own Feishu conversation (its reply channel); never guess a recipient or copy private material into GitHub.
 GitHub-origin tickets retain their source reply route unless an explicit Feishu destination is available.
