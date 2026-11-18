@@ -3,7 +3,7 @@
  * buttons answer a worker's `human_action`, a TAPD ticket's priority question, the forms for a typed direction, the cards
  * that record an answer, and the text fallback when Feishu refuses a card.
  */
-import { PLAN_CARD_QUESTION, PLAN_REPLY_HINT, PLAN_TEMPLATES, PRIORITY_LABELS, PRIORITY_LEVELS, planLines, planTemplate, type Plan, type PlanDecision,
+import { grillAnswerLines, PLAN_CARD_QUESTION, PLAN_REPLY_HINT, PLAN_TEMPLATES, PRIORITY_LABELS, PRIORITY_LEVELS, planLines, planTemplate, type Grill, type Plan, type PlanDecision,
   type PlanDiff, type PlanOption, type PlanTemplate, type PipelineCard, type PriorityAsk, type PriorityLevel, type QuestionSection, type Ticket } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
 import { feishuPostContent, jsonForCmd, textSafe } from './feishu-text.ts'
@@ -231,6 +231,9 @@ const foldPanel = (sections: readonly QuestionSection[], title: string): Record<
 })
 /** The four evidence lines the fix plan card folds away; a worker's custom sections replace them. */
 const EVIDENCE = ['代码线', '资产线', '配置线', '验证方案'] as const
+/** The choices a person confirmed in the grill, so the plan card never asks the same questions again. */
+const confirmedBlock = (grill: Pick<Grill, 'questions' | 'answers'>): Record<string, unknown> =>
+  markdown(`**已确认 · 开工前 ${grill.questions.length} 问**\n${grillAnswerLines(grill).map(line => `• ${line}`).join('\n')}`)
 /** Which plan lines a card leads with and which it folds, per template: the fix layout is the original one. */
 const PLAN_LAYOUTS: Readonly<Record<PlanTemplate, { front: readonly string[]; fold: readonly string[] }>> = {
   fix: { front: ['现象', '修复锚点', '影响面', '预算'], fold: EVIDENCE },
@@ -257,7 +260,7 @@ const buttonRow = (buttons: readonly Record<string, unknown>[]): Record<string, 
  * previews the card by its question. The text fallback carries the key lines and the labels in full, since only a person
  * who cannot see the card reads it.
  */
-export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 'text' | 'template' | 'question' | 'options' | 'deadline' | 'sections' | 'diff'>,
+export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 'text' | 'template' | 'question' | 'options' | 'deadline' | 'sections' | 'diff' | 'grill'>,
   ticketLink?: string): CardMessage {
   const template = planTemplate(plan)
   const lines = linesOf(plan.text, template)
@@ -272,6 +275,7 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
     title: `待确认 · ${PLAN_KIND[template]}`, subtitle: ticketSubtitle(ticket, !!ticketLink), template: 'blue', summary: `待确认：${question}`,
     elements: [
       markdown(`**${question}**`, { text_size: 'heading' }),
+      ...plan.grill?.answers.length ? [confirmedBlock(plan.grill)] : [],
       ...body.length ? body.map(section => block(section.label, section.text))
         : custom ? [] : layout.front.map(label => block(label, get(label), ['影响面', '预算'].includes(label) ? { text_size: 'notation' } : {})),
       ...plan.diff ? [diffBlock(plan.diff), ...ticketLink ? [markdown(`[在面板看完整 diff（内联 / 并排）](${ticketLink})`, { text_size: 'notation' })] : []] : [],
@@ -290,6 +294,7 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
     + `${plan.diff.base ? `（对比 ${plan.diff.base}）` : ''}；逐行 diff 在工单面板里，可切内联 / 并排。` : ''
   const text = textSafe([`待确认 · ${PLAN_KIND[template]}：${ticket.title}（工单 ${shortId(ticket)}）`,
     `要你定：${question}`,
+    ...plan.grill?.answers.length ? [`已确认：${grillAnswerLines(plan.grill).join('；')}`] : [],
     ...context.map(section => blockText(section.label, section.text)),
     diffText,
     '通过后：开始实现，交付前再请你确认；不会直接 submit。',
@@ -416,6 +421,64 @@ const handledCard = (title: string, subtitle: string, line: string): Record<stri
 export function priorityStaleCard(ticketId: string): CardMessage {
   return { card: handledCard('已处理 · 优先级已记过', `工单 ${ticketId.slice(0, 8)}`, '已经有人答过或已按默认处理，当前值在工单面板里。'),
     text: '已处理 · 这张卡的优先级已记过' }
+}
+/**
+ * The structured grill before a plan card: one form with at most four decisions, each a short question, its options and the
+ * worker's recommendation, and one submit. The person answers everything in one pass, so the old drip of one blocking
+ * question card at a time (or a long grill document) becomes a single, bounded round.
+ */
+export function grillCard(ticket: Pick<Ticket, 'id' | 'title'>, grill: Pick<Grill, 'id' | 'questions'>, ticketLink?: string): CardMessage {
+  const count = grill.questions.length
+  const linked = !!ticketLink
+  const question = `开工前 ${count} 个问题`
+  const intro = '先定这几件事，方案卡就只问「能不能开工」。每题选一个。'
+  const fields = grill.questions.flatMap((item, index): Record<string, unknown>[] => [
+    markdown(`**Q${index + 1} · ${item.title}**\n${item.question}`),
+    markdown(`推荐：${item.options[item.recommended] ?? '—'}`, { text_size: 'notation' }),
+    {
+      tag: 'select_static', name: item.id, required: true, width: 'fill', placeholder: plain('选一个'),
+      options: item.options.map((option, optionIndex) => ({ text: plain(optionIndex === item.recommended ? `${option}（推荐）` : option), value: String(optionIndex) })),
+    },
+  ])
+  const card = shell({
+    title: `待你答 · ${question}`, subtitle: ticketSubtitle(ticket, linked), template: 'orange', summary: `待你答：${question}`,
+    elements: [
+      markdown(intro),
+      { tag: 'form', name: 'grill_form', vertical_spacing: '8px', elements: [
+        ...fields,
+        { tag: 'button', name: 'submit_grill', form_action_type: 'submit', type: 'primary_filled', width: 'fill',
+          text: plain('提交回答，出方案卡') },
+      ] },
+      footer(['全部选完再提交；提交后 worker 按回答出方案卡。想补充就回这条话题。'], ticket.id, linked ? ticketLink : undefined)!,
+    ],
+  })
+  const text = textSafe([`待你答 · ${question}：${ticket.title}（工单 ${shortId(ticket)}）`, intro,
+    ...grill.questions.flatMap((item, index) => [`Q${index + 1} ${item.title}`, item.question,
+      ...item.options.map((option, optionIndex) => `  ${String.fromCharCode(65 + optionIndex)} ${option}${optionIndex === item.recommended ? '（推荐）' : ''}`)]),
+    `回 q1=A q2=B（或直接按题目回答），也可以点卡片一次提交。`].join('\n'))
+    + (linked ? `\n${ticketLinkText(ticket.id, ticketLink)}` : '')
+  return { card, text }
+}
+
+/** The card that replaces a submitted grill: every answer in one place, and the next step. */
+export function grillResolvedCard(ticket: Pick<Ticket, 'id' | 'title'>, grill: Pick<Grill, 'questions' | 'answers'>): CardMessage {
+  const lines = grillAnswerLines(grill)
+  const card = shell({
+    title: '已收齐 · worker 接着出方案卡', subtitle: ticketSubtitle(ticket, false), template: 'green',
+    summary: `已收齐 ${lines.length} 个回答`,
+    elements: [markdown(lines.map(line => `• ${line}`).join('\n')), markdown('方案卡会把这些选择列成「已确认」，只问能不能开工。', { text_size: 'notation' })],
+  })
+  return { card, text: textSafe(`已收齐 ${lines.length} 个回答：${lines.join('；')}。worker 接着出方案卡。`) }
+}
+/** The card for a submit on a grill that was answered or replaced: idempotent, and it changes nothing. */
+export function grillStaleCard(ticketId?: string): CardMessage {
+  return { card: handledCard('已处理 · 这轮问题不用再答', ticketId ? `工单 ${ticketId.slice(0, 8)}` : '问题已关闭',
+    '已经有人答过，或已换成新的问题，最新状态在工单面板里。'), text: '已处理 · 这轮问题不用再答' }
+}
+/** The card for a submit that did not carry one option per question: the form stays open, nothing is recorded. */
+export function grillIncompleteCard(ticket: Pick<Ticket, 'id' | 'title'>): CardMessage {
+  return { card: handledCard('还差一个选择', ticketSubtitle(ticket, false), '每个问题都要选一个选项再提交。'),
+    text: textSafe(`还差一个选择：${ticket.title} 的每个问题都要选一个选项再提交。`) }
 }
 /**
  * A worker's question card: the question in full, then one button per choice the worker wrote (2–4), and the note that a

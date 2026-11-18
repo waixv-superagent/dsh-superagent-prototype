@@ -90,7 +90,9 @@ interface Skill { name: string; description: string; content: string }
 // A plan declares its write paths and an approved plan widens the lease, and a worker's lease re-request is applied by the
 // host instead of becoming a question (docs/011); the handoff/work rules and the plan's `paths` and report's `lease` fields
 // measure 71,096 on the main Session and 67,694 on the worker, so the budgets grow to 71,100 and 67,800.
-const BUDGET: Record<Role, number> = { orchestrator: 71_100, worker: 67_800 }
+// The structured grill before the plan card adds `orchestrator_grill` and its one-round rule (docs/012): the worker surface
+// measures 69,760, so its budget grows to 69,800.
+const BUDGET: Record<Role, number> = { orchestrator: 71_100, worker: 69_800 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'
@@ -412,7 +414,7 @@ function failures(): Map<string, string> {
 }
 
 it('collects both roles\' tools, prompts, skills and inputs', () => {
-  expect([...toolsOf('worker').keys()].sort()).toEqual(['orchestrator_ack', 'orchestrator_editor', 'orchestrator_phase',
+  expect([...toolsOf('worker').keys()].sort()).toEqual(['orchestrator_ack', 'orchestrator_editor', 'orchestrator_grill', 'orchestrator_phase',
     'orchestrator_pipeline', 'orchestrator_pipeline_check', 'orchestrator_pipeline_rerun', 'orchestrator_plan',
     'orchestrator_read', 'orchestrator_redispatch', 'orchestrator_report', 'orchestrator_thread_follow',
     'orchestrator_thread_unrelated', 'orchestrator_ticket_link', 'orchestrator_trigger_handback', 'sentry'])

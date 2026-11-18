@@ -2,13 +2,13 @@
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, latestReport, liveTicket, MODEL_APPROVAL_OPTIONS, modelRoute, personNamesRoute, readUntil, routesNamedIn, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
-import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, LinkedRelationKind, Mandate, ModelGrant, ModelRelay, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, TeamRoute, ThreadRef, Ticket, TicketDeploy, TicketEndBy,
+import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, Grill, GrillQuestion, LinkedRelationKind, Mandate, ModelGrant, ModelRelay, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, TeamRoute, ThreadRef, Ticket, TicketDeploy, TicketEndBy,
   TicketInput, TicketOutcome, TicketPhaseReset, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { classifyTicket } from './kind.ts'
 import { ticketUpdateTrack } from './update-track.ts'
-import { mergeLease, missingPlanLabels, normalizeWritePath, pendingPlan, phaseRank, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planPhaseProblem,
+import { grillAnswerLines, grillProblem, grillWaiting, mergeLease, missingPlanLabels, normalizeWritePath, pendingPlan, phaseRank, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planPhaseProblem,
   planSettleable, planTemplate, ticketMode, ticketPhase, validPlanOptions, validQuestionSections, writePathsProblem,
   type Plan, type PlanDecision, type PlanOption, type PlanPhase, type PlanTemplate, type PlanVia, type TicketPhase } from './plan.ts'
 import { parsePlanDiff, type PlanDiff } from './diff.ts'
@@ -606,7 +606,66 @@ export class Tickets extends EnginePart {
       ...(phase.after?.length ? { after: phase.after.map(name => name.trim()) } : {}) }))
     return { text, at: this.now(), ...(template !== 'fix' ? { template } : {}), ...(asked ? { question: asked } : {}),
       ...(choices?.length ? { options: choices } : {}), ...(context?.length ? { sections: context } : {}), ...(diff ? { diff } : {}),
-      ...(team?.length ? { phases: team } : {}), ...(declared?.length ? { paths: declared.map(normalizeWritePath) } : {}) }
+      ...(team?.length ? { phases: team } : {}), ...(ticket.grill?.answeredAt ? { grill: ticket.grill } : {}),
+      ...(declared?.length ? { paths: declared.map(normalizeWritePath) } : {}) }
+  }
+  /**
+   * A worker's one structured question round before its plan card (docs/012 §2): 1–4 decisions, each with 2–4 concrete
+   * options and the worker's recommended one, sent to the person as a single form. One round per plan attempt: a pending
+   * round blocks a second one, and an answered round blocks another until the person asks for a new direction (which clears
+   * it). A pending ordinary question is withdrawn, since the grill replaces it.
+   * @throws UserError when the ticket is unknown or ended, a plan waits or was approved, this attempt already asked, or the
+   * questions are not one a person can answer in one pass.
+   */
+  askGrill(ticketId: string, questions: readonly Pick<GrillQuestion, 'title' | 'question' | 'options' | 'recommended'>[]): Ticket {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    if (pendingPlan(ticket) || ticket.plan?.approved) throw new UserError('grillUsed')
+    const problem = grillProblem(questions)
+    if (problem) throw new UserError('grillQuestions', { problem })
+    if (grillWaiting(ticket)) throw new UserError('grillPending')
+    if (ticket.grill?.answeredAt) throw new UserError('grillUsed')
+    const at = this.now()
+    const prepared: GrillQuestion[] = questions.map((item, index) => ({
+      id: `q${index + 1}`, title: item.title.trim(), question: item.question.trim(),
+      options: item.options.map(option => option.trim()), recommended: item.recommended,
+    }))
+    ticket.grill = { id: key('grill', ticketId, at), at, questions: prepared, answers: [] }
+    if (ticket.attention && ticket.attention.question !== PLAN_QUESTION) {
+      this.replies.withdrawAttention(ticket.attention.id)
+      delete ticket.attention
+    }
+    ticket.updatedAt = at
+    this.repo.tickets.save(ticket)
+    return ticket
+  }
+  /**
+   * A person answered every question of the ticket's waiting grill, through the Feishu form or the panel: the answers are
+   * recorded, the round closes, and they reach the worker as one Input so it goes straight to its plan card. A partial or
+   * stale answer changes nothing.
+   * @throws UserError when the ticket is unknown or ended, the grill is gone or replaced, or the answers do not cover each
+   * question with one of its options.
+   */
+  answerGrill(ticketId: string, grillId: string, answers: Readonly<Record<string, number>>, via: 'feishu' | 'panel' = 'panel'): Ticket {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    const grill = ticket.grill
+    if (!grill || grill.id !== grillId || grill.answeredAt) throw new UserError('notGrill')
+    const at = this.now()
+    const recorded = grill.questions.map(question => {
+      const option = answers[question.id]
+      if (option === undefined || !Number.isInteger(option) || option < 0 || option >= question.options.length) throw new UserError('grillAnswers')
+      return { questionId: question.id, option, at, via }
+    })
+    const answered: Grill = { ...grill, answers: recorded, answeredAt: at }
+    ticket.grill = answered
+    ticket.updatedAt = at
+    const lines = grillAnswerLines(answered)
+    this.addInput(ticket, { id: key('input', ticketId, 'grill', grill.id, at), kind: 'text', at, person: true,
+      text: `人对开工前的 ${lines.length} 个问题答了（${via === 'feishu' ? '飞书' : '面板'}）：\n`
+        + lines.map((line, index) => `Q${index + 1} ${line}`).join('\n')
+        + '\n请据此出方案卡；方案卡会把这些选择列成「已确认」，不要再问同样的问题。' })
+    return this.require(ticketId)
   }
   /**
    * Merges a plan's declared write paths into a ticket's lease, so the placement that follows an approval sees the paths
@@ -631,6 +690,13 @@ export class Tickets extends EnginePart {
     diffText?: string, diffBase?: string, phases?: PlanPhase[], paths?: string[]): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    // The grill is the plan's input: the card may not follow while it waits. A person's own reply on the ticket is the
+    // answer when the structured form was not used (the card's text fallback says so), so that reply lets the plan follow.
+    const waitingGrill = grillWaiting(ticket)
+    if (waitingGrill) {
+      if (!this.personWroteSince(ticket, waitingGrill.at)) throw new UserError('grillUnanswered')
+      delete ticket.grill
+    }
     const plan = this.planOf(ticket, text, question, options, sections, template, diffText, diffBase, phases, paths)
     const previous = ticket.attention
     ticket.plan = { ...plan, waiting: true, deadline: new Date(Date.parse(plan.at) + PLAN_GATE_HOURS * 3_600_000).toISOString() }
@@ -698,6 +764,8 @@ export class Tickets extends EnginePart {
     } else if (decision === 'revise') {
       plan.feedback = [...plan.feedback ?? [], { text: note || '请换一个方向，重新给方案。', at, via, ...(choice ? { option: choice } : {}) }]
       delete plan.waiting
+      // A new direction starts a new plan attempt: the one grill round it used was about the plan the person just refused.
+      delete ticket.grill
       ticket.updatedAt = at
       this.repo.tickets.save(ticket)
       // The person's own direction is their message to the worker: marked as theirs, so a model route it names is an
@@ -869,6 +937,10 @@ export class Tickets extends EnginePart {
     }
     return messages
   }
+  /** Whether a person wrote on the ticket after `at`: the free-text answer a grill's text fallback asks for. */
+  private personWroteSince(ticket: Ticket, at: string): boolean {
+    return this.personMessages(ticket).some(message => message.at > at)
+  }
   /**
    * A worker moves its ticket one phase forward: implement (only through a person's plan approval) → verify → deliver, the
    * last only with verification recorded. A step that skips a phase or goes backwards is refused, so the gate cannot be
@@ -914,6 +986,8 @@ export class Tickets extends EnginePart {
       if (ticket.attention?.question === PLAN_QUESTION) { this.replies.withdrawAttention(ticket.attention.id); delete ticket.attention }
     }
     if (ticket.verification?.state === 'pending') delete ticket.verification
+    // A reopened phase starts a new round: a grill of the round it leaves behind cannot decide the new plan.
+    if (ticket.grill) delete ticket.grill
     // The verification the worker reported checked the work before the gate reopened: deliver must not accept it again, so
     // the reopened round verifies anew before it can move forward (no forward skip, docs/012).
     if (ticket.execution?.verification) { const { verification: _stale, ...execution } = ticket.execution; ticket.execution = execution }

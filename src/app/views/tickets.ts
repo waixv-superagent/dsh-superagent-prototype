@@ -196,9 +196,15 @@ function planView(ticket: Ticket) {
   return { text: plan.text, template, lines: planLines(plan.text, template), at: plan.at, waiting: !!pendingPlan(ticket),
     ...plan.question ? { question: plan.question } : {}, ...plan.options?.length ? { options: plan.options } : {},
     ...plan.sections?.length ? { sections: plan.sections } : {},
+    ...plan.grill ? { grill: plan.grill } : {},
     ...plan.diff ? { diff: plan.diff } : {},
     ...plan.deadline ? { deadline: plan.deadline } : {}, ...plan.approved ? { approved: plan.approved } : {},
     ...plan.feedback?.length ? { feedback: plan.feedback } : {} }
+}
+/** The ticket's one structured question round, waiting for a person or answered, as its page shows it. */
+function grillView(ticket: Ticket) {
+  const grill = ticket.grill
+  return grill ? { ...grill, waiting: !grill.answeredAt } : undefined
 }
 export function ticketDetail(host: ViewHost, id: string) {
   const { store } = host
@@ -224,6 +230,7 @@ export function ticketDetail(host: ViewHost, id: string) {
     channels: ticket.channels.map(channel => channelLink(view, channel)),
     reply: answerLink(view, ticket, stage),
     plan: planView(ticket),
+    ...grillView(ticket) ? { grill: grillView(ticket) } : {},
     // The back-moves a person made, so the execution history says why a gate reopened (docs/031).
     phaseResets: ticket.phaseResets ?? [],
     decision: decision ? decisionView(view, decision) : undefined,
