@@ -28,7 +28,8 @@
 - 交接页：用真实 `registerHttp` handler 起一个临时 HTTP 服务，headless Chrome 截图 `handoff-app.png`；
   同一服务在浏览器端返回 `302 /?ticket=…`（`web-redirect.txt`）。
 - 卡片：分支代码生成两张合成方案卡（假工单 `ffffffff`）：`card-before.json`（无链接）与 `card-after.json`
-  （footer 链接 + 整卡 `card_link`），发到本工单的飞书话题后由工单主人截图。
+  （footer 链接 + 整卡 `card_link`），两张都发到了本工单的飞书话题（`om_x100b60ee153624a8b4958f95faddd2d` /
+  `om_x100b60ee12b37cb4cfc92ce75633804`）。工单主人明确说不用贴截图，所以这里只保留卡片 JSON，不附飞书渲染截图。
 
 ## 复现
 
