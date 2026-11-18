@@ -9,17 +9,28 @@ import { errorText, fullTime, readableMarkers, setupText, when, checkLines, type
 
 const external = { target: '_blank', rel: 'noopener noreferrer' } as const
 /**
- * A client scheme (`feishu://`, `lark://`) hands the URL to the desktop app, so it must not open a browser tab first:
- * `target="_blank"` on such a link leaves an empty tab behind after the app opens.
+ * Whether this page runs in the DSH desktop shell (Electron). That shell opens an http(s) link in the system browser
+ * but drops any other scheme, so a client link would do nothing there; the page is told apart by its user agent.
+ */
+const electronShell = (): boolean => typeof navigator !== 'undefined' && /(?:^|\s)Electron\/\d/.test(navigator.userAgent)
+/**
+ * A client scheme (`feishu://`, `lark://`) hands the URL to the Feishu desktop client, so it must not open a browser tab
+ * first: `target="_blank"` on such a link leaves an empty tab behind after the client opens.
  */
 export const linkTarget = (href: string) => /^(?:feishu|lark):\/\//i.test(href) ? {} : external
 /**
  * A Feishu AppLink rendered through the client scheme instead: the `https://applink…` form first renders Feishu's own
- * landing page in the browser, which is the tab a person has to close. Other links pass through unchanged.
+ * landing page in the browser, which is the tab a person has to close. Other links pass through unchanged. The DSH
+ * desktop shell only opens http(s) links in the browser, so there the AppLink keeps that form and the browser opens it
+ * instead of a client link the shell would drop.
  */
-export const clientHref = (href: string): string => href
-  .replace(/^https:\/\/applink\.feishu\.cn\//i, 'feishu://applink/')
-  .replace(/^https:\/\/applink\.larksuite\.com\//i, 'lark://applink/')
+export const clientHref = (href: string): string => electronShell()
+  ? href
+    .replace(/^feishu:\/\/applink\//i, 'https://applink.feishu.cn/')
+    .replace(/^lark:\/\/applink\//i, 'https://applink.larksuite.com/')
+  : href
+    .replace(/^https:\/\/applink\.feishu\.cn\//i, 'feishu://applink/')
+    .replace(/^https:\/\/applink\.larksuite\.com\//i, 'lark://applink/')
 
 export function When({ at }: { at: string | undefined }) {
   const { t } = usePanel()
