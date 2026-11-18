@@ -58,6 +58,16 @@ export function place(workspaces: readonly Workspace[], active: readonly Active[
     && active.every(item => item.workspace !== workspace.id || !overlap(item.lease, lease)))
 }
 
+/**
+ * The workspace a Ticket is placed in: the one its execution pinned, or else the first one `place` accepts. A p4 Ticket's
+ * execution pins the task centre's default workspace, so its work happens in that tree and client even when it named no
+ * paths; a pinned workspace that this installation no longer configures falls back to the pool. `undefined` means wait.
+ */
+export function placeTicket(workspaces: readonly Workspace[], active: readonly Active[], lease: Lease, pinned?: string): Workspace | undefined {
+  const workspace = pinned ? workspaces.find(item => item.id === pinned) : undefined
+  return place(workspace ? [workspace] : workspaces, active, lease)
+}
+
 /** The smallest set of leases that `lease` conflicts with, for the message a queued Ticket shows. */
 export function conflicts(active: readonly Active[], lease: Lease): Active[] {
   return active.filter(item => overlap(item.lease, lease))

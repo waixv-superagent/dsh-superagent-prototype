@@ -593,11 +593,14 @@ export interface TicketRelation { kind: LinkedRelationKind; ticketId: string; re
  */
 export interface Follow { thread: string; own: boolean; closed?: { at: string; outcome: 'merged' | 'closed' } }
 /**
- * Where a ticket's worker runs. `lease` holds the path prefixes it may write, relative to its workspace: an empty lease
- * means the whole workspace, so the task center never runs it beside another ticket in the same workspace. The delivery
- * facts — `changelist`, `review`, `verification` — are what its latest report said it delivered.
+ * Where a ticket's worker runs. `directory` is the ticket's own directory, or the task center workspace `workspace` names;
+ * `lease` holds the path prefixes it may write, relative to its workspace: an empty lease means the whole workspace, so the
+ * task center never runs it beside another ticket in the same workspace. The delivery facts — `changelist`, `review`,
+ * `verification` — are what its latest report said it delivered.
  */
-export interface Execution { name: string; directory: string; assignment: string; workspace?: string; lease?: string[]
+export interface Execution { name: string; directory: string; assignment: string
+  /** The task center workspace the ticket works in, by id: a p4 ticket records the configured default; absent keeps its own directory. */
+  workspace?: string; lease?: string[]
   /** The delivery environment this ticket's work belongs in; absent keeps the deployment's configured backend. */
   backend?: Backend
   /** The configured repository or workspace the work belongs to, once an accept or a Source named one. */

@@ -42,7 +42,7 @@ With the `p4` backend and an empty `executor.prepare`, the Executor runs a gener
 3. submits the specification with `p4 client -i`, never `-f`: a non-admin account may save its own client but forcing one is refused with "You don't have permission for this operation";
 4. syncs `p4.depot/...` at `<syncSpec>`.
 
-The client is named after the workspace under the task center (see 011 Task center), so one workspace has one client and its Tickets keep their own changelists inside it.
+The client is the workspace's configured `p4Client`, else the template with the workspace id (see 011 Task center), so one workspace has one client and its Tickets keep their own changelists inside it.
 
 A task center workspace shares one client across the Tickets placed in it. Each Ticket delivers in a changelist of its own — `p4 change -i`, `p4 reopen -c <CL> <files>`, `p4 shelve -c <CL>` — and keeps its files and edits in the workspace afterwards: a person may test the change locally and the next round continues from the same edits, while the lease, not a clean tree, keeps peers off those paths. It does not revert them after shelving.
 
@@ -50,14 +50,16 @@ Everything is read from the execution environment, so no depot path is baked int
 
 A failed prepare fails the Ticket with the command's output and is not retried, because an existing directory counts as prepared (see 007 Architecture).
 
-### 2.1 Where a delivered change lives, and why it may be a workspace you cannot see
+### 2.1 Where a delivered change lives
 
-A Ticket works in the directory its Execution block names — by default `<stateDir>/work/<short name>`, or a task centre workspace when the accept placed it in one. Under the `p4` backend that directory is also a client the host created, named from `p4.clientTemplate`; the Ticket's changelist is opened, shelved and kept in that client. A person's own P4V client therefore does not list the shelved changelist: it belongs to the Ticket's client, not to the mainline workspace the person uses day to day. The change is still visible where it matters — Swarm serves the review by id, and the Ticket page names the workspace directory, the target and the client that owns the changelist.
+A `p4` Ticket works in the task center's default workspace, which is the first one configured in `executor.workspaces`; this installation configures `sun` at `E:\sun_mainline` with the client `wanghuaiyang_sun_mainline`. Its changelist is opened, shelved and kept in that client, so a person's own P4V client lists the pending changelist and the edits are in the tree a build or the editor sees. The Ticket page names the workspace directory, the target and the client that owns the changelist, and Swarm serves the review by id.
+
+A Ticket with no configured workspace keeps its own `<stateDir>/work/<short name>` directory, and the client the prepare command creates for it from `p4.clientTemplate` is not the person's own: P4V does not list that Ticket's pending changelist.
 
 Two layouts are reasonable:
 
-- **One workspace per Ticket (the default).** Each Ticket gets its own client and tree, so two Tickets never compile into or sync the same files, and a person can inspect one without disturbing another. The cost is that the directory is under the execution root, not in the person's usual checkout.
-- **A pooled task-centre workspace.** Several Tickets are placed in the same workspace and share one client and one build tree; each still delivers its own changelist. Use it when the Tickets are expected to build and be verified together (a shared change, a batch of small fixes) and the shared tree is the thing a person wants to test.
+- **The shared default workspace (the default).** Every new `p4` Ticket is pinned there and shares its tree and client; each still delivers its own changelist. A Ticket that named no paths waits for the workspace and runs alone, so two Tickets never edit the same file; a Ticket that named paths runs beside disjoint peers. Use it when the machine has one mainline workspace large enough that a second copy is impractical, which is the usual case.
+- **A private workspace per Ticket (when no workspace is configured).** Each Ticket gets its own client and tree, so two Tickets never compile into or sync the same files, and a person can inspect one without disturbing another. The cost is a second copy of the tree, and a client a person's own P4V does not show.
 
 No step moves a delivered changelist into another workspace: the workspace named on the Ticket is where it was made, shelved and left for the follow-up. A person who wants to test the shelf locally opens that directory (or adds that client in P4V); a person who only reviews reads it in Swarm.
 
@@ -68,7 +70,7 @@ The p4 backend adds these to the execution environment, visible in Execution set
 | Variable | Value |
 | --- | --- |
 | `DSH_SUPERAGENT_BACKEND` | `git` or `p4` |
-| `DSH_SUPERAGENT_P4_CLIENT` | The Ticket's workspace name, from the template and its short name |
+| `DSH_SUPERAGENT_P4_CLIENT` | The task center workspace's client, or, without a workspace, the per-ticket client from the template |
 | `DSH_SUPERAGENT_P4_PORT`, `DSH_SUPERAGENT_P4_DEPOT`, `DSH_SUPERAGENT_P4_SYNC`, `DSH_SUPERAGENT_SWARM_URL` | The configured values |
 | `DSH_SUPERAGENT_P4_CL`, `DSH_SUPERAGENT_SWARM_REVIEW` | Empty at launch; the worker records them when it delivers |
 
