@@ -3,6 +3,7 @@
  * undeclared query parameter or body mismatch in `server.misuse`, which `usePanelServer` asserts is empty after each test.
  */
 import type { UpgradeView } from '../../src/app/upgrade.ts'
+import type { AppUpgradeView } from '../../src/app/app-upgrade.ts'
 import { afterEach, beforeEach, expect, vi } from 'vitest'
 import { z } from 'zod'
 import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -94,8 +95,13 @@ type Settings = ReturnType<typeof SettingsSchema.parse>
 /** A host whose update checks are off: no checkout configured. */
 export const NO_UPDATE: UpgradeView = { enabled: false, installed: null, remote: { ref: 'origin/main', sha: null, checkedAt: null, error: null },
   behind: [], more: false, available: false, blocked: null, run: null, prepared: null, running: 0 }
+/** A host without a DSH fork checkout: the desktop app track renders its disabled hint. */
+export const NO_APP_UPDATE: AppUpgradeView = { enabled: false, installed: { commit: null, version: null },
+  fork: { ref: 'fork/master', sha: null, checkedAt: null, error: null }, official: { ref: 'origin/master', sha: null, checkedAt: null, error: null },
+  behind: [], more: false, officialAhead: { count: null, commits: [] }, available: false, blocked: 'disabled', run: null, ready: null }
 export interface PanelServer {
   upgrade?: UpgradeView
+  appUpgrade?: AppUpgradeView
   joined?: Record<string, string>; joining?: Record<string, string>
   joinError?: string
   settings: Settings; revisions: Record<string, number>
@@ -594,6 +600,10 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'POST upgrade/prepare': { answer: () => server.upgrade?.run ?? refuse(409, 'Update refused: unchecked', { upgrade: 'unchecked' }) },
   'POST upgrade/apply': { body: true, answer: () => server.upgrade?.run ?? refuse(409, 'Update refused: not-prepared', { upgrade: 'not-prepared' }) },
   'POST upgrade/cancel': { answer: () => ({ cancelled: false }) },
+  'GET app-upgrade': { answer: () => server.appUpgrade ?? NO_APP_UPDATE },
+  'POST app-upgrade/check': { answer: () => server.appUpgrade ?? NO_APP_UPDATE },
+  'POST app-upgrade/build': { answer: () => server.appUpgrade?.run ?? refuse(409, 'App build refused: disabled', { appUpgrade: 'disabled' }) },
+  'POST app-upgrade/apply': { answer: () => ({ started: true as const }) },
   'GET models': { answer: () => ({ default: { provider: 'host', model: 'default' }, routableProviders: [], failures: [],
     groups: [{ id: 'worker-provider', name: 'Worker provider', models: [{ id: 'worker-model', name: 'Worker model',
       reasoning: { efforts: [{ id: 'high', name: 'High' }] } }] }] }) },

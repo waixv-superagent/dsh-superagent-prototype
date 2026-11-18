@@ -1315,6 +1315,9 @@ button.dt-problem-title:hover { color: var(--dsw-alias-label-primary); text-deco
 
 /* Update dialog: versions, new commits and the steps of a running update. */
 .dt-modal.dt-upgrade-modal { width: min(520px, 100%); }
+.dt-app-upgrade { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--dsw-alias-border-l1, rgba(127, 127, 127, .22)); }
+.dt-app-upgrade h3 { margin: 0; font-size: 13px; line-height: 20px; }
+.dt-app-upgrade .dt-upgrade-versions { margin: 0; }
 .dt-upgrade-body { display: flex; flex-direction: column; gap: 12px; font-size: 13px; line-height: 20px; }
 .dt-upgrade-versions { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; }
 .dt-upgrade-commits { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }

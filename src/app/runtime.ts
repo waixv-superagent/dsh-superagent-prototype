@@ -61,6 +61,7 @@ import { PipelineChecks, pipelineChoices } from './pipeline.ts'
 import { PipelineWatch } from './pipeline-watch.ts'
 import { Watchdog } from './watchdog.ts'
 import { Upgrade } from './upgrade.ts'
+import { AppUpgrade } from './app-upgrade.ts'
 import { StallWatch } from './stall-watch.ts'
 import { Settings } from './settings.ts'
 import { sourceContextOf, sourceState, type SourceContextDeps } from './source-context.ts'
@@ -113,6 +114,8 @@ export class Runtime extends Service implements SourceHost {
   readonly watchdog: Watchdog
   /** Checks the fork for a newer build and runs the one-click update the sidebar badge offers. */
   readonly upgrade: Upgrade
+  /** Checks the DSH fork and the official upstream and builds a new desktop installer on request. */
+  readonly appUpgrade: AppUpgrade
   readonly stallWatch: StallWatch
   readonly assessor: MasterAssessor
   readonly outbox: Outbox
@@ -349,6 +352,8 @@ export class Runtime extends Service implements SourceHost {
         // The launcher's bounded shutdown stops every plugin as a signal would; without it, the process ends itself.
         exit: () => { const exit = ctx.get('appExit') as ((code: number) => void) | undefined; if (exit) exit(0); else process.kill(process.pid, 'SIGTERM') },
         warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
+      this.appUpgrade = new AppUpgrade({ config: machine.upgrade ?? NO_UPGRADE, stateDir: machine.stateDir,
+        warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       const passes = this.passes = new Passes({ engine: { receive: trigger => engine.receive(trigger), evaluateDue }, effects,
         health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing(),
         // The idle judgement reads a slot's free time; recording the load every pass keeps it current after the mainline ends.
@@ -446,6 +451,7 @@ export class Runtime extends Service implements SourceHost {
     this.disposers.push(registerHttp(this.ctx, this.httpHost()))
     // Update checks run even while setup waits: an update may be what fixes setup.
     this.upgrade.start()
+    this.appUpgrade.start()
     if (!await this.setup.run(this.store.settings())) {
       this.runtimeHealth.set({ ...health('paused', 'setupPending'), at: now() })
       return
@@ -478,8 +484,8 @@ export class Runtime extends Service implements SourceHost {
   }
   private httpHost(): HttpHost {
     const runtime = this
-    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, repro, build, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing, stallWatch, upgrade } = this
-    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, repro, build, billing, upgrade, health, machine, masterId, ready, sourceLinks, watchdog, stallWatch,
+    const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, repro, build, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing, stallWatch, upgrade, appUpgrade } = this
+    return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, repro, build, billing, upgrade, appUpgrade, health, machine, masterId, ready, sourceLinks, watchdog, stallWatch,
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
@@ -497,6 +503,7 @@ export class Runtime extends Service implements SourceHost {
     this.nightRepro.stop()
     this.billing.stop()
     this.upgrade.stop()
+    this.appUpgrade.stop()
     this.stopped.abort()
     try {
       this.assessor.stop()
