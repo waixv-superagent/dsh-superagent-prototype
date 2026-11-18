@@ -35,6 +35,12 @@ The assessment that accepts a Ticket also records the paths it expects the chang
 
 The lease is stored on the Ticket (`execution.lease`), so the panel, the follow-up turns and a resumed assignment all see the same set.
 
+A lease also grows without another decision from the person who approved the work:
+
+- a plan that changes a shared workspace declares `paths`, the workspace-relative prefixes it will write (docs/012 §2); approving the plan merges them into `execution.lease`, so the one approval that opens implementation also places the paths it named;
+- a path the worker needs later is a lease re-request: `orchestrator_report` carries `lease` with the prefixes, and the host merges them itself and returns the new lease in the report's result. A lease is placement, not another authorization — the request or plan a person already approved authorized the work — so the re-request never becomes a question for a person;
+- a path is normalized to forward slashes without leading or trailing separators, must be relative to the workspace (an absolute path or a `..` segment is refused), and a prefix another entry already covers is skipped. The widening does not stop a running peer that already holds a requested path: the worker sees its peers in the launch message and avoids them, and the next placement of either ticket treats the overlap as a conflict and waits like any queued Ticket.
+
 ## 4. Peers
 
 Every worker's environment names its lease, and its launch message names its peers:
@@ -44,7 +50,7 @@ Every worker's environment names its lease, and its launch message names its pee
 | `DSH_SUPERAGENT_LEASE` (environment) | The Ticket's leased paths, space-separated; empty means the Ticket is outside the pool and writes only in its own directory |
 | `peers` (launch message) | One entry per peer: `{ ticket_id, title, lease }`, the tickets running in the same workspace right now |
 
-A worker that needs a file outside its lease does not take it: it reports the need in its result, and the assessment either widens the lease (when the peer holding the path delivers first) or splits the work into another ticket. A worker may read anything in the workspace; the lease governs writes.
+A worker that needs a file outside its lease does not take it: it reports the lease re-request, which the host merges into the lease (when a peer holds the path, the next placement waits for it) or, when the work belongs elsewhere, splits it into another ticket. A worker may read anything in the workspace; the lease governs writes.
 
 ## 5. p4 under a shared workspace
 
@@ -63,6 +69,8 @@ The engine stays shared: it is mounted in the workspace as the same directory ev
 | Lease overlap and placement, as pure logic (`src/executor/workspace.ts`) | Implemented and tested (`tests/workspace.spec.ts`) |
 | Workspace pool in settings (`executor.workspaces`), slots per workspace | Implemented |
 | Lease declared by the assessment (`paths` on the accept outcome, `execution.lease`) | Implemented, and told to the worker as `DSH_SUPERAGENT_LEASE` |
+| A plan's declared paths join the lease when the plan is approved | Implemented: `Plan.paths`, merged by `decidePlan`/`settlePlan`, named in the plan-approved Input |
+| A lease re-request widens the lease without a person's decision | Implemented: `orchestrator_report`'s `lease`, applied by `widenLease` in the same transaction as the report |
 | Placement wired into the Executor's launch path, waiting when it cannot place | Implemented: a launch that cannot place throws `Later` and is re-queued |
 | A Ticket that named no paths stays out of the pool | Implemented: `claimsWorkspace()` keeps it in its own directory, with no slot and no p4 client |
 | Peers in the launch message (`peers`) | Implemented |

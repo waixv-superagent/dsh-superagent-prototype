@@ -8,9 +8,9 @@ import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { classifyTicket } from './kind.ts'
 import { ticketUpdateTrack } from './update-track.ts'
-import { missingPlanLabels, pendingPlan, phaseRank, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planPhaseProblem, planSettleable, planTemplate,
-  ticketMode, ticketPhase, validPlanOptions, validQuestionSections, type Plan, type PlanDecision, type PlanOption, type PlanPhase, type PlanTemplate,
-  type PlanVia, type TicketPhase } from './plan.ts'
+import { mergeLease, missingPlanLabels, normalizeWritePath, pendingPlan, phaseRank, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planPhaseProblem,
+  planSettleable, planTemplate, ticketMode, ticketPhase, validPlanOptions, validQuestionSections, writePathsProblem,
+  type Plan, type PlanDecision, type PlanOption, type PlanPhase, type PlanTemplate, type PlanVia, type TicketPhase } from './plan.ts'
 import { parsePlanDiff, type PlanDiff } from './diff.ts'
 import { defaultPriority, priorityAskDeadline, PRIORITY_ASK_MINUTES, priorityAskOverdue, systemPriority, waitsForIdle, type PriorityLevel,
   type PriorityVia } from './priority.ts'
@@ -565,10 +565,17 @@ export class Tickets extends EnginePart {
    * or diff are not a card's.
    */
   private planOf(ticket: Ticket, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[],
-    template: PlanTemplate = 'fix', diffText?: string, diffBase?: string, phases?: PlanPhase[]): Plan {
+    template: PlanTemplate = 'fix', diffText?: string, diffBase?: string, phases?: PlanPhase[], paths?: string[]): Plan {
     if (ticket.plan?.approved) throw new UserError('phaseOutOfOrder', { from: ticketPhase(ticket) })
     const missing = missingPlanLabels(text, template)
     if (missing.length) throw new UserError('planIncomplete', { template, labels: missing.join(', ') })
+    // A plan on a shared workspace declares the write paths its change needs; approving it makes them the ticket's lease,
+    // so the host places the work instead of asking a person which paths a later implementation may write (docs/011).
+    const declared = paths?.map(path => path.trim()).filter(Boolean)
+    if (declared) {
+      const problem = writePathsProblem(declared)
+      if (problem) throw new UserError('planPaths', { problem })
+    }
     // A phased ticket's plan splits the work into a team a person decides on: the phases are checked here, so the card
     // never shows a plan the ticket cannot dispatch, and the standard flow never carries phases it would not use.
     const phased = ticketMode(ticket) === 'phased'
@@ -599,7 +606,18 @@ export class Tickets extends EnginePart {
       ...(phase.after?.length ? { after: phase.after.map(name => name.trim()) } : {}) }))
     return { text, at: this.now(), ...(template !== 'fix' ? { template } : {}), ...(asked ? { question: asked } : {}),
       ...(choices?.length ? { options: choices } : {}), ...(context?.length ? { sections: context } : {}), ...(diff ? { diff } : {}),
-      ...(team?.length ? { phases: team } : {}) }
+      ...(team?.length ? { phases: team } : {}), ...(declared?.length ? { paths: declared.map(normalizeWritePath) } : {}) }
+  }
+  /**
+   * Merges a plan's declared write paths into a ticket's lease, so the placement that follows an approval sees the paths
+   * the person just approved. Shared by the waiting gate and the conversation-settled plan.
+   */
+  private widenPlanLease(ticket: Ticket, plan: Plan): string[] {
+    if (!plan.paths?.length) return []
+    const execution = ticket.execution ?? { name: '', directory: '', assignment: '' }
+    const lease = mergeLease(execution.lease ?? [], plan.paths)
+    ticket.execution = { ...execution, lease }
+    return plan.paths.map(normalizeWritePath)
   }
   /**
    * A worker's P1 plan, as the fixed template with evidence, now waits for a person: the ticket stays in `plan`, its
@@ -610,10 +628,10 @@ export class Tickets extends EnginePart {
    * the question or choices are not a card's, or the attached diff is not a unified diff this panel can render.
    */
   submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[], template: PlanTemplate = 'fix',
-    diffText?: string, diffBase?: string, phases?: PlanPhase[]): Ticket {
+    diffText?: string, diffBase?: string, phases?: PlanPhase[], paths?: string[]): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
-    const plan = this.planOf(ticket, text, question, options, sections, template, diffText, diffBase, phases)
+    const plan = this.planOf(ticket, text, question, options, sections, template, diffText, diffBase, phases, paths)
     const previous = ticket.attention
     ticket.plan = { ...plan, waiting: true, deadline: new Date(Date.parse(plan.at) + PLAN_GATE_HOURS * 3_600_000).toISOString() }
     ticket.phase = 'plan'
@@ -631,12 +649,13 @@ export class Tickets extends EnginePart {
    * one the gate accepts.
    */
   settlePlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[],
-    template: PlanTemplate = 'fix', diffText?: string, diffBase?: string, phases?: PlanPhase[]): Ticket {
+    template: PlanTemplate = 'fix', diffText?: string, diffBase?: string, phases?: PlanPhase[], paths?: string[]): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     if (!planSettleable(ticket)) throw new UserError('planGateRequired')
-    const plan = this.planOf(ticket, text, question, options, sections, template, diffText, diffBase, phases)
+    const plan = this.planOf(ticket, text, question, options, sections, template, diffText, diffBase, phases, paths)
     ticket.plan = { ...plan, approved: { at: plan.at, via: 'session' } }
+    this.widenPlanLease(ticket, plan)
     ticket.phase = 'implement'
     ticket.updatedAt = plan.at
     this.repo.tickets.save(ticket)
@@ -665,12 +684,16 @@ export class Tickets extends EnginePart {
       // every phase and its model, so the worker may start those teammates without a second roster card (docs/003).
       const phased = ticketMode(ticket) === 'phased'
       const granted = phased ? this.grantPlanModels(ticket, at, plan) : []
+      // The same approval settles the plan's write paths: they join the ticket's lease, so a p4 worker that planned an
+      // implementation does not come back asking a person to expand a workspace or a writable path (docs/011).
+      const widened = this.widenPlanLease(ticket, plan)
       this.repo.tickets.save(ticket)
       const routes = granted.length ? `方案里的阶段模型已授权：${granted.map(grant => `${grant.role}=${modelRoute(grant)}`).join('、')}；` : ''
+      const paths = widened.length ? `方案声明的写入路径已并入本单租约：${widened.join('、')}，直接按该租约继续，不要再向人确认租约或工作区；` : ''
       const dispatch = phased ? `${routes}本单是 phased 模式：按方案的阶段派发 sub agent，复核由独立的复核 sub agent 做；`
         + '若你选的是「主会话只调度」，你只调度、不自己实现或验证，各阶段结果与 diff 都要自己读过再报 ready。' : ''
       this.addInput(ticket, { id: key('input', ticketId, 'plan-approved', at), kind: 'text', at,
-        text: `人已通过 P1 方案（${where}${choice ? ` · ${choice}` : ''}）。进入实现阶段：可以改文件。${dispatch}`
+        text: `人已通过 P1 方案（${where}${choice ? ` · ${choice}` : ''}）。进入实现阶段：可以改文件。${paths}${dispatch}`
           + '实现完成后调用 orchestrator_phase 进入 verify，验证通过后进入 deliver。' })
     } else if (decision === 'revise') {
       plan.feedback = [...plan.feedback ?? [], { text: note || '请换一个方向，重新给方案。', at, via, ...(choice ? { option: choice } : {}) }]
@@ -688,6 +711,26 @@ export class Tickets extends EnginePart {
       this.repo.tickets.save(ticket)
       this.end(ticketId, 'human', 'stopped', at, `人停在 P1 方案门（${where}）`)
     }
+    return this.require(ticketId)
+  }
+  /**
+   * Applies a worker's lease re-request: the safe workspace-relative paths join the ticket's lease, so the host places the
+   * work in its shared workspace instead of the request becoming a person's decision (docs/011). The lease is placement,
+   * not another approval: the request or the plan a person already approved authorized the implementation.
+   * @throws UserError when the ticket is unknown or ended, or the paths are not 1–20 safe, unique, relative prefixes.
+   */
+  widenLease(ticketId: string, paths: readonly string[]): Ticket {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    const problem = writePathsProblem(paths)
+    if (problem) throw new UserError('leasePaths', { problem })
+    const execution = ticket.execution ?? { name: '', directory: '', assignment: '' }
+    const lease = mergeLease(execution.lease ?? [], paths)
+    // A request every existing path already covers changes nothing; leave the ticket and its timestamp untouched.
+    if (lease.length === (execution.lease?.length ?? 0)) return ticket
+    ticket.execution = { ...execution, lease }
+    ticket.updatedAt = this.now()
+    this.repo.tickets.save(ticket)
     return this.require(ticketId)
   }
   /**

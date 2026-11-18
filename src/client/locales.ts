@@ -1542,6 +1542,8 @@ const TEXT = {
   'userError.planQuestion': ['方案的问题是单行非空文本，最多 200 字。', USER_ERRORS.planQuestion[1]],
   'userError.planSections': ['方案卡的语境分块是 1–6 块，每块一个简短不重复的标题和一段正文。', USER_ERRORS.planSections[1]],
   'userError.planDiff': ['方案附的代码 diff 必须是一份能渲染的 unified diff：{problem}', USER_ERRORS.planDiff[1]],
+  'userError.planPaths': ['方案的写入路径需为 1–20 个、每个不超过 400 字的安全相对前缀（相对工单工作区、不得绝对路径或含 ..）：{problem}', USER_ERRORS.planPaths[1]],
+  'userError.leasePaths': ['租约申请需为 1–20 个、每个不超过 400 字的安全相对前缀（相对工单工作区、不得绝对路径或含 ..）：{problem}', USER_ERRORS.leasePaths[1]],
   'userError.optionsWithoutQuestion': ['选项要跟着它回答的问题一起给出，请用 human_action 提问。', USER_ERRORS.optionsWithoutQuestion[1]],
   'userError.modelRequest': ['申请子 agent 模型授权时，要给人一句问题，选项固定为 允许 / 不允许。', USER_ERRORS.modelRequest[1]],
   'userError.modelRelayPerson': ['转达模型授权时，必须指向人的一条原话；机器人、CI 或 note 都不能授权。', USER_ERRORS.modelRelayPerson[1]],

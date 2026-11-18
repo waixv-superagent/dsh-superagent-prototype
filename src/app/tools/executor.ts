@@ -24,7 +24,7 @@ import type { EditorGatekeeper } from '../editor-gatekeeper.ts'
 
 export interface ExecutorToolsHost {
   readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'submitPlan' | 'settlePlan' | 'advancePhase'
-    | 'resetPhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'authorizeModelFromPerson'>
+    | 'resetPhase' | 'redispatchTicket' | 'widenLease' | 'recordPipeline' | 'rerunPipeline' | 'authorizeModelFromPerson'>
   readonly store: Pick<Store, 'tickets' | 'settings' | 'replyStatus' | 'atomic'>
   readonly sessions: Pick<Sessions, 'relay' | 'notify' | 'prompt'>
   readonly resources: ResourceHost
@@ -195,7 +195,7 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
     }),
     tool({
       name: 'orchestrator_plan',
-      description: 'Submit the P1 plan before any code change: fix uses 现象/代码线/资产线/配置线/修复锚点/影响面/验证方案/预算; analysis uses 问题/结论/依据/建议; design uses 问题/选项/证据/推荐. One label per line with evidence. A person answers 1 (approve), 2 (change direction) or 3 (stop); the card question and 2–4 choices may use your own wording. Pass the change as a real unified diff (`diff`) so the person reads code. A ticket accepted in the phased flow must also pass `phases`, and its plan text must name every phase and its model. Files and shells stay refused until 1, or until `decided` settles a self-iteration plan whose direction the person already decided.',
+      description: 'Submit the P1 plan before any code change: fix uses 现象/代码线/资产线/配置线/修复锚点/影响面/验证方案/预算; analysis uses 问题/结论/依据/建议; design uses 问题/选项/证据/推荐. One label per line with evidence. A person answers 1 (approve), 2 (change direction) or 3 (stop); the card question and 2–4 choices may use your own wording. Pass the change as a real unified diff (`diff`) so the person reads code. A plan that writes a shared workspace declares `paths`; approving it merges them into the ticket\'s lease. A ticket accepted in the phased flow must also pass `phases`, and its plan text must name every phase and its model. Files and shells stay refused until 1, or until `decided` settles a self-iteration plan whose direction the person already decided.',
       schema: z.object({
         plan: z.string().trim().min(40).max(6000).describe('The plan as label：content lines, in the chosen template order, each with evidence; a long line is broken into points on the card.'),
         template: z.enum(['fix', 'analysis', 'design']).optional()
@@ -225,6 +225,8 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
         }).strict()).min(2).max(4).optional()
           .describe('Phased tickets only: split the work into 2–4 phases, each with its job, files and model route, and write every phase name and model in the plan '
             + 'text so the card a person approves shows what will run. The standard flow omits this: it keeps today\'s single-worker plan.'),
+        paths: z.array(z.string().trim().min(1).max(400)).min(1).max(20).optional()
+          .describe('Workspace-relative write prefixes this plan changes; approving it merges them into the ticket\'s lease. No absolute path or "..".'),
       }).strict(),
       execute: async args => {
         const current = host.store.tickets.get(ticketId)
@@ -256,10 +258,11 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
         // A decided plan records the same plan the card would show, approved at once: no card goes out and the worker
         // implements without waiting. Every other plan takes the gate.
         const updated = args.decided
-          ? host.engine.settlePlan(ticketId, args.plan, args.question, args.options, args.sections, args.template, args.diff, args.diff_base, phases)
-          : host.engine.submitPlan(ticketId, args.plan, args.question, args.options, args.sections, args.template, args.diff, args.diff_base, phases)
+          ? host.engine.settlePlan(ticketId, args.plan, args.question, args.options, args.sections, args.template, args.diff, args.diff_base, phases, args.paths)
+          : host.engine.submitPlan(ticketId, args.plan, args.question, args.options, args.sections, args.template, args.diff, args.diff_base, phases, args.paths)
         const message = args.decided ? undefined : await host.notifyPlan(updated)
-        return { submitted: true, phase: ticketPhase(updated), ...args.decided ? { settled: true } : { notified: message !== undefined } }
+        return { submitted: true, phase: ticketPhase(updated), ...args.decided ? { settled: true } : { notified: message !== undefined },
+          ...updated.execution?.lease?.length ? { lease: updated.execution.lease } : {} }
       },
     }),
     tool({
@@ -278,11 +281,14 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
     tool({
       name: 'orchestrator_report',
       description: 'Report progress, ready, blocked, failed or dropped, as the work and handoff sections say. It is the only channel '
-        + 'to the person: a final answer stays in the Session, so ask for a decision, more scope or a new ticket here, not in prose.',
+        + 'to the person: a final answer stays in the Session, so ask for a decision, more scope or a new ticket here, not in prose. '
+        + 'A scheduling or environment need — a lease, workspace, p4 client, target, placement or priority — is the host\'s: send it with `lease` or the tool that owns it, never as human_action.',
       schema: z.object({
         state: z.enum(['progress', 'ready', 'blocked', 'failed', 'dropped']),
         summary: z.string().min(1),
         human_action: z.string().trim().min(1).max(1000).nullish().describe('One concrete question for a person, also with state=progress; omit to keep the pending one, null to clear it.'),
+        lease: z.array(z.string().trim().min(1).max(400)).min(1).max(20).optional()
+          .describe('Workspace-relative write paths this ticket needs beyond its lease; the host adds them itself, so never ask a person. No absolute path or "..".'),
         options: z.array(z.string().trim().min(1).max(24)).min(2).max(4).optional()
           .describe('With human_action: 2–4 choices at a key node where a click is fastest, such as confirming a plan; everyday questions stay plain text.'),
         subagent_model: z.object({
@@ -404,6 +410,9 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
         // neither the main Session nor a card; the verdict is what the board shows.
         const analyzing = analysisRunning(current)
         const result = host.store.atomic(() => {
+          // A lease re-request is placement, not a person's decision: the host widens the ticket's lease in this same
+          // transaction as the report, so the worker's next step reads the new paths and nobody is asked about a workspace.
+          const lease = args.lease ? host.engine.widenLease(ticketId, args.lease).execution?.lease : undefined
           const refused = pull && claimPull(host.github, ticketId, pull)
           if (refused) throw new Error(refused)
           const delivery = { ...(args.changelist != null ? { changelist: args.changelist } : {}),
@@ -420,6 +429,7 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           if (relay) host.sessions.relay(relay.id, relay.text)
           const notification = relay ? 'orchestrator' : 'internal_only'
           return { reported: true, notification, ...(updated.attention ? { attention: updated.attention } : {}),
+            ...(lease ? { lease } : {}),
             ...(authorized ? { authorized: { provider: authorized.provider, model: authorized.model, inputId: authorized.inputId, at: authorized.at,
               note: `人已经在本工单的消息里点名 ${authorized.provider}/${authorized.model}，授权已记录；不用再问，直接用 subagent 的 provider/model 指定它。` } } : {}) }
         })

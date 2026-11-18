@@ -196,6 +196,12 @@ export class Engine {
    */
   redispatchTicket(ticketId: string, backend: Backend, target?: string): Ticket { return this.repo.atomic(() => this.tickets.redispatch(ticketId, backend, target)) }
   /**
+   * Adds a worker's re-requested write paths to a ticket's lease: placement, not another person's decision, so a p4
+   * implementation an approved plan already authorized never comes back as a question about workspaces or leases.
+   * @throws UserError when the ticket is unknown or ended, or the paths are not safe workspace-relative prefixes.
+   */
+  widenLease(ticketId: string, paths: readonly string[]): Ticket { return this.repo.atomic(() => this.tickets.widenLease(ticketId, paths)) }
+  /**
    * Records a person's confirmation that a delivered ticket may be submitted. It never submits: the person runs the submit.
    * @throws UserError when the ticket is unknown, ended, did not report a changelist, or was already confirmed.
    */
@@ -260,8 +266,8 @@ export class Engine {
    * the attached diff is not a unified diff this panel can render.
    */
   submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[], template: PlanTemplate = 'fix',
-    diff?: string, diffBase?: string, phases?: PlanPhase[]): Ticket {
-    return this.repo.atomic(() => this.tickets.submitPlan(ticketId, text, question, options, sections, template, diff, diffBase, phases))
+    diff?: string, diffBase?: string, phases?: PlanPhase[], paths?: string[]): Ticket {
+    return this.repo.atomic(() => this.tickets.submitPlan(ticketId, text, question, options, sections, template, diff, diffBase, phases, paths))
   }
   /**
    * A worker's plan for a self-iteration Ticket whose direction the person's own message already decided: recorded and
@@ -269,8 +275,8 @@ export class Engine {
    * @throws UserError when the ticket may not settle its plan in the conversation, or the plan is incomplete.
    */
   settlePlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[],
-    template: PlanTemplate = 'fix', diff?: string, diffBase?: string, phases?: PlanPhase[]): Ticket {
-    return this.repo.atomic(() => this.tickets.settlePlan(ticketId, text, question, options, sections, template, diff, diffBase, phases))
+    template: PlanTemplate = 'fix', diff?: string, diffBase?: string, phases?: PlanPhase[], paths?: string[]): Ticket {
+    return this.repo.atomic(() => this.tickets.settlePlan(ticketId, text, question, options, sections, template, diff, diffBase, phases, paths))
   }
   /**
    * A person's decision on a ticket's waiting plan: `1` approves it and moves the ticket to implement, `2` asks for another
@@ -489,7 +495,7 @@ export type EngineForSettings = Pick<Engine, 'policyChanged'>
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
   | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'reply'
   | 'submitPlan' | 'settlePlan' | 'advancePhase' | 'resetPhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch' | 'startIdleAnalysis'
-  | 'authorizeModelFromPerson' | 'dropUnstartedIdle'>
+  | 'widenLease' | 'authorizeModelFromPerson' | 'dropUnstartedIdle'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>
 /** What the host's watchdog tells the Engine: it recovers a ticket its worker stopped on a passing failure. */

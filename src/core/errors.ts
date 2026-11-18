@@ -63,6 +63,8 @@ export const USER_ERRORS = {
   planQuestion: ['refused', 'A plan question is one non-empty line of at most 200 characters'],
   planSections: ['refused', 'A plan card\'s context sections are 1 to 6 blocks, each with a short unique label and its own text'],
   planDiff: ['refused', 'The plan diff must be one unified diff this panel can render: {problem}'],
+  planPaths: ['refused', 'The plan\'s write paths must be 1 to 20 unique, safe prefixes of at most 400 characters, relative to the ticket\'s workspace: {problem}'],
+  leasePaths: ['refused', 'A lease request needs 1 to 20 unique, safe write prefixes of at most 400 characters, relative to the ticket\'s workspace: {problem}'],
   optionsWithoutQuestion: ['refused', 'Options need the question they answer; ask it with human_action'],
   modelRequest: ['refused', 'A subagent model request needs the question for a person, and its choices are fixed to 允许 and 不允许'],
   modelRelayPerson: ['refused', 'A relayed model authorization needs a person\'s own message: a bot\'s, CI\'s or a note authorizes nothing'],

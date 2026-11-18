@@ -465,6 +465,21 @@ describe('a worker whose work runs in the background', () => {
   it('frees the slot of a worker that asks a person a question with a progress report', async () => {
     await handsOff({ state: 'progress', summary: 'The server runs.', human_action: 'Does the button look right?' })
   })
+  it('applies a worker\'s lease re-request itself instead of turning it into a person\'s question', async () => {
+    const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
+    const ticket = () => h.runtime.store.tickets.get(one.ticket.id)!
+    const reported = await h.runTool(one.sessionId, 'orchestrator_report',
+      { state: 'progress', summary: 'The change also touches the test.', lease: ['Source/UI/AvatarListTest.cpp'] }) as { lease?: string[] }
+    expect(reported.lease).toEqual(['Source/UI/AvatarListTest.cpp'])
+    expect(ticket().execution!.lease).toEqual(['Source/UI/AvatarListTest.cpp'])
+    // A lease is placement, not a question: the host applies it and no attention card is raised for a person.
+    expect(ticket().attention).toBeUndefined()
+    // A path that leaves the workspace is refused, and nothing widens.
+    await expect(h.runTool(one.sessionId, 'orchestrator_report',
+      { state: 'progress', summary: 'Outside.', lease: ['../elsewhere.cpp'] })).rejects.toThrow('leaves the workspace')
+    expect(ticket().execution!.lease).toEqual(['Source/UI/AvatarListTest.cpp'])
+    await h.runtime.idle()
+  })
   it('leaves the background work of a turn a person started in the worker\'s Session after a hand-off to that turn', async () => {
     const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
     const agent = h.agents.get(one.sessionId)!

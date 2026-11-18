@@ -107,6 +107,17 @@ const RULES: [rule: string, file: string, says: string[], gone?: string[]][] = [
   ['Feishu reads and messages are the bot\'s; a document is created as the ticket requester', 'cli', ['Feishu reads and messages use --as bot; a document a ticket creates is created and edited with the ticket requester\'s own identity']],
   ['Every GitHub message says an automated agent wrote it', 'team/communication',
     ['Begin every message posted on GitHub, including comments, review replies and PR descriptions, with this line: This is by an automated agent, not a human.']],
+  ['A scheduling or environment need is the host\'s, never a person\'s question', 'handoff-worker',
+    ['A scheduling or environment need — a lease or write path, a workspace or p4 client', 'is the host\'s: send it as `lease` or with the tool that owns it, never as human_action',
+      'never ask a person to allocate a lease, choose a workspace, fix an environment']],
+  ['A decision the owner already made is not asked again', 'handoff-worker',
+    ['A decision the owner already made — an approved plan, their message, standing Policy — is not a question',
+      'never ask again to confirm it']],
+  ['A plan declares its write paths, and approving it widens the ticket\'s lease', 'work',
+    ['A plan that writes a shared workspace declares `paths`', 'approving it merges them into the ticket\'s lease',
+      'A later path is a `lease` re-request on the report that the host applies']],
+  ['The main Session relays only the owner\'s decision, not a host matter', 'handoff-orchestrator',
+    ['Relay the owner\'s decision only', 'is the host\'s, never a person\'s']],
   ['Removed rules stay removed', '*', [], ['at most three investigation/implementation rounds', 'continue dispatch until explicitly instructed', 'page-size']],
 ]
 const textOf = (file: string) => file === '*' ? composePrompt(defaultPrompts(), 'orchestrator') + composePrompt(defaultPrompts(), 'worker')
