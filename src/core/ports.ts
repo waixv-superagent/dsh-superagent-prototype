@@ -1,5 +1,5 @@
 /** Ports the core depends on. Sources, policies, assessors, executors, and channels are project-specific. */
-import type { Assignment, ChannelRef, Decision, DecisionKind, Escalation, Mandate, MandateBasis, PipelineCard, QuestionSection, Strength, Thread, Ticket, TicketEndBy, TicketOutcome, Trigger }
+import type { Assignment, ChannelRef, Decision, DecisionKind, Escalation, ExecutionMode, Mandate, MandateBasis, PipelineCard, QuestionSection, Strength, Thread, Ticket, TicketEndBy, TicketOutcome, Trigger }
   from './model.ts'
 import type { Reason } from './reasons.ts'
 import type { TicketKind } from './kind.ts'
@@ -51,6 +51,11 @@ export type AssessmentOutcome =
    */
   | { kind: 'accept'; title: string; scope: string; reason: string | Reason; acknowledgement?: string; rules?: string[]; audit?: Record<string, unknown>;
     name?: string; note?: string; paths?: string[]; category?: 'bug' | 'feature'; target?: string; ticketKind?: TicketKind
+    /**
+     * How the ticket's worker executes: `phased` is the opt-in agent-team flow, whose P1 plan splits the work into phases
+     * with model routes a person authorizes; absent is `standard`, today's single-worker flow (docs/003).
+     */
+    mode?: ExecutionMode
     /**
      * The other separable goals of the same message, each opened as its own ticket under this Decision. One source message
      * becomes one Decision and 1–4 tickets; only the first carries the receipt, which names every ticket this Decision

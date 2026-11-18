@@ -1,7 +1,7 @@
 /** The P1 plan gate (docs/012): a ticket's phases, the worker's fixed plan template, and the person's one-word decision. */
 import type { PlanDiff } from './diff.ts'
 import { ticketKind } from './kind.ts'
-import { liveTicket, type QuestionSection, type Ticket } from './model.ts'
+import { liveTicket, type ExecutionMode, type ModelRoute, type QuestionSection, type Ticket } from './model.ts'
 
 /** The phases a ticket passes, from the P1 plan gate to delivery; the submit after delivery stays a person's (P5). */
 export type TicketPhase = 'plan' | 'implement' | 'verify' | 'deliver'
@@ -39,7 +39,81 @@ export interface Plan {
    * inline or side by side, so a person reviews code before approving instead of reading a description of it.
    */
   diff?: PlanDiff
+  /**
+   * The phases a phased ticket's plan splits its work into, oldest first: approving the plan also authorizes each phase's
+   * model route, so the worker dispatches a team instead of asking for a roster card. Absent on the standard flow.
+   */
+  phases?: PlanPhase[]
 }
+/**
+ * One phase of a phased ticket's plan: the job it owns, the files it writes, the earlier phases it waits for, and the
+ * model route that runs it. Every phase is a teammate's brief, and approving the plan authorizes every route.
+ */
+export interface PlanPhase {
+  /** A short name the plan text and the person's card use, unique in the plan, such as `数据层` or `独立复核`. */
+  name: string
+  /** The one-line job this phase owns, as the teammate will be briefed with it. */
+  job: string
+  /** The files or directories this phase writes; two phases that may run side by side may not overlap. */
+  files?: string[]
+  /** Names of earlier phases this one waits for; absent means it may run beside any phase that does not block it. */
+  after?: string[]
+  /** The model route that runs this phase; approving the plan records it as a grant on the ticket. */
+  route: ModelRoute
+}
+/** How many phases a phased plan splits into, and how long each name and job may be; a team is one to four teammates. */
+export const PLAN_PHASE_LIMITS = { min: 2, max: 4, name: 20, job: 300 } as const
+/** Whether `path` and `other` are the same file, or one is a directory containing the other. */
+const scopesOverlap = (path: string, other: string): boolean => {
+  const a = path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase()
+  const b = other.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase()
+  return !!a && !!b && (a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`))
+}
+/** Whether phase `later` waits, directly or through other phases, on phase `earlier`. */
+const waitsFor = (phases: readonly PlanPhase[], later: number, earlier: number): boolean =>
+  (phases[later]?.after ?? []).some(name => {
+    const at = phases.findIndex(phase => phase.name.trim().toLowerCase() === name.trim().toLowerCase())
+    return at === earlier || (at >= 0 && at < later && waitsFor(phases, at, earlier))
+  })
+/**
+ * The problem a phase plan has, worded for its refusal, or undefined when it is a team a person can decide: 2–4 uniquely
+ * named phases, each with a job and a route, dependencies that name an earlier phase (so the graph is acyclic), and
+ * non-overlapping write scopes wherever two phases may run side by side.
+ */
+export function planPhaseProblem(phases: readonly PlanPhase[]): string | undefined {
+  if (phases.length < PLAN_PHASE_LIMITS.min || phases.length > PLAN_PHASE_LIMITS.max) {
+    return `a phased plan splits into ${PLAN_PHASE_LIMITS.min} to ${PLAN_PHASE_LIMITS.max} phases, not ${phases.length}`
+  }
+  const names = new Set<string>()
+  for (const [index, phase] of phases.entries()) {
+    const name = phase.name?.trim() ?? ''
+    if (!name || Array.from(name).length > PLAN_PHASE_LIMITS.name) return `phase ${index + 1} needs a name of at most ${PLAN_PHASE_LIMITS.name} characters`
+    if (names.has(name.toLowerCase())) return `the phase name "${name}" appears twice; every phase needs its own name`
+    names.add(name.toLowerCase())
+    if (!phase.job?.trim() || Array.from(phase.job.trim()).length > PLAN_PHASE_LIMITS.job) {
+      return `the phase "${name}" needs a one-line job of at most ${PLAN_PHASE_LIMITS.job} characters`
+    }
+    if (!phase.route?.provider?.trim() || !phase.route?.model?.trim()) return `the phase "${name}" needs a model route`
+    for (const other of phase.after ?? []) {
+      const at = phases.findIndex(item => item.name.trim().toLowerCase() === other.trim().toLowerCase())
+      if (at < 0 || at >= index) return `the phase "${name}" waits on "${other}", which is not an earlier phase`
+    }
+  }
+  for (let later = 0; later < phases.length; later++) {
+    for (let earlier = 0; earlier < later; earlier++) {
+      if (waitsFor(phases, later, earlier) || waitsFor(phases, earlier, later)) continue
+      for (const path of phases[later]?.files ?? []) {
+        for (const other of phases[earlier]?.files ?? []) {
+          if (scopesOverlap(path, other)) return `the phases "${phases[earlier]!.name}" and "${phases[later]!.name}" may run side by side but both write ${path}`
+        }
+      }
+    }
+  }
+  return undefined
+}
+/** The execution mode a ticket runs: `standard` unless the accept that created it chose the phased flow. */
+export const ticketMode = (ticket: Pick<Ticket, 'execution'>): ExecutionMode => ticket.execution?.mode ?? 'standard'
+
 /** The labels of the fix plan template, in the order a worker writes them (docs/012 §2). */
 export const PLAN_LABELS = ['现象', '代码线', '资产线', '配置线', '修复锚点', '影响面', '验证方案', '预算'] as const
 /** The light template for an investigation or analysis: what was asked, what was found, the evidence, what to do next. */
@@ -150,11 +224,13 @@ export const missingPlanLabels = (text: string, template: PlanTemplate = 'fix'):
  * Whether a plan may be recorded as already decided by the conversation, with no confirmation card. Only the agent's own
  * iteration (`self`) that a person asked for explicitly may settle this way, and only while the plan is the first one:
  * a plan the person asked to revise, a gate they reopened for added scope, and proactive (inferred) work all still wait
- * for their answer. This is the one gate a ticket kind takes part in (docs/012, docs/020).
+ * for their answer. This is the one gate a ticket kind takes part in (docs/012, docs/020). A phased ticket always takes
+ * the card, because approving it is what authorizes its phases' model routes.
  */
 export const planSettleable = (ticket: Pick<Ticket, 'kind' | 'kindSource' | 'category' | 'mandate' | 'execution' | 'title' | 'plan' | 'planHistory'>): boolean =>
   ticket.mandate.strength === 'explicit'
   && ticketKind(ticket).kind === 'self'
+  && ticketMode(ticket) !== 'phased'
   && !ticket.plan?.feedback?.length
   && !ticket.plan?.waiting
   && !ticket.planHistory?.length

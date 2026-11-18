@@ -78,7 +78,10 @@ interface Skill { name: string; description: string; content: string }
 // budget grows to 69,200.
 // The P1 gate's read-only analysis exception adds one worker prompt sentence, the `DSH_SUPERAGENT_EVIDENCE` variable line
 // and the evidence-directory wording (docs/012); the worker surface measures 61,555, so the budget grows to 61,600.
-const BUDGET: Record<Role, number> = { orchestrator: 69_200, worker: 61_600 }
+// A ticket accepted in the phased flow adds the `execution_mode` accept field and the rule that never infers it, the
+// `DSH_SUPERAGENT_MODE` variable line, and the worker's phased-planning, dispatch and verifier rules (docs/003); the
+// main Session's surface measures 69,963 and the worker's 64,799, so the budgets grow to 70,100 and 64,900.
+const BUDGET: Record<Role, number> = { orchestrator: 70_100, worker: 64_900 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

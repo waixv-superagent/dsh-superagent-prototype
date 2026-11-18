@@ -33,7 +33,7 @@ describe('p4 delivery settings', () => {
 describe('p4 execution variables', () => {
   it('are declared once, so the Execution settings list them even with the git backend', () => {
     const keys = EXECUTOR_VARIABLES.map(variable => variable.key)
-    for (const key of ['DSH_SUPERAGENT_BACKEND', 'DSH_SUPERAGENT_EVIDENCE', 'DSH_SUPERAGENT_P4_CLIENT', 'DSH_SUPERAGENT_P4_PORT',
+    for (const key of ['DSH_SUPERAGENT_BACKEND', 'DSH_SUPERAGENT_EVIDENCE', 'DSH_SUPERAGENT_MODE', 'DSH_SUPERAGENT_P4_CLIENT', 'DSH_SUPERAGENT_P4_PORT',
       'DSH_SUPERAGENT_P4_DEPOT', 'DSH_SUPERAGENT_P4_STREAM', 'DSH_SUPERAGENT_P4_SYNC', 'DSH_SUPERAGENT_P4_CL', 'DSH_SUPERAGENT_SWARM_URL',
       'DSH_SUPERAGENT_SWARM_REVIEW']) expect(keys).toContain(key)
     expect(new Set(keys).size).toBe(keys.length)
@@ -51,6 +51,13 @@ describe('p4 execution variables', () => {
     expect(valueOf(variables, 'DSH_SUPERAGENT_P4_CLIENT')).toBe('dsh-fix-thing')
     // The plan gate's one writable directory is outside every workspace: the ticket's evidence directory.
     expect(valueOf(variables, 'DSH_SUPERAGENT_EVIDENCE')).toBe(join('/state', 'evidence', 't1'))
+    // A ticket that never opted into the phased flow runs the standard one.
+    expect(valueOf(variables, 'DSH_SUPERAGENT_MODE')).toBe('standard')
+  })
+  it('names the phased flow a ticket recorded, so its worker plans the phases', () => {
+    const variables = environmentOf({ deployment: testDeployment(), sources: noSources, settings: settingsWith({ backend: 'git' }),
+      ticket: { id: 't1', name: 'fix-thing', directory: '/work/fix-thing', mode: 'phased' } })
+    expect(valueOf(variables, 'DSH_SUPERAGENT_MODE')).toBe('phased')
   })
   it('leave the changelist and review empty until the worker records them', () => {
     const variables = environmentOf({ deployment: testDeployment(), sources: noSources,
@@ -69,6 +76,7 @@ describe('p4 execution variables', () => {
     const variables = environmentOf({ deployment: testDeployment(), sources: noSources, settings: settingsWith({ backend: 'p4' }) })
     expect(variables.map(variable => variable.key)).not.toContain('DSH_SUPERAGENT_P4_CLIENT')
     expect(variables.map(variable => variable.key)).not.toContain('DSH_SUPERAGENT_EVIDENCE')
+    expect(variables.map(variable => variable.key)).not.toContain('DSH_SUPERAGENT_MODE')
   })
 })
 

@@ -302,7 +302,9 @@ export interface ModelRoute { provider: string; model: string }
  * card records `attentionId`; a message the person wrote on the ticket that named the route records `inputId` instead; and
  * `triggerId` names the person's message the main Session relayed from its conversation (docs/003).
  */
-export interface ModelGrant extends ModelRoute { at: string; attentionId?: string; inputId?: string; triggerId?: string; role?: string }
+export interface ModelGrant extends ModelRoute { at: string; attentionId?: string; inputId?: string; triggerId?: string; role?: string
+  /** Set when approving a phased plan authorized this route: when the plan that named it was submitted. */
+  planAt?: string }
 /** A person's message the main Session relays, so the host records the model routes that message names on a ticket. */
 export interface ModelRelay { triggerId: string; catalog: readonly RoutedModel[] }
 /** One model as the deployment's catalog names it, for judging whether a person's own message named a route. */
@@ -569,10 +571,18 @@ export interface Execution { name: string; directory: string; assignment: string
   target?: string
   changelist?: number; review?: string; verification?: string
   /** The subagent model routes a person allowed on this ticket, each with the question it answered. */
-  modelGrants?: ModelGrant[] }
+  modelGrants?: ModelGrant[]
+  /**
+   * How this ticket's worker executes, chosen when the ticket is accepted: `standard` runs one worker on its own model,
+   * `phased` gates code behind a P1 plan whose 2–4 phases each name the model route that runs them. Absent is `standard`,
+   * so every ticket accepted before phases had keeps the flow it had.
+   */
+  mode?: ExecutionMode }
 
 /** A delivery environment: this deployment's git source repository, or its Perforce depot. */
 export type Backend = 'git' | 'p4'
+/** How a ticket's worker executes: the standard flow, or a phased team whose phases a person planned and authorized. */
+export type ExecutionMode = 'standard' | 'phased'
 
 /** Where a delivered ticket stands with the person's local check: waiting, passed, or returned for rework. */
 export interface TicketVerification {

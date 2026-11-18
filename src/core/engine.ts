@@ -4,7 +4,7 @@ import { isoTime, liveTicket } from './model.ts'
 import type { Backend, ChannelRef, Decision, LinkedRelationKind, ModelGrant, ModelRelay, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, ThreadRef, Ticket, TicketPipeline, TicketRepair, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
-import type { PlanDecision, PlanOption, PlanTemplate, PlanVia } from './plan.ts'
+import type { PlanDecision, PlanOption, PlanPhase, PlanTemplate, PlanVia } from './plan.ts'
 import type { PriorityLevel, PriorityVia } from './priority.ts'
 import type { IdleLevel } from './idle.ts'
 import { Assignments, type WorkerReport } from './assignments.ts'
@@ -253,8 +253,8 @@ export class Engine {
    * the attached diff is not a unified diff this panel can render.
    */
   submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[], template: PlanTemplate = 'fix',
-    diff?: string, diffBase?: string): Ticket {
-    return this.repo.atomic(() => this.tickets.submitPlan(ticketId, text, question, options, sections, template, diff, diffBase))
+    diff?: string, diffBase?: string, phases?: PlanPhase[]): Ticket {
+    return this.repo.atomic(() => this.tickets.submitPlan(ticketId, text, question, options, sections, template, diff, diffBase, phases))
   }
   /**
    * A worker's plan for a self-iteration Ticket whose direction the person's own message already decided: recorded and
@@ -262,8 +262,8 @@ export class Engine {
    * @throws UserError when the ticket may not settle its plan in the conversation, or the plan is incomplete.
    */
   settlePlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[],
-    template: PlanTemplate = 'fix', diff?: string, diffBase?: string): Ticket {
-    return this.repo.atomic(() => this.tickets.settlePlan(ticketId, text, question, options, sections, template, diff, diffBase))
+    template: PlanTemplate = 'fix', diff?: string, diffBase?: string, phases?: PlanPhase[]): Ticket {
+    return this.repo.atomic(() => this.tickets.settlePlan(ticketId, text, question, options, sections, template, diff, diffBase, phases))
   }
   /**
    * A person's decision on a ticket's waiting plan: `1` approves it and moves the ticket to implement, `2` asks for another

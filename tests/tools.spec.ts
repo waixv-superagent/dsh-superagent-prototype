@@ -590,6 +590,43 @@ it('hands back a request typed into the worker\'s Session as one Web request the
     acknowledgement: '收到，另开一单。' })
   expect(accepted.ticket).toMatchObject({ ticket_id: expect.any(String) })
 })
+it('plans a ticket accepted in the phased flow as a team with its model routes, and keeps the standard flow out of it', async () => {
+  const trigger = feishu('2', '@bot 这个需求复杂，按 phased 团队跑')
+  h.runtime.receive(trigger); await h.runtime.idle()
+  const result = await h.route({ kind: 'accept', trigger_id: trigger.id, title: 'Phased work', worktree_name: 'phased-work',
+    acknowledgement: '收到，按 phased 团队跑。', execution_mode: 'phased' })
+  const ticketId = (result.ticket as { ticket_id: string }).ticket_id
+  await h.runtime.idle()
+  const stored = h.runtime.store.tickets.get(ticketId)!
+  expect(stored.execution?.mode).toBe('phased')
+  expect(stored.phase).toBe('plan')
+  const sessionId = `worker-${ticketId}`
+  const plan = `现象：复杂需求只能一个模型做到底
+代码线：src/core/tickets.ts 的方案门
+资产线：无
+配置线：无
+修复锚点：实现 phase 交给 Opus 5.5，复核 phase 交给 DeepSeek V4.1 Flash
+影响面：只影响本工单
+验证方案：单测 + 本地卡片
+预算：1 小时`
+  const phases = [
+    { name: '实现', job: '改方案门与派发', files: ['src/core/tickets.ts'], route: { provider: 'ai-gateway', model: 'claude-opus-5.5' } },
+    { name: '复核', job: '跑测试并验收', after: ['实现'], route: { provider: 'deepseek-account', model: 'deepseek-v4.1-flash' } },
+  ]
+  // A phase graph is a team a person decides: an unknown route, a plan text that hides a phase, and a single phase are refused.
+  await expect(h.runTool(sessionId, 'orchestrator_plan', { plan, phases: [{ ...phases[0], route: { provider: 'ai-gateway', model: 'nope' } }, phases[1]] }))
+    .rejects.toThrow('Unknown model route')
+  await expect(h.runTool(sessionId, 'orchestrator_plan', { plan: plan.replace('复核', '检查'), phases }))
+    .rejects.toThrow('must name every phase')
+  await expect(h.runTool(sessionId, 'orchestrator_plan', { plan, phases: [phases[0]] })).rejects.toThrow()
+  // The decided shortcut never applies to a phased plan: the card is the authorization.
+  await expect(h.runTool(sessionId, 'orchestrator_plan', { plan, phases, decided: true })).rejects.toThrow('always takes the card')
+  expect(await h.runTool(sessionId, 'orchestrator_plan', { plan, phases })).toMatchObject({ submitted: true, phase: 'plan' })
+  expect(h.runtime.store.tickets.get(ticketId)!.plan?.phases).toHaveLength(2)
+  // The standard flow refuses phases: its plan keeps the single-worker shape.
+  const { sessionId: standardSession } = await h.acceptedTicket(feishu('3', '@bot 修一下回归'))
+  await expect(h.runTool(standardSession, 'orchestrator_plan', { plan, phases })).rejects.toThrow('standard flow')
+})
 it('records a decided self-iteration plan without a card and implements at once', async () => {
   const { ticket, sessionId } = await h.acceptedTicket(feishu('1', '@bot 按刚才说定的方案改'))
   expect(h.runtime.store.tickets.get(ticket.id)!.kind).toBe('self')

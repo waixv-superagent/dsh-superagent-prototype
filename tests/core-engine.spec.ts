@@ -2642,6 +2642,99 @@ describe('P1 plan gate', () => {
   })
 })
 
+describe('phased tickets', () => {
+  /** The phases a phased plan splits into: one implementation on a stronger route, one independent acceptance. */
+  const PHASES = [
+    { name: '实现', job: '改核心与工具', files: ['src/core/plan.ts', 'src/app/tools/executor.ts'],
+      route: { provider: 'ai-gateway', model: 'claude-opus-5.5' } },
+    { name: '复核', job: '跑 typecheck 与测试', after: ['实现'], route: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' } },
+  ]
+  /** A harness whose accepts record the execution mode and the plan gate, as the Executor does with the accept's `mode`. */
+  const phasedHarness = () => harness({}, { prepareTicket: (ticket, outcome) => ({ ...ticket,
+    execution: { name: 'w', directory: '/w', assignment: '', backend: 'git', ...(outcome.mode ? { mode: outcome.mode } : {}) },
+    ...(outcome.mode === 'phased' ? { phase: 'plan' as const } : {}) }) })
+  const acceptPhased = (h: ReturnType<typeof harness>): string => {
+    h.engine.receive(trigger('1', { threads: [{ source: 'chat', id: 't1' }] })); h.pump()
+    const decision = h.decide(h.requests.at(-1)!, { kind: 'accept', title: 'Phased fix', scope: 'team', reason: 'requested',
+      acknowledgement: 'ok', mode: 'phased' })
+    h.settle()
+    return decision.ticketId!
+  }
+  it('records the mode at accept, plans 2–4 phases, and authorizes their routes when the plan is approved', () => {
+    const h = phasedHarness()
+    const ticketId = acceptPhased(h)
+    expect(h.repo.tickets.get(ticketId)!.execution?.mode).toBe('phased')
+    h.tick(1)
+    const submitted = h.engine.submitPlan(ticketId, PLAN, undefined, undefined, undefined, 'fix', undefined, undefined, PHASES)
+    expect(submitted.phase).toBe('plan')
+    expect(submitted.plan!.phases).toEqual([
+      { name: '实现', job: '改核心与工具', files: ['src/core/plan.ts', 'src/app/tools/executor.ts'],
+        route: { provider: 'ai-gateway', model: 'claude-opus-5.5' } },
+      { name: '复核', job: '跑 typecheck 与测试', after: ['实现'], route: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' } },
+    ])
+    h.tick(1)
+    const decided = h.engine.decidePlan(ticketId, 'approve')
+    expect(decided.phase).toBe('implement')
+    // Approving the plan is the person's authorization of exactly the routes the card showed: each phase records its
+    // route with the phase it runs and the plan it came from, so the worker dispatches without a second roster card.
+    expect(decided.execution?.modelGrants).toEqual([
+      { provider: 'ai-gateway', model: 'claude-opus-5.5', at: '2026-09-23T00:00:02.000Z', planAt: submitted.plan!.at, role: '实现' },
+      { provider: 'ai-gateway', model: 'deepseek-v4.1-flash', at: '2026-09-23T00:00:02.000Z', planAt: submitted.plan!.at, role: '复核' },
+    ])
+    // The approval Input tells the worker the flow and the routes it may now start.
+    const approval = decided.inputs.flatMap(input => input.kind === 'text' ? [input.text] : []).join('\n')
+    expect(approval).toContain('phased')
+    expect(approval).toContain('claude-opus-5.5')
+  })
+  it('refuses phases on the standard flow, and a phased plan without them', () => {
+    const standard = harness()
+    const feature = accepted(standard).ticketId!
+    standard.tick(1)
+    expect(() => standard.engine.submitPlan(feature, PLAN, undefined, undefined, undefined, 'fix', undefined, undefined, PHASES))
+      .toThrowError(expect.objectContaining({ code: 'planPhasesStandard' }))
+    const phased = phasedHarness()
+    const team = acceptPhased(phased)
+    phased.tick(1)
+    expect(() => phased.engine.submitPlan(team, PLAN)).toThrowError(expect.objectContaining({ code: 'planPhasesRequired' }))
+  })
+  it('refuses a phase graph a person cannot decide: count, names, dependencies and parallel write scopes', () => {
+    const h = phasedHarness()
+    const ticketId = acceptPhased(h)
+    h.tick(1)
+    const submit = (phases: unknown[]) => h.engine.submitPlan(ticketId, PLAN, undefined, undefined, undefined, 'fix', undefined, undefined, phases as never)
+    expect(() => submit([PHASES[0]])).toThrowError(expect.objectContaining({ code: 'planPhases', message: expect.stringContaining('2 to 4') }))
+    expect(() => submit([PHASES[0], { ...PHASES[1], name: '实现' }]))
+      .toThrowError(expect.objectContaining({ code: 'planPhases', message: expect.stringContaining('appears twice') }))
+    expect(() => submit([PHASES[0], { ...PHASES[1], after: ['复核'] }]))
+      .toThrowError(expect.objectContaining({ code: 'planPhases', message: expect.stringContaining('not an earlier phase') }))
+    // Two phases that may run side by side may not write the same file or directory.
+    expect(() => submit([{ ...PHASES[0], files: ['src/core'] }, { ...PHASES[1], after: undefined, files: ['src/core/plan.ts'] }]))
+      .toThrowError(expect.objectContaining({ code: 'planPhases', message: expect.stringContaining('side by side') }))
+  })
+  it('keeps the card for a phased self-iteration ticket, because the card is what authorizes its routes', () => {
+    const h = phasedHarness()
+    const ticketId = acceptPhased(h)
+    h.tick(1)
+    expect(() => h.engine.settlePlan(ticketId, PLAN, undefined, undefined, undefined, 'fix', undefined, undefined, PHASES))
+      .toThrowError(expect.objectContaining({ code: 'planGateRequired' }))
+  })
+  it('keeps its plan gate across a redispatch, before and after approval', () => {
+    const h = phasedHarness()
+    const ticketId = acceptPhased(h)
+    expect(h.repo.tickets.get(ticketId)!.phase).toBe('plan')
+    h.engine.redispatchTicket(ticketId, 'p4', '//sun/mainline')
+    // Moving the channel never decides the gate: a phased ticket is still in its plan phase.
+    expect(h.repo.tickets.get(ticketId)!.phase).toBe('plan')
+    h.tick(1)
+    h.engine.submitPlan(ticketId, PLAN, undefined, undefined, undefined, 'fix', undefined, undefined, PHASES)
+    h.tick(1); h.engine.decidePlan(ticketId, 'approve')
+    expect(h.repo.tickets.get(ticketId)!.phase).toBe('implement')
+    h.engine.redispatchTicket(ticketId, 'git', 'acme/widgets')
+    // An approved phased plan is not reopened by a dispatch either.
+    expect(h.repo.tickets.get(ticketId)!.phase).toBe('implement')
+  })
+})
+
 describe('phase rollback', () => {
   it('moves a verify ticket back to plan on the person\'s message, archives the decided plan, and takes a new round', () => {
     const h = harness()

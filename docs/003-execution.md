@@ -65,6 +65,16 @@ The worker Session is the team's leader. It briefs each teammate with a self-con
 
 A team is not the default: a small fix is faster alone, and work that cannot be split cleanly is not work to delegate.
 
+### A phased ticket (opt-in)
+
+A ticket is accepted in one of two execution modes. `standard` is the default and is everything above: one worker on the deployment's executor model, and a team only when it asks for one. `phased` is the opt-in flow a person asks for on the ticket's own message; the orchestrator passes `execution_mode: 'phased'` to the accept only then, never from the ticket's complexity.
+
+A phased ticket starts in the plan phase on every backend, so the P1 gate holds its workspace exactly as it does for p4. Its plan also carries `phases`: 2–4 phases, each with a name, its one-line job, the files it writes, the earlier phases it waits for, and the model route that runs it. The host checks the plan (routes from the deployment catalog, unique names, dependencies on earlier phases only, and no write-scope overlap between phases that may run side by side) and refuses a plan whose text does not name every phase and its model, because that text is what the person approving the card sees. Approving the plan records each phase's route as `execution.modelGrants` with `planAt`, so the worker starts those teammates with `subagent` and needs no separate roster card; a phased plan never settles in the conversation, even on a self-iteration ticket.
+
+The worker Session is the dispatcher. It starts each phase on its granted route, reads every result and diff, and reports; a separate 复核 teammate runs the build, the tests and the reproduction and returns the commands and their output, which the worker puts in the verification package. When the plan has more than three serial phases or any parallel phases, the plan question asks whether the Session only schedules; if the person chooses `只调度`, the worker implements, compiles and verifies nothing itself. The host wakes it when a phase ends, so it never polls.
+
+The mode is recorded at creation and shown to the worker as `DSH_SUPERAGENT_MODE`. Standard tickets keep every rule above unchanged. The deployment default stays `standard` for the pilot: the accept decides per ticket, and making `phased` the default is a later change of that default, not part of this flow.
+
 ### Preparing a Ticket directory
 
 Before the first Assignment, if the Ticket directory does not exist, the prepare command runs once with `sh` in the execution root. It has ten minutes to finish. Without a prepare command, the worker starts in an empty directory.
@@ -88,6 +98,7 @@ The prepare command and Executor instructions receive the same execution variabl
 | Variable | Registered by | Value |
 | --- | --- | --- |
 | `DSH_SUPERAGENT_DIR`, `DSH_SUPERAGENT_NAME`, `DSH_SUPERAGENT_TICKET` | Executor | The Ticket's directory, short name and id |
+| `DSH_SUPERAGENT_MODE` | Executor | How this Ticket's worker executes: `standard`, or `phased` for the opt-in phase plan |
 | `DSH_SUPERAGENT_BLOCKED_COMMANDS` | Executor | Commands the Executor may not run |
 | `DSH_SUPERAGENT_GITHUB_REPOSITORY` | GitHub | The repository the Source watches, `owner/name` |
 | `DSH_SUPERAGENT_GITHUB_ACCOUNT`, `DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL` | GitHub | The agent account and its commit email |

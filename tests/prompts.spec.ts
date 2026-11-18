@@ -88,6 +88,19 @@ it('tells a worker a route a person already named needs no card', () => {
   expect(worker).toContain('`subagent_model` and no `human_action`')
 })
 
+it('tells a worker on a phased ticket to plan its phases, dispatch them, and accept through a verifier', () => {
+  // docs/003: approving a phased plan authorizes its routes, so the card is the plan text and the worker starts the team itself.
+  const worker = composePrompt(defaultPrompts(), 'worker')
+  expect(worker).toContain('DSH_SUPERAGENT_MODE')
+  expect(worker).toContain('pass `phases` to `orchestrator_plan`')
+  expect(worker).toContain('只调度')
+  expect(worker).toContain('复核')
+  // The main Session names the mode only when the person's own message asked for it; complexity never infers it.
+  const main = composePrompt(defaultPrompts(), 'orchestrator')
+  expect(main).toContain('`execution_mode`')
+  expect(main).toContain('Never infer it from complexity')
+})
+
 it('reads a prompt file whatever its line ends and blank lines, and names a missing or empty one', () => {
   const dir = mkdtempSync(join(tmpdir(), 'prompt-file-'))
   // An absolute name reads that file; a bare name resolves under prompts/.
