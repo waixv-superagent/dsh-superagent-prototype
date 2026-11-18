@@ -1,7 +1,7 @@
 /** Shared view projections for triggers, tickets, threads, decisions, and channel links. */
 import { z } from 'zod'
 import { canRetry, currentReport, followupOwners, latestReport, liveTicket, ownPull, phaseRank, PRIORITY_LABELS, settled, threadKey, ticketKind, ticketPhase,
-  ticketPriority, ticketStage, waitsForIdle, type ActorRef, type ChannelRef, type Decision, type DecisionKind, type Thread, type ThreadFacts, type Ticket,
+  ticketPriority, ticketStage, ticketUpdateTrack, waitsForIdle, type ActorRef, type ChannelRef, type Decision, type DecisionKind, type Thread, type ThreadFacts, type Ticket,
   type TicketStage, type Trigger } from '../../core/index.ts'
 import { allowedSender, listedBot } from '../../policy.ts'
 import type { ChannelLink, Localized } from '../../sources/kind.ts'
@@ -140,10 +140,14 @@ export function ticketSummary(ticket: Ticket) {
     : undefined
   // What kind of work it is, recorded at acceptance or derived for an older ticket, so the board can label and filter it.
   const kind = ticketKind(ticket)
+  // How its change reaches the running system, and what the host did after the merge: a hot change is deployed on its own,
+  // a package one waits for its desktop app build (docs/006 and docs/020).
+  const update = ticketUpdateTrack(ticket)
   // The level a ticket runs at, and whether its work waits in the idle pool: the board splits the machine queue from the
   // discretionary pool with these, and a person promotes a pooled ticket by raising its level.
   const level = ticketPriority(ticket), priority = PRIORITY_LABELS[level]
   return { id: ticket.id, title: ticket.title, state, ...stage, ...note ? { note } : {}, kind: kind.kind, kindSource: kind.source,
+    ...(update ? { update: { track: update.track, source: update.source, ...(ticket.update?.deploy ? { deploy: ticket.update.deploy } : {}) } } : {}),
     phase: ticketPhase(ticket), phaseBack: phaseBack(ticket),
     priority: { level, code: priority.code, word: priority.word, hint: priority.hint, source: ticket.priority?.source ?? 'default' },
     pool: waitsForIdle(level),

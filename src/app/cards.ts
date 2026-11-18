@@ -1,5 +1,5 @@
 /** Compact, bounded model-facing projections of triggers, tickets, threads, and decisions; full texts stay behind readable resources. */
-import { latestReport, reasonText, threadKey, ticketKind, ticketPhase, ticketStage, waitingOf, type Decision, type Mandate, type Thread, type Ticket, type TicketInput,
+import { latestReport, reasonText, threadKey, ticketKind, ticketPhase, ticketStage, ticketUpdateTrack, waitingOf, type Decision, type Mandate, type Thread, type Ticket, type TicketInput,
   type Trigger, type TriggerDisposition } from '../core/index.ts'
 import { pullOf } from '../sources/github-pull.ts'
 import { batchLine, inputResource } from '../executor/dsh.ts'
@@ -29,10 +29,14 @@ export function ticketCard(ticket: Ticket) {
   const ended = ticket.ended && { at: ticket.ended.at, by: ticket.ended.by, reason: ticket.ended.reason ?? ticket.ended.outcome }
   const { attention } = ticket
   const analysis = analysisView(ticket)
+  const update = ticketUpdateTrack(ticket)
   const gate = ticket.plan?.waiting && !ticket.plan.approved ? { at: ticket.plan.at, preview: preview(ticket.plan.text), ...ticket.plan.deadline ? { deadline: ticket.plan.deadline } : {},
     ...ticket.plan.question ? { question: ticket.plan.question } : {}, ...ticket.plan.options?.length ? { options: ticket.plan.options } : {} } : undefined
   return { ticket_id: ticket.id, title: ticket.title, state: cardState(ticket), phase: ticketPhase(ticket), strength: ticket.mandate.strength,
     ...(ticket.category ? { category: ticket.category } : {}), kind: ticketKind(ticket).kind,
+    // How the change reaches the running system and what the host did after the merge, so a reader knows whether a hot
+    // change is deployed on its own or a package needs a new build (docs/020).
+    ...(update ? { update: { track: update.track, source: update.source, ...(ticket.update?.deploy ? { deploy: ticket.update.deploy } : {}) } } : {}),
     // Where the ticket's own replies go, such as the Feishu topic a Source opened for it: a worker delivering a long report
     // replies to that message, never to the source thread, which keeps only the acceptance receipt that links the topic.
     ...(ticket.replyChannel ? { reply_channel: ticket.replyChannel } : {}),

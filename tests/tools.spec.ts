@@ -382,7 +382,9 @@ it('reads a ticket with the ids it is tied to, its reports by assignment, and it
   expect(await read(details.assignments.next_resource!, { offset: 6 })).toEqual({ next_offset: null,
     items: [expect.objectContaining({ id: 'a1', report: expect.objectContaining({ read: `ticket/${ticket.id}/report/a1` }) })] })
   expect(await h.runTool(sessionId, 'orchestrator_read', { resource: `ticket/${ticket.id}/report/a1` })).toMatchObject({ text: report(1).summary })
-  expect(JSON.stringify(details).length).toBeLessThan(3000)
+  // The ticket card gained the update track and the deployment the host ran after a merge (docs/020), so the compact read
+  // of a self-iteration ticket grows by that one small object.
+  expect(JSON.stringify(details).length).toBeLessThan(3_100)
   const page = await read(details.inputs.items[0]!.read!) as { text: string }
   expect(page.text).toContain('check the margin on mobile as well.')
   // An Input also reads by the id it has on the ticket.

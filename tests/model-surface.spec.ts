@@ -84,7 +84,10 @@ interface Skill { name: string; description: string; content: string }
 // A ticket's later replies go to the conversation its Source opened for it — the ticket card's `reply_channel` — and a
 // worker posts an inquiry's report there rather than in the source thread (docs/015). The worker surface measures
 // 65,053, so the budget grows to 65,100.
-const BUDGET: Record<Role, number> = { orchestrator: 70_100, worker: 65_100 }
+// The update track adds the accept's `ticket_update`, the report's `update_track`, and one delivery line about a hot change
+// being deployed after its merge (docs/020); the main Session's surface measures 70,924 and the worker's 65,955, so the
+// budgets grow to 71,000 and 66,000.
+const BUDGET: Record<Role, number> = { orchestrator: 71_000, worker: 66_000 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

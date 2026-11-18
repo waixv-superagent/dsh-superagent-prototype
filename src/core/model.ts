@@ -4,6 +4,7 @@ import type { Plan, TicketPhase } from './plan.ts'
 import type { IdleLevel } from './idle.ts'
 import type { PriorityAsk, TicketPriority } from './priority.ts'
 import type { TicketKind, TicketKindSource } from './kind.ts'
+import type { UpdateTrack, UpdateTrackSource } from './update-track.ts'
 
 /** Actor identity in the source's own vocabulary; Policy decides which actors may originate work on that Source. */
 export interface ActorRef { source: string; id: string }
@@ -477,6 +478,13 @@ export interface Ticket {
   kind?: TicketKind
   /** Who decided `kind`: the router's accept, the Source or delivery target, or the title rule. */
   kindSource?: TicketKindSource
+  /**
+   * How this ticket's change reaches the running system (docs/020): `hot` ships by replacing this plugin's package, which
+   * the one-click update applies after the merge, and `package` needs a new desktop app build. Recorded when the router or
+   * the worker names it; read it through `ticketUpdateTrack`, which defaults the agent's own work to `hot`, and its
+   * `deploy` records the automatic update the host ran after the change merged (docs/006).
+   */
+  update?: TicketUpdate
   /** The Channels of the messages it was accepted from. */
   channels: ChannelRef[]
   /** Where its replies go now; a Source may move them to a conversation it opened, such as a topic. */
@@ -542,6 +550,31 @@ export interface Ticket {
    * `Tickets.link`). A `spawned` relation is never stored: the panel derives it from the records (see `app/views/graph.ts`).
    */
   relations?: TicketRelation[]
+}
+/**
+ * How a ticket's change reaches the running system, and what the host did about it: the track recorded at accept or in the
+ * worker's report, and the automatic update the host ran once a hot change merged (docs/006 and docs/020).
+ */
+export interface TicketUpdate {
+  track: UpdateTrack
+  /** Who decided the track: the router's accept, the worker's report, or the default for the agent's own work. */
+  source: UpdateTrackSource
+  at: string
+  /** The deployment the host ran after a hot change merged; absent while none started, such as before the merge. */
+  deploy?: TicketDeploy
+}
+/**
+ * One automatic deployment of a merged hot change: the host builds the new commit (`preparing`), has a build waiting
+ * (`ready`), hands it to the switch (`applying`), and records `applied` or `failed` afterwards. A host that restarts during
+ * the switch reads the outcome from its own update state, not from this record.
+ */
+export interface TicketDeploy {
+  state: 'preparing' | 'ready' | 'applying' | 'applied' | 'failed'
+  at: string
+  /** The commit the update builds, so a host that starts after the restart can tell whether it landed. */
+  sha?: string
+  /** Why it failed, or the step it reached, in words a person can act on. */
+  detail?: string
 }
 /**
  * What one ticket is to another: `spawned` started it (derived, never stored), `supersedes` replaces its work, `blocks` holds

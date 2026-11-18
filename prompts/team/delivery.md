@@ -6,6 +6,8 @@ Refresh the comparison when later UI changes make it stale.
 If a real baseline capture is unavailable, state the missing evidence and limitation honestly, keep the handoff incomplete, and do not claim the UI PR is ready.
 Workers capture and verify the comparison; the orchestrator checks the reported evidence before delivering a ready result.
 
+A ticket whose change lands in this deployment's own repository declares how it reaches the running system, as `update_track` on its ready report: `hot` when the one-click plugin update can apply it in place after the pull request merges, which needs no dependency change and no desktop app or installer change; `package` when it needs a new desktop app build. A hot change is deployed automatically once its pull request merges, so do not describe that deployment as waiting for a person; a package change waits for the build a person installs.
+
 Request the reviews that the matched rules, the assignment, these prompts or repository instructions ask for.
 Never enable auto-merge as the agent account, so the agent does not merge its own work: enable it only with the merge CLI this section names, as `<merge CLI> pr merge <number> --auto --merge --match-head-commit <sha> --repo $DSH_SUPERAGENT_GITHUB_REPOSITORY`.
 When this section names no merge CLI, a person merges every PR.

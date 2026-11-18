@@ -32,6 +32,7 @@ export const Config = s.object({
     pnpm: s.string().default('pnpm').description('The pnpm command used to install, check and build.'),
     intervalMin: s.number().min(1).max(1440).step(1).default(10).description('Minutes between update checks.'),
     idleTimeoutMin: s.number().min(1).max(240).step(1).default(30).description('Minutes an update waits for running workers before it gives up.'),
+    autoDeploy: s.boolean().default(true).description('Deploy a merged hot self-iteration change on its own: build the new commit, then restart into it once no worker is in a turn (docs/006).'),
     appCheckout: s.string().default('').description('Absolute path of the DSH fork checkout whose desktop app this host can build; empty turns app updates off.'),
     appInstall: s.string().default('').description('Absolute path of the desktop app install directory this host updates in place; empty detects the app this host runs from.'),
     appRemote: s.string().pattern(/^[A-Za-z0-9_.\/-]+$/).default('fork').description('The fork remote of the DSH checkout to check.'),
@@ -56,6 +57,8 @@ export interface UpgradeConfig {
   pnpm: string
   intervalMin: number
   idleTimeoutMin: number
+  /** Deploy a merged hot self-iteration change on its own; false keeps every update the panel's choice. */
+  autoDeploy: boolean
   /** Empty turns desktop app updates off. */
   appCheckout: string
   appInstall: string
@@ -69,7 +72,7 @@ export interface UpgradeConfig {
   appIntervalMin: number
 }
 export const NO_UPGRADE: UpgradeConfig = { checkout: '', remote: 'origin', branch: 'main', install: '', startCommand: '', holdFile: '',
-  pnpm: 'pnpm', intervalMin: 10, idleTimeoutMin: 30, appCheckout: '', appInstall: '', appRemote: 'fork', appBranch: 'master',
+  pnpm: 'pnpm', intervalMin: 10, idleTimeoutMin: 30, autoDeploy: true, appCheckout: '', appInstall: '', appRemote: 'fork', appBranch: 'master',
   appOfficialRemote: 'origin', appOfficialBranch: 'master', appBuildScript: 'package:desktop:win:x64:unsigned',
   appArtifacts: '', appPnpm: '', appIntervalMin: 60 }
 export interface Machine {

@@ -2,7 +2,7 @@
 import { z } from 'zod'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { LINKED_RELATION_KINDS, analysisRunning, liveTicket, missingVerifyLabels, modelRoute, PLAN_DIFF_LIMITS, TEAM_ROLE_CHARS, TEAM_ROLES_MAX,
-  TEAM_TASK_CHARS, ticketMode, ticketPhase, VERIFY_LABELS, type EngineForExecutor, type ModelGrant, type ModelRoute, type PlanPhase, type ReceiveResult,
+  TEAM_TASK_CHARS, ticketMode, ticketPhase, UPDATE_TRACKS, VERIFY_LABELS, type EngineForExecutor, type ModelGrant, type ModelRoute, type PlanPhase, type ReceiveResult,
   type TeamRoute, type Ticket } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
 import { matchDeliveryTarget, deliveryTargets } from '../delivery-targets.ts'
@@ -306,6 +306,7 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
         changelist: z.number().int().positive().nullish().describe('p4: the shelved changelist this report delivers, so the board and a person can see what to submit.'),
         swarm_review: z.string().trim().max(200).nullish().describe('p4: the Swarm review id or URL opened on that changelist.'),
         verification: z.string().trim().max(2_000).nullish().describe(`The verification package: ${VERIFY_LABELS.join(' / ')}, one label per line. Required before a ready report that delivers work, so a person can run and judge it.`),
+        update_track: z.enum(UPDATE_TRACKS).nullish().describe('How this change reaches the running system: hot (this plugin\'s package carries it, and the host deploys it automatically once the pull request merges) or package (it needs a new desktop app build a person installs). The agent\'s own work defaults to hot.'),
         reply_to_trigger_id: z.string().optional().describe('The explicit human question this report answers; never for ordinary progress.'),
       }).strict(),
       execute: async (args, signal) => {
@@ -412,6 +413,7 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
             ...(subagentModel ? { model: subagentModel } : {}), ...(subagentTeam ? { team: subagentTeam } : {}),
             ...(args.question_for_trigger_id && !authorized ? { askedBy: args.question_for_trigger_id } : {}),
             ...(args.reply_to_trigger_id ? { answers: args.reply_to_trigger_id } : {}),
+            ...(args.update_track ? { update: args.update_track } : {}),
             ...(Object.keys(delivery).length ? { delivery } : {}) }
           const updated = host.engine.report(ticketId, report)
           const relay = analyzing ? undefined : reportRelay(updated, report)
