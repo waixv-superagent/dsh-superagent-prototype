@@ -210,7 +210,7 @@ P1 时工单的工作区还没检出（`ticket.execution.directory` 为空或未
 `message_id → { ticketId, planAt, url }` 记进 `KV.feishu.cards`（48 小时后清理）；回调没有工单号时靠它反查。
 `url` 来自紧接着的 `im +messages-mget` 的 `message_app_link`（形如
 `https://applink.feishu.cn/client/thread/open?…&thread_position=…`，`thread_position` 让它直接定位到这张卡）。
-面板里只有卡片入口（「去飞书回答」）留在消息级链接上：卡片或纯文本提问都用发卡/发消息时记下的 `url`，没有时先用该工单的飞书话题链接（打开到话题根消息），再退回来源消息或会话链接，点开正好落到要回答的提问；工单页和话题页的「打开飞书原文」、话题 chip 用同样的**话题根消息**链接：`open_chat_id` / `open_thread_id` 再带 `openchatid` / `openthreadid` 两种拼写和 `thread_position=-1`，与飞书自己的 `message_app_link` 一致。客户端要靠根消息的 `thread_position` 解析话题，缺了它按位置 0 解析，而还没有回复的话题没有位置 0，点了会静默无反应——「已开话题」刚发出时恰好就是这种话题。只有会话链接时先用 `chatId` 和 `threadId`（话题 id，旧话题从首个 Trigger 的 meta 取）补出话题链接，都拿不到才退回会话链接（并去掉 `position`，打开到最新处）。过滤记录的来源链接仍指向被过滤的那条消息。链接按飞书的降级协议转成
+面板里只有卡片入口（「去飞书回答」）留在消息级链接上：卡片或纯文本提问都用发卡/发消息时记下的 `url`，没有时先用该工单的飞书话题链接（打开到话题根消息），再退回来源消息或会话链接，点开正好落到要回答的提问；工单页和话题页的「打开飞书原文」、话题 chip 用同样的**话题根消息**链接：`open_chat_id` / `open_thread_id` 再带 `openchatid` / `openthreadid` 两种拼写和 `thread_position=-1`，与飞书自己的 `message_app_link` 一致。客户端要靠根消息的 `thread_position` 解析话题，缺了它按位置 0 解析，而还没有回复的话题没有位置 0，点了会静默无反应——「已开话题」刚发出时恰好就是这种话题。回执如果本身就发在工单话题里（来源消息已经在那个话题里），不再附加这条跳转链接，只回内容：人已经在那里了。只有会话链接时先用 `chatId` 和 `threadId`（话题 id，旧话题从首个 Trigger 的 meta 取）补出话题链接，都拿不到才退回会话链接（并去掉 `position`，打开到最新处）。过滤记录的来源链接仍指向被过滤的那条消息。链接按飞书的降级协议转成
 `feishu://applink/client/…`（Lark 品牌为 `lark://applink/…`）后再放进面板：它直接拉起已安装的客户端，
 不再先打开 `https://applink…` 的落地页，也就不会在浏览器里留下一个要手动关掉的标签页。
 旧版本只存了会话链接的卡片和话题由 `linksLoop` 定期补齐（每轮最多 12 次 `im +messages-mget`，失败的下一轮重试），

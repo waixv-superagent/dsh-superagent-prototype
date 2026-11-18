@@ -93,7 +93,7 @@ export const KV = {
      * The topic link an accepted ticket's receipt carries, by ticket id: settled by the opener and kept for an hour, so a
      * receipt whose delivery was retried or resumed after a restart still folds the link into its one message.
      */
-    topicLinks: record<Record<string, { url: string; title: string; at: string }>>('feishu-topic-links'),
+    topicLinks: record<Record<string, { url: string; title: string; at: string; chatId?: string; messageId?: string }>>('feishu-topic-links'),
     /** Control messages (挂起/恢复) already applied, by message ID and time, so a history replay never toggles processing again. */
     controls: record<Record<string, string>>('feishu-controls'),
     seen: family<string[], [thread: string]>('thread-seen:'), initialized: family<boolean, [thread: string]>('thread-initialized:') },

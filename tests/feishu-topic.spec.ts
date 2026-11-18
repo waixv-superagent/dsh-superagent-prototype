@@ -100,7 +100,7 @@ describe('Feishu ticket topics', () => {
     const opening = openFeishuTopic(context(lark, vi.fn(), vi.fn(), vi.fn(), notify, state), carried, receipt)
     // The receipt is the message already queued for the accept; it waits for the topic instead of a second notice.
     expect(await takeTopicLink(stateOf(state), carried.id)).toEqual({
-      url: topicLink, title: '把话题改成工单简述',
+      url: topicLink, title: '把话题改成工单简述', chatId: 'oc_topic', messageId: 'om_topic',
     })
     await opening
     expect(notify).not.toHaveBeenCalled()
@@ -125,6 +125,20 @@ describe('Feishu ticket topics', () => {
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({
       text: `已开话题：[「把话题改成工单简述」](${topicLink})`,
     }))
+  })
+
+  it('skips the notice when the request already came from the ticket\'s own topic', async () => {
+    const lark = vi.fn(async (args: string[]) => args[1] === '+messages-send'
+      ? { message_id: 'om_topic', thread_id: 'omt_topic' }
+      : { data: { messages: [{ message_id: 'om_topic', thread_id: 'omt_topic',
+        message_app_link: 'https://applink.feishu.cn/client/thread/open?open_thread_id=omt_topic' }] } })
+    const notify = vi.fn()
+    const inside = { ...trigger, channel: { source: 'feishu', thread: 'feishu:oc_topic',
+      address: { chatId: 'oc_topic', messageId: 'om_topic' } } }
+    const ctx = { ...context(lark, vi.fn(), vi.fn(), vi.fn(), notify), triggers: { get: () => inside } } as unknown as SourceContext
+    await openFeishuTopic(ctx, ticket())
+    // The person is already in the topic; a link back into it would only repeat where they are.
+    expect(notify).not.toHaveBeenCalled()
   })
 
   it('keeps the topic and still links it from its thread id when the link lookup fails', async () => {

@@ -8,8 +8,8 @@
 import { KV } from '../kv.ts'
 import type { SourceContext } from './host.ts'
 
-/** The topic a receipt points at: the link to open, and the ticket brief its title starts with. */
-export interface TopicLink { url: string; title: string }
+/** The topic a receipt points at: the link to open, the ticket brief its title starts with, and the conversation it opens. */
+export interface TopicLink { url: string; title: string; chatId?: string; messageId?: string }
 
 /** How long a receipt waits for its ticket's topic before it goes without the link; the opener then posts its own notice. */
 export const TOPIC_WAIT_MS = 10_000
@@ -50,7 +50,10 @@ export async function takeTopicLink(state: LinkState, ticketId: string, timeoutM
   if (!entry) {
     const saved = state.get(KV.feishu.topicLinks) ?? {}
     const link = saved[ticketId]
-    return link && Date.now() - Date.parse(link.at) < LINK_KEEP_MS ? { url: link.url, title: link.title } : undefined
+    // A link settled by an older build names no conversation; it still opens the topic, so a receipt keeps it.
+    return link && Date.now() - Date.parse(link.at) < LINK_KEEP_MS
+      ? { url: link.url, title: link.title, ...link.chatId ? { chatId: link.chatId } : {}, ...link.messageId ? { messageId: link.messageId } : {} }
+      : undefined
   }
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<undefined>(done => { timer = setTimeout(() => done(undefined), timeoutMs) })

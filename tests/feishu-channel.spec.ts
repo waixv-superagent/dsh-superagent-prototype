@@ -20,7 +20,8 @@ function memory() {
   }
 }
 const linkState = (state: ReturnType<typeof memory>) => state as unknown as Parameters<typeof takeTopicLink>[0]
-const topic = { url: 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1', title: '修好登录' }
+const topic = { url: 'https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1', title: '修好登录',
+  chatId: 'oc_1', messageId: 'om_root' }
 
 describe('Feishu outbound replies', () => {
   it('encodes Markdown as one post payload, so no literal newline survives in the argument', () => {
@@ -55,6 +56,17 @@ describe('Feishu outbound replies', () => {
     expect(JSON.parse(args[args.indexOf('--content') + 1]!).zh_cn.content[0][0].text).toBe(
       '收到，排查登录。\n已开话题：[「修好登录」](https://applink.feishu.cn/client/thread/open?open_chat_id=oc_1&open_thread_id=omt_1)'
       + '\n[工单 t-topic ↗](https://panel.example/?ticket=t-topic)')
+  })
+  it('answers inside the ticket\'s own topic without a link back to it, since the person is already there', async () => {
+    const state = memory()
+    expectTopicLink('t-inside')
+    settleTopicLink(linkState(state), 't-inside', topic)
+    const lark = vi.fn(async (_args: string[]) => ({ ok: true }))
+    const inside: OutboundMessage = { ...message('收到，继续。'), kind: 'acknowledgement', ticketId: 't-inside',
+      channel: { source: 'feishu', thread: 'feishu:oc_1', address: { chatId: 'oc_1', messageId: 'om_root' } } }
+    expect(await sendFeishu(host(lark, state), inside)).toBe('sent')
+    const args = lark.mock.calls[0]![0] as string[]
+    expect(JSON.parse(args[args.indexOf('--content') + 1]!).zh_cn.content[0][0].text).toBe('收到，继续。')
   })
   it('waits for the topic its accept is opening, so the receipt goes out with the link', async () => {
     expectTopicLink('t-wait')
