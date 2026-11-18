@@ -52,7 +52,7 @@ A failed prepare fails the Ticket with the command's output and is not retried, 
 
 ### 2.1 Where a delivered change lives
 
-A `p4` Ticket works in the task center's default workspace, which is the first one configured in `executor.workspaces`; this installation configures `sun` at `E:\sun_mainline` with the client `wanghuaiyang_sun_mainline`. Its changelist is opened, shelved and kept in that client, so a person's own P4V client lists the pending changelist and the edits are in the tree a build or the editor sees. The Ticket page names the workspace directory, the target and the client that owns the changelist, and Swarm serves the review by id.
+A `p4` Ticket works in the task center's default workspace, which is the first one configured in `executor.workspaces`. Its changelist is opened, shelved and kept in that workspace's client, so when the workspace configures the client a person uses day to day, that person's P4V client lists the pending changelist and the edits are in the tree a build or the editor sees. The Ticket page names the workspace directory, the target and the client that owns the changelist, and Swarm serves the review by id.
 
 A Ticket with no configured workspace keeps its own `<stateDir>/work/<short name>` directory, and the client the prepare command creates for it from `p4.clientTemplate` is not the person's own: P4V does not list that Ticket's pending changelist.
 

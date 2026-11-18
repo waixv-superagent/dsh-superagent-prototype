@@ -62,7 +62,7 @@ A worker that needs a file outside its lease does not take it: it reports the ne
 
 A workspace has one p4 client, created once, not one per ticket:
 
-- the client is the workspace's configured `p4Client` (for this installation's `sun` workspace, `wanghuaiyang_sun_mainline`), so a person's own P4V client lists the Tickets' pending changelists, and the edits in the tree are the ones a build or the editor sees; a workspace without a configured client uses the template and its id;
+- the client is the workspace's configured `p4Client` (else the template and the workspace id), so a workspace that names a person's own client lets their P4V list the Tickets' pending changelists, and the edits in the tree are the ones a build or the editor sees;
 - a Ticket's edits go into its own changelist: `p4 change -i`, `p4 reopen -c <CL> <its files>`, `p4 shelve -c <CL>`;
 - after shelving, the Ticket keeps its files and edits in the workspace instead of reverting them, so a person can test the change and the next round continues from the same edits; the lease, not a clean tree, keeps peers off those paths;
 - a worker never runs a whole-workspace `p4 sync`, `p4 submit`, or a `p4 revert` without `-c`: those are the commands that would disturb a peer. Once its changelist has been submitted, it syncs only its own files to the new revision and opens a new changelist for follow-up work.
