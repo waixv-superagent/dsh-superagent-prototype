@@ -18,9 +18,9 @@ it('leads with a verdict and a five-lane board, keeping the idle pool behind one
   await openOverview()
   expect(tab(zh.homeViewBoard).getAttribute('aria-selected')).toBe('true')
   expect(all('.dt-tabs [role="tab"]').map(tab => tab.textContent)).toEqual(['概览', '来源', '触发', '评估', '执行', '设置'])
-  expect(document.querySelector('.dt-verdict-title')?.textContent).toBe('2件等你验证·2件等你决定')
+  expect(document.querySelector('.dt-verdict-title')?.textContent).toBe('1件刚交付等你看·2件等你决定')
   expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('2 件在跑')
-  expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('最久的交付已经等了')
+  expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('另有 1 张待验证排队')
   // The editor row sits under the verdict, before the lanes: it is the one fact an agent must read before it builds.
   expect(document.querySelector('.dt-editor-line')?.getAttribute('data-holder')).toBe('person')
   expect(document.querySelector('.dt-editor-line')?.textContent).toContain('编辑器：你正在用')
@@ -36,23 +36,31 @@ it('leads with a verdict and a five-lane board, keeping the idle pool behind one
   expect(all('.dt-deck-card-kind').map(kind => kind.textContent)).toEqual(['待回答', '待处理失败'])
   expect(all('.dt-deck-card-body').map(body => body.textContent)).toEqual(['需要确认按钮颜色',
     'LlmError: no adapter registered for provider "provider-a"'])
-  expect(all('.dt-verify-title').map(title => title.textContent)).toEqual(['修复移动普攻后接 Q 技能无法起飞', 'README 更新'])
-  expect(all('.dt-verify-cl').map(item => item.textContent)).toEqual(['CL 123456', 'CL 123456'])
-  expect(document.querySelector('.dt-backlog-line')?.textContent).toBe('1 张历史交付待补验')
+  expect(all('.dt-verify-title').map(title => title.textContent)).toEqual(['修复移动普攻后接 Q 技能无法起飞'])
+  expect(all('.dt-verify-cl').map(item => item.textContent)).toEqual(['CL 123456'])
+  // Only the fresh handover leads with a card; the ended delivery waits folded behind its count and longest wait.
+  expect(document.querySelector('.dt-verify-group')?.textContent).toBe('现在看')
+  expect(document.querySelector('.dt-verify-queue-title')?.textContent).toBe('排队 1 张')
+  expect(all('.dt-verify-queue-row')).toHaveLength(0)
+  await click(document.querySelector('.dt-verify-queue-head')!)
+  await settle()
+  expect(all('.dt-verify-queue-name').map(name => name.textContent)).toEqual(['README 更新'])
+  expect(document.querySelector('.dt-verify-queue-note')?.textContent).toBe('1 张历史交付待补验')
+  // A folded row is a way into its Ticket; it never offers the pass action the card body has (no worker left to return it to).
+  expect(all('.dt-verify-queue-row')[0]!.querySelectorAll('button')).toHaveLength(1)
   // The running lane is the executor's work; the pooled ticket waits behind the dock until a person picks it.
   expect(all('.dt-board-col[data-tone="run"] .dt-run-title').map(title => title.textContent)).toEqual(['补 i18n 文案', '升级依赖'])
   expect(all('.dt-ended2-title').map(title => title.textContent)).toEqual(['旧工单'])
   expect(all('.dt-ended2-outcome').map(outcome => outcome.textContent)).toEqual(['人工停止'])
   expect(all('.dt-ended2-meta .dt-tag')).toEqual([])
-  // The historical delivery keeps only the pass action; there is no worker turn left to send it back to.
-  expect(all('.dt-verify-card')[1]!.querySelectorAll('.dt-verify-foot button').length).toBe(2)
 })
 
 it('leads the board with the recently active Tickets, newest first, and opens the one clicked', async () => {
   await mount()
   await openOverview()
   expect(document.querySelector('.dt-active-title')?.textContent).toBe(zh.boardActiveTitle)
-  expect(document.querySelector('.dt-active-sub')?.textContent).toBe(zh.boardActiveSub)
+  expect(document.querySelector('.dt-active-sub')?.textContent).toBe('在跑 1 · 等你 1')
+  expect(all('.dt-active-row[data-live] .dt-active-stage').map(item => item.textContent)).toEqual([zh['stage.working']])
   expect(all('.dt-active-name').map(item => item.textContent)).toEqual(['升级依赖', '修复移动普攻后接 Q 技能无法起飞'])
   expect(all('.dt-active-stage').map(item => item.textContent)).toEqual([zh['stage.working'], zh['stage.verify']])
   expect(all('.dt-active-age').map(item => item.textContent)).toEqual(['4 分钟前', '30 分钟前'])
@@ -190,8 +198,9 @@ it('rings the lane a stored count focus names when the board is opened cold', as
   await mount()
   expect(tab(zh.homeViewBoard).getAttribute('aria-selected')).toBe('true')
   expect(document.querySelector('.dt-verdict')).not.toBeNull()
-  expect(all('.dt-verify-card[data-board-focus]')).toHaveLength(2)
-  expect(all('[data-board-focus]')).toHaveLength(2)
+  // Only the handover that still asks now carries the ring; the folded ended delivery is not the lane's lead card.
+  expect(all('.dt-verify-card[data-board-focus]')).toHaveLength(1)
+  expect(all('[data-board-focus]')).toHaveLength(1)
 })
 
 it('shows the editor row in each state, keeping an unreadable probe on the safe side', async () => {
@@ -316,7 +325,7 @@ it('labels every verification row with a fixed pill and folds past three rows', 
   const proof = ['Compile Result: Succeeded', 'Automation 1/2 failed', 'P4_Check 未运行',
     'p4 shelve -f -c 581411: 5 个文件 shelve'].join('\n')
   server.verification = [ticketSummary({ id: 'v1', title: '气泡验证', delivery: { lease: [], changelist: 581411,
-    review: 'Swarm 1', verification: proof }, verification: { at: '2026-09-23T00:00:00Z', state: 'pending' } },
+    review: 'Swarm 1', verification: proof }, verification: { at: new Date(Date.now() - 30 * 60_000).toISOString(), state: 'pending' } },
   { stage: 'person', action: 'verify' })]
   await mount()
   await openOverview()
@@ -497,12 +506,12 @@ it('offers the step that fixes a settings problem, and says the Executor waits f
 
 it('shows the duty desk in English', async () => {
   await mount(en)
-  expect(document.querySelector('.dt-verdict-title')?.textContent).toBe('2 to verify·2 waiting on you')
+  expect(document.querySelector('.dt-verdict-title')?.textContent).toBe('1 just delivered for your look·2 waiting on you')
   expect(document.querySelector('.dt-verdict-sub')?.textContent).toContain('2 running')
   expect(all('.dt-board-col-title').map(title => title.textContent)).toEqual(['Needs your decision', 'To verify', 'Running', 'Pipeline', 'Recently ended'])
   expect(all('.dt-deck-card-kind').map(kind => kind.textContent)).toEqual([en['stage.answer'], en['stage.failed']])
   expect(all('.dt-deck-card-foot button').map(button => button.textContent)).toContain(en.retry)
-  expect(all('.dt-verify-badge').map(badge => badge.textContent)).toEqual([en.verifyWorkerBadge, en.verifyWorkerBadge])
+  expect(all('.dt-verify-badge').map(badge => badge.textContent)).toEqual([en.verifyWorkerBadge])
 })
 
 it('says when no Source is on, an Eval is past its deadline or a message keeps failing, each with the way to it', async () => {

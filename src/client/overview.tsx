@@ -2,9 +2,9 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { usePoll, type BillingView, type EditorRow, type Problem, type RecentActiveRow, type TicketRow, type TicketSearchView } from './api.ts'
 import type { PriorityLevel } from '../core/priority.ts'
-import { verifyLines } from '../core/verification.ts'
+import { verifyFocus, verifyLines } from '../core/verification.ts'
 import { Button, Icon, Input, Tag } from './controls.tsx'
-import { activeAgo, ticketMark } from './marks.ts'
+import { activeAgo, ticketLive, ticketMark } from './marks.ts'
 import { pipelineTrack, pipelineProgressText, pipelineSmokeFailed, pipelineStageLabel, pipelineStep, pipelineTrackState } from './pipeline.ts'
 import { PriorityMenu, PriorityTag, startsNow } from './priority.tsx'
 import { useAction, usePanel, usePanelData } from './provider.tsx'
@@ -223,15 +223,20 @@ function staleLabel(t: T, at: string): string {
 function RecentActive({ tickets }: { tickets: RecentActiveRow[] }) {
   const { t, navigate } = usePanel()
   if (!tickets.length) return null
+  // The band says which rows are moving right now and which wait on a person, so six equal-looking rows read as a mix
+  // of live work and asks rather than as one undifferentiated list.
+  const live = tickets.filter(ticket => ticketLive(ticket)).length
+  const waiting = tickets.filter(ticket => ticket.stage === 'person').length
   return <section className="dt-active" aria-labelledby="dt-active-title">
     <header className="dt-active-head">
       <h2 id="dt-active-title" className="dt-active-title">{t('boardActiveTitle')}</h2>
-      <p className="dt-active-sub">{t('boardActiveSub')}</p>
+      <p className="dt-active-sub">{live || waiting ? t('boardActiveCounts', { live, person: waiting }) : t('boardActiveSub')}</p>
     </header>
     <ol className="dt-active-list">
       {tickets.map(ticket => {
         const mark = ticketMark(t, ticket)
-        return <li key={ticket.id} className="dt-active-row" data-tone={mark.tone}>
+        return <li key={ticket.id} className="dt-active-row" data-tone={mark.tone} data-live={ticketLive(ticket) || undefined}
+          data-person={ticket.stage === 'person' || undefined}>
           <span className="dt-active-dot" aria-hidden="true" />
           <button type="button" className="dt-active-name" onClick={() => navigate(ticketRoute(ticket.id))}>{ticket.title}</button>
           <span className="dt-active-stage">{mark.label}</span>
@@ -559,6 +564,41 @@ function VerifyCard({ ticket, onChanged, focused }: { ticket: TicketRow; onChang
 }
 
 /**
+ * The verify lane's standing queue: older, pooled and already-ended deliveries, folded behind one line so a backlog never
+ * competes with the handovers that block current work. It names its count and the longest wait while closed; opening it
+ * lists one compact row per Ticket, and a row opens the Ticket where the check itself lives.
+ */
+function VerifyQueue({ tickets, backlog, onChanged }: { tickets: TicketRow[]; backlog: number; onChanged: () => Promise<void> }) {
+  const { t, navigate } = usePanel()
+  const [open, setOpen] = useState(false)
+  const handoverAt = (ticket: TicketRow) => ticket.verification?.at ?? ticket.ended?.at ?? ticket.updatedAt
+  const oldest = tickets[0]
+  return <div className="dt-verify-queue">
+    <button type="button" className="dt-verify-queue-head" aria-expanded={open}
+      aria-label={t('boardVerifyQueueToggle', { count: tickets.length })} onClick={() => setOpen(value => !value)}>
+      <span className="dt-verify-queue-title">{t('boardVerifyQueueTitle', { count: tickets.length })}</span>
+      {oldest && <span className="dt-verify-queue-age">{t('boardVerifyQueueOldestShort', { time: waitedFor(t, handoverAt(oldest)) })}</span>}
+      <span className="dt-verify-queue-chevron" aria-hidden="true"><Icon name={open ? 'chevron-up' : 'chevron-down'} size={12} /></span>
+    </button>
+    {open && <ul className="dt-verify-queue-list">
+      {tickets.map(ticket => {
+        const ended = ticket.state === 'ended'
+        return <li key={ticket.id} className="dt-verify-queue-row" data-ended={ended || undefined}>
+          {!ended && <PriorityMenu ticket={ticket} onChanged={onChanged} variant="icon" />}
+          <button type="button" className="dt-verify-queue-name" onClick={() => navigate(ticketRoute(ticket.id))}>{ticket.title}</button>
+          <span className="dt-verify-queue-meta">
+            {ended && <Tag tone="quiet">{t('verifyHistorical')}</Tag>}
+            {ticket.delivery?.changelist !== undefined && <span className="dt-verify-cl">CL {ticket.delivery.changelist}</span>}
+            <span className="dt-verify-queue-wait">{waitedFor(t, handoverAt(ticket))}</span>
+          </span>
+        </li>
+      })}
+    </ul>}
+    {open && backlog > 0 && <p className="dt-verify-queue-note">{t('verifyBacklogPending', { count: backlog })}</p>}
+  </div>
+}
+
+/**
  * A delivered ticket being followed through its review and pipeline. A blocked one that needs a person sits at the top of
  * the lane; a running one is still moving, so the card leans on the last check and the review link instead of a verdict.
  * `manual` separates "only your approval or submit remains" (a gold wait, not a failure) from a real block.
@@ -771,6 +811,9 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
   if (!data) return <LoadState error={error} loading />
   const person = data.person
   const verification = data.verification ?? []
+  // An older host splits nothing: every pending check then reads as the current ask, which is the previous behaviour.
+  const verifyNow = data.verifyNow ?? verification
+  const verifyLater = data.verifyLater ?? []
   const pipeline = data.pipeline ?? []
   const blockedPipeline = pipeline.filter(ticket => ticket.stage === 'pipeline' && ticket.action === 'blocked'
     && (!ticket.pipeline?.manual || pipelineSmokeFailed(ticket.pipeline))).length
@@ -779,17 +822,20 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
   const pool = data.pool ?? []
   const parked = data.parked ?? []
   const ended = data.ended ?? []
-  const endedStats = data.endedStats ?? { completed: 0, verified: 0, pending: 0, agent: 0, none: 0, changelist: 0 }
-  const needs = person.length + verification.length
+  const needs = person.length + verifyNow.length
   const running = working.length + idle.length
-  const backlog = verification.filter(ticket => ticket.state === 'ended').length
+  const backlog = verifyLater.filter(ticket => ticket.state === 'ended').length
   const stuck = working.filter(ticket => !(ticket.stage === 'working' && ticket.action === 'queued')
     && Date.now() - Date.parse(ticket.updatedAt) > STUCK_MS).length
-  const oldest = verification.map(ticket => ticket.verification?.at ?? ticket.ended?.at).filter((at): at is string => !!at)
+  const oldest = verifyLater.map(ticket => ticket.verification?.at ?? ticket.ended?.at).filter((at): at is string => !!at)
     .sort((left, right) => left.localeCompare(right))[0]
+  // The queue is stated once as a count and its longest wait, so the pile is still visible without leading with its size.
+  const queue = verifyLater.length ? [t('boardVerifyQueuePart', { count: verifyLater.length }),
+    oldest ? t('boardVerifyQueueOldest', { time: waitedFor(t, oldest) }) : ''].filter(Boolean).join(' · ') : ''
   const note = [running > 0 ? t('boardRunningPart', { count: running }) : '', pool.length + parked.length > 0
     ? t('boardPoolPart', { count: pool.length + parked.length }) : '', stuck > 0 ? t('boardStuckPart', { count: stuck }) : '',
-    oldest ? t('boardOldestVerify', { time: waitedFor(t, oldest) }) : ''].filter(Boolean).join(' · ')
+    queue].filter(Boolean).join(' · ')
+  const quiet = [t('boardAllClearSub', { count: running }), queue].filter(Boolean).join(' · ')
   const openTickets = () => navigate({ page: 'execution', query: { filter: 'open' } })
   return <>
     {error && <LoadState error={error} loading={false} />}
@@ -798,16 +844,16 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
       <div className="dt-verdict-main">
         <p className="dt-eyebrow">{t('boardEyebrow')}</p>
         <h2 id="dt-verdict-title" className="dt-verdict-title" data-quiet={needs === 0 || undefined}>
-          {verification.length > 0 && <>
-            <span className="dt-verdict-n">{verification.length}</span>{t('boardVerifyTail')}
+          {verifyNow.length > 0 && <>
+            <span className="dt-verdict-n">{verifyNow.length}</span>{t('boardVerifyNowTail')}
           </>}
-          {verification.length > 0 && person.length > 0 && <span className="dt-verdict-sep" aria-hidden="true">·</span>}
+          {verifyNow.length > 0 && person.length > 0 && <span className="dt-verdict-sep" aria-hidden="true">·</span>}
           {person.length > 0 && <>
             <span className="dt-verdict-dec">{person.length}</span>{t('boardDecisionTail')}
           </>}
           {needs === 0 && t('boardAllClear')}
         </h2>
-        <p className="dt-verdict-sub">{needs ? note || t('boardRunningEmpty') : t('boardAllClearSub', { count: running })}</p>
+        <p className="dt-verdict-sub">{needs ? note || t('boardRunningEmpty') : quiet}</p>
         {data.editor && <EditorLine editor={data.editor} />}
       </div>
       <dl className="dt-figures">
@@ -849,17 +895,17 @@ export function OverviewPage({ focus }: { focus?: BoardFocus }) {
             focused={mark === 'person'} />)}</div>
         </Lane>
 
-        <Lane tone="verify" title={t('boardVerifyTitle')} count={verification.length} sub={t('boardVerifySub')}
+        <Lane tone="verify" title={t('boardVerifyTitle')} count={verification.length}
+          sub={verifyNow.length && verifyLater.length ? t('boardVerifySubNowQueued', { now: verifyNow.length, queued: verifyLater.length })
+            : verifyNow.length ? t('boardVerifySubNow', { now: verifyNow.length })
+            : verifyLater.length ? t('boardVerifySubQueued', { count: verifyLater.length }) : t('boardVerifySub')}
           empty={t('boardVerifyEmpty')}
           action={verification.length ? <button type="button" className="dt-board-more" onClick={() => navigate({ page: 'execution', query: { filter: 'verify' } })}>
             {t('boardAllNeeds', { count: verification.length })} →</button> : undefined}>
-          {backlog > 0 && <div className="dt-backlog">
-            <p className="dt-backlog-line">{t('verifyBacklogPending', { count: backlog })}</p>
-            {endedStats.completed > 0 && <p className="dt-backlog-detail">{t('verifyBacklogDetail', { agent: endedStats.agent,
-              none: endedStats.none, cl: endedStats.changelist })}</p>}
-          </div>}
-          <div className="dt-board-stack">{verification.map(ticket => <VerifyCard key={ticket.id} ticket={ticket} onChanged={reload}
+          {verifyNow.length > 0 && verifyLater.length > 0 && <p className="dt-verify-group">{t('boardVerifyNowLabel')}</p>}
+          <div className="dt-board-stack">{verifyNow.map(ticket => <VerifyCard key={ticket.id} ticket={ticket} onChanged={reload}
             focused={mark === 'verification'} />)}</div>
+          {verifyLater.length > 0 && <VerifyQueue tickets={verifyLater} backlog={backlog} onChanged={reload} />}
         </Lane>
 
         <Lane tone="run" title={t('boardRunning')} count={running} sub={t('boardRunningSub')} empty={t('boardRunningEmpty')}

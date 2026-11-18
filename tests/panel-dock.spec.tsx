@@ -31,23 +31,32 @@ const rows = () => all('.dt-dock-row')
 const press = async (element: HTMLElement) => { await act(async () => { element.click() }); await settle() }
 
 describe('active-Tickets dock', () => {
-  it('lists the active Tickets newest first with their stage and relative age, and makes a person-stage row loud', async () => {
+  it('lists only live work and rows that wait on a person, live first, and never the all-identical six-row dump', async () => {
     server.active = [...server.active, { ...ticketSummary({ id: 't9', title: '排队的工单' }, { stage: 'working', action: 'queued' }),
       activeAt: new Date(Date.now() - 3 * 3_600_000).toISOString() }]
     await mountDock()
-    expect(document.querySelector('.dt-dock-label')?.textContent).toBe('活跃工单3')
-    expect(rows().map(row => row.querySelector('.dt-dock-title')?.textContent)).toEqual(['升级依赖', '修复移动普攻后接 Q 技能无法起飞', '排队的工单'])
-    const [working, person, queued] = rows()
+    expect(document.querySelector('.dt-dock-label')?.textContent).toBe('活跃工单2')
+    // A queued turn is not moving, so it stays on the board rather than on the always-visible strip.
+    expect(rows().map(row => row.querySelector('.dt-dock-title')?.textContent)).toEqual(['升级依赖', '修复移动普攻后接 Q 技能无法起飞'])
+    const [working, person] = rows()
+    expect(working!.closest('.dt-dock-item')?.getAttribute('data-live')).toBe('true')
     expect(working!.querySelector('.dt-dock-stage')?.textContent).toBe(zh['stage.working'])
     expect(working!.querySelector('.dt-dock-spin')).not.toBeNull()
     expect(working!.querySelector('.dt-dock-age')?.textContent).toBe('4 分钟前')
     expect(person!.querySelector('.dt-dock-pill')?.textContent).toBe(zh['stage.verify'])
     expect(person!.querySelector('.dt-dock-stage')).toBeNull()
     expect(person!.querySelector('.dt-dock-age')?.textContent).toBe('30 分钟前')
-    expect(queued!.querySelector('.dt-dock-stage')?.textContent).toBe(zh['stage.queued'])
-    expect(queued!.querySelector('.dt-dock-age')?.textContent).toBe('3 小时前')
+    // The live group and the group that waits on a person are visibly separate.
+    expect(document.querySelectorAll('.dt-dock-sep')).toHaveLength(1)
     // The full title stays reachable when the visible one is cut.
     expect(person!.getAttribute('aria-label')).toContain('修复移动普攻后接 Q 技能无法起飞')
+  })
+
+  it('keeps an older handover off the strip, where it is queue rather than active work', async () => {
+    server.active = [{ ...ticketSummary({ id: 't9', title: '上周交付的工单', verification: { at: new Date(Date.now() - 3 * 86_400_000)
+      .toISOString(), state: 'pending' } }, { stage: 'person', action: 'verify' }), activeAt: new Date(Date.now() - 2 * 3_600_000).toISOString() }]
+    await mountDock()
+    expect(container!.innerHTML).toBe('')
   })
 
   it('renders nothing when no open Ticket has recent activity', async () => {

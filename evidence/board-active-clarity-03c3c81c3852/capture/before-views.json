@@ -1,0 +1,949 @@
+{
+ "GET overview": {
+  "problems": [],
+  "active": [
+   {
+    "id": "demo-queued-0010",
+    "title": "示例：排队等执行槽的工单",
+    "state": "open",
+    "stage": "working",
+    "action": "queued",
+    "kind": "feature",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": false,
+     "rework": false
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "",
+    "summary": "",
+    "createdAt": "2026-11-17T16:00:00.000Z",
+    "updatedAt": "2026-11-18T15:55:00.000Z",
+    "threads": [],
+    "activeAt": "2026-11-18T15:55:00.000Z"
+   },
+   {
+    "id": "demo-run-0008",
+    "title": "示例：worker 正在改转向门控",
+    "state": "open",
+    "stage": "working",
+    "kind": "feature",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": false,
+     "rework": false
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-run-0008",
+    "summary": "",
+    "createdAt": "2026-11-17T16:00:00.000Z",
+    "updatedAt": "2026-11-18T15:48:00.000Z",
+    "threads": [],
+    "activeAt": "2026-11-18T15:48:00.000Z"
+   },
+   {
+    "id": "demo-run-0009",
+    "title": "示例：worker 正在跑回归用例",
+    "state": "open",
+    "stage": "working",
+    "kind": "bug",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": false,
+     "rework": false
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-run-0009",
+    "summary": "",
+    "createdAt": "2026-11-16T16:00:00.000Z",
+    "updatedAt": "2026-11-18T15:35:00.000Z",
+    "threads": [],
+    "activeAt": "2026-11-18T15:35:00.000Z"
+   },
+   {
+    "id": "demo-verify-0003",
+    "title": "示例：刚交付的转向修复等你本地验证",
+    "state": "open",
+    "stage": "person",
+    "action": "verify",
+    "kind": "bug",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": true,
+     "rework": true
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "verification": {
+     "at": "2026-11-18T14:00:00.000Z",
+     "state": "pending"
+    },
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-verify-0003",
+    "directory": "/tmp/demo-verify-0003",
+    "summary": "示例：已交付，等本地验证。",
+    "createdAt": "2026-11-12T16:00:00.000Z",
+    "updatedAt": "2026-11-18T14:00:00.000Z",
+    "delivery": {
+     "lease": [],
+     "changelist": 620101,
+     "review": "620101",
+     "verification": "版本与前置：示例面板构建；CL 示例\n复现步骤：打开看板，再打开这张工单\n预期与证据：工单显示「待你验证」\n待你判断：这张单是否仍需要现在看"
+    },
+    "threads": [],
+    "activeAt": "2026-11-18T14:00:00.000Z"
+   },
+   {
+    "id": "demo-verify-0004",
+    "title": "示例：一天前交付的镜头跟随修复",
+    "state": "open",
+    "stage": "person",
+    "action": "verify",
+    "kind": "bug",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P2",
+     "code": "P2",
+     "word": "闲时",
+     "hint": "闲时处理 / 排期",
+     "source": "default"
+    },
+    "pool": true,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": true,
+     "rework": true
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "verification": {
+     "at": "2026-11-17T10:00:00.000Z",
+     "state": "pending"
+    },
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-verify-0004",
+    "directory": "/tmp/demo-verify-0004",
+    "summary": "示例：已交付，等本地验证。",
+    "createdAt": "2026-11-12T16:00:00.000Z",
+    "updatedAt": "2026-11-17T10:00:00.000Z",
+    "delivery": {
+     "lease": [],
+     "changelist": 620077,
+     "review": "620077",
+     "verification": "版本与前置：示例面板构建；CL 示例\n复现步骤：打开看板，再打开这张工单\n预期与证据：工单显示「待你验证」\n待你判断：这张单是否仍需要现在看"
+    },
+    "threads": [],
+    "activeAt": "2026-11-17T10:00:00.000Z"
+   },
+   {
+    "id": "demo-verify-0005",
+    "title": "示例：两天前交付的动画融合调整",
+    "state": "open",
+    "stage": "person",
+    "action": "verify",
+    "kind": "feature",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": true,
+     "rework": true
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "verification": {
+     "at": "2026-11-17T04:00:00.000Z",
+     "state": "pending"
+    },
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-verify-0005",
+    "directory": "/tmp/demo-verify-0005",
+    "summary": "示例：已交付，等本地验证。",
+    "createdAt": "2026-11-12T16:00:00.000Z",
+    "updatedAt": "2026-11-17T04:00:00.000Z",
+    "delivery": {
+     "lease": [],
+     "changelist": 620065,
+     "review": "620065",
+     "verification": "版本与前置：示例面板构建；CL 示例\n复现步骤：打开看板，再打开这张工单\n预期与证据：工单显示「待你验证」\n待你判断：这张单是否仍需要现在看"
+    },
+    "threads": [],
+    "activeAt": "2026-11-17T04:00:00.000Z"
+   }
+  ],
+  "person": [
+   {
+    "id": "demo-decision-0001",
+    "title": "示例：方案卡等你拍板（入口放哪一栏）",
+    "state": "open",
+    "stage": "person",
+    "action": "answer",
+    "note": {
+     "text": "入口放概览还是执行页？",
+     "error": false
+    },
+    "kind": "feature",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": false,
+     "rework": false
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "attention": {
+     "id": "demo-attention-1",
+     "question": "入口放概览还是执行页？"
+    },
+    "assignments": 1,
+    "inputs": 1,
+    "undelivered": 0,
+    "sessionId": "worker-demo-decision-0001",
+    "summary": "等确认入口位置后再改。",
+    "createdAt": "2026-11-14T16:00:00.000Z",
+    "updatedAt": "2026-11-16T16:00:00.000Z",
+    "threads": []
+   },
+   {
+    "id": "demo-decision-0002",
+    "title": "示例：构建失败等你决定是否重试",
+    "state": "open",
+    "stage": "person",
+    "action": "failed",
+    "note": {
+     "text": "示例：编译在 PlayLevel 阶段失败。",
+     "error": true
+    },
+    "kind": "inquiry",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": true,
+     "stop": true,
+     "confirm": false,
+     "verify": false,
+     "rework": false
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-decision-0002",
+    "summary": "示例：编译在 PlayLevel 阶段失败。",
+    "createdAt": "2026-11-15T16:00:00.000Z",
+    "updatedAt": "2026-11-15T16:00:00.000Z",
+    "threads": []
+   }
+  ],
+  "verification": [
+   {
+    "id": "demo-verify-0003",
+    "title": "示例：刚交付的转向修复等你本地验证",
+    "state": "open",
+    "stage": "person",
+    "action": "verify",
+    "kind": "bug",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": true,
+     "rework": true
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "verification": {
+     "at": "2026-11-18T14:00:00.000Z",
+     "state": "pending"
+    },
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-verify-0003",
+    "directory": "/tmp/demo-verify-0003",
+    "summary": "示例：已交付，等本地验证。",
+    "createdAt": "2026-11-12T16:00:00.000Z",
+    "updatedAt": "2026-11-18T14:00:00.000Z",
+    "delivery": {
+     "lease": [],
+     "changelist": 620101,
+     "review": "620101",
+     "verification": "版本与前置：示例面板构建；CL 示例\n复现步骤：打开看板，再打开这张工单\n预期与证据：工单显示「待你验证」\n待你判断：这张单是否仍需要现在看"
+    },
+    "threads": []
+   },
+   {
+    "id": "demo-verify-0004",
+    "title": "示例：一天前交付的镜头跟随修复",
+    "state": "open",
+    "stage": "person",
+    "action": "verify",
+    "kind": "bug",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P2",
+     "code": "P2",
+     "word": "闲时",
+     "hint": "闲时处理 / 排期",
+     "source": "default"
+    },
+    "pool": true,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": true,
+     "rework": true
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "verification": {
+     "at": "2026-11-17T10:00:00.000Z",
+     "state": "pending"
+    },
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-verify-0004",
+    "directory": "/tmp/demo-verify-0004",
+    "summary": "示例：已交付，等本地验证。",
+    "createdAt": "2026-11-12T16:00:00.000Z",
+    "updatedAt": "2026-11-17T10:00:00.000Z",
+    "delivery": {
+     "lease": [],
+     "changelist": 620077,
+     "review": "620077",
+     "verification": "版本与前置：示例面板构建；CL 示例\n复现步骤：打开看板，再打开这张工单\n预期与证据：工单显示「待你验证」\n待你判断：这张单是否仍需要现在看"
+    },
+    "threads": []
+   },
+   {
+    "id": "demo-verify-0005",
+    "title": "示例：两天前交付的动画融合调整",
+    "state": "open",
+    "stage": "person",
+    "action": "verify",
+    "kind": "feature",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": true,
+     "rework": true
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "verification": {
+     "at": "2026-11-17T04:00:00.000Z",
+     "state": "pending"
+    },
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-verify-0005",
+    "directory": "/tmp/demo-verify-0005",
+    "summary": "示例：已交付，等本地验证。",
+    "createdAt": "2026-11-12T16:00:00.000Z",
+    "updatedAt": "2026-11-17T04:00:00.000Z",
+    "delivery": {
+     "lease": [],
+     "changelist": 620065,
+     "review": "620065",
+     "verification": "版本与前置：示例面板构建；CL 示例\n复现步骤：打开看板，再打开这张工单\n预期与证据：工单显示「待你验证」\n待你判断：这张单是否仍需要现在看"
+    },
+    "threads": []
+   },
+   {
+    "id": "demo-verify-0006",
+    "title": "示例：三天前交付的界面文案修正",
+    "state": "open",
+    "stage": "person",
+    "action": "verify",
+    "kind": "feature",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P2",
+     "code": "P2",
+     "word": "闲时",
+     "hint": "闲时处理 / 排期",
+     "source": "default"
+    },
+    "pool": true,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": true,
+     "rework": true
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "verification": {
+     "at": "2026-11-15T16:00:00.000Z",
+     "state": "pending"
+    },
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-verify-0006",
+    "directory": "/tmp/demo-verify-0006",
+    "summary": "示例：已交付，等本地验证。",
+    "createdAt": "2026-11-12T16:00:00.000Z",
+    "updatedAt": "2026-11-15T16:00:00.000Z",
+    "delivery": {
+     "lease": [],
+     "changelist": 620012,
+     "verification": "版本与前置：示例面板构建；CL 示例\n复现步骤：打开看板，再打开这张工单\n预期与证据：工单显示「待你验证」\n待你判断：这张单是否仍需要现在看"
+    },
+    "threads": []
+   },
+   {
+    "id": "demo-verify-0007",
+    "title": "示例：已结束的历史交付待补验",
+    "state": "ended",
+    "stage": "ended",
+    "kind": "feature",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": false,
+     "confirm": false,
+     "verify": true,
+     "rework": false
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "ended": {
+     "at": "2026-11-17T16:00:00.000Z",
+     "by": "human",
+     "outcome": "completed"
+    },
+    "verification": {
+     "at": "2026-11-16T16:00:00.000Z",
+     "state": "pending"
+    },
+    "provenance": "agent",
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-verify-0007",
+    "directory": "/tmp/demo-verify-0007",
+    "summary": "示例：已交付，等本地验证。",
+    "createdAt": "2026-11-12T16:00:00.000Z",
+    "updatedAt": "2026-11-16T16:00:00.000Z",
+    "delivery": {
+     "lease": [],
+     "changelist": 620090,
+     "verification": "版本与前置：示例面板构建；CL 示例\n复现步骤：打开看板，再打开这张工单\n预期与证据：工单显示「待你验证」\n待你判断：这张单是否仍需要现在看"
+    },
+    "threads": []
+   }
+  ],
+  "pipeline": [
+   {
+    "id": "demo-pipeline-0012",
+    "title": "示例：已过本地验证，Swarm 审核等你点通过",
+    "state": "open",
+    "stage": "pipeline",
+    "action": "blocked",
+    "kind": "inquiry",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "pipeline": {
+     "state": "blocked",
+     "at": "2026-11-18T15:00:00.000Z",
+     "manual": true,
+     "step": "review",
+     "check": "Swarm 已通过，待人工审核",
+     "url": "https://swarm.example/reviews/619900",
+     "progress": {
+      "pass": 2,
+      "running": 0,
+      "fail": 0,
+      "total": 2
+     }
+    },
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": false,
+     "rework": false
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "verification": {
+     "at": "2026-11-13T16:00:00.000Z",
+     "state": "passed",
+     "by": "person"
+    },
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-pipeline-0012",
+    "directory": "/tmp/demo-pipeline",
+    "summary": "已交付 CL 619900 / Swarm 619900。",
+    "createdAt": "2026-11-10T16:00:00.000Z",
+    "updatedAt": "2026-11-18T15:00:00.000Z",
+    "delivery": {
+     "lease": [],
+     "changelist": 619900,
+     "review": "619900"
+    },
+    "threads": []
+   }
+  ],
+  "working": [
+   {
+    "id": "demo-queued-0010",
+    "title": "示例：排队等执行槽的工单",
+    "state": "open",
+    "stage": "working",
+    "action": "queued",
+    "kind": "feature",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": false,
+     "rework": false
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "",
+    "summary": "",
+    "createdAt": "2026-11-17T16:00:00.000Z",
+    "updatedAt": "2026-11-18T15:55:00.000Z",
+    "threads": []
+   },
+   {
+    "id": "demo-run-0008",
+    "title": "示例：worker 正在改转向门控",
+    "state": "open",
+    "stage": "working",
+    "kind": "feature",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": false,
+     "rework": false
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-run-0008",
+    "summary": "",
+    "createdAt": "2026-11-17T16:00:00.000Z",
+    "updatedAt": "2026-11-18T15:48:00.000Z",
+    "threads": []
+   },
+   {
+    "id": "demo-run-0009",
+    "title": "示例：worker 正在跑回归用例",
+    "state": "open",
+    "stage": "working",
+    "kind": "bug",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": false,
+     "rework": false
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-run-0009",
+    "summary": "",
+    "createdAt": "2026-11-16T16:00:00.000Z",
+    "updatedAt": "2026-11-18T15:35:00.000Z",
+    "threads": []
+   }
+  ],
+  "idle": [
+   {
+    "id": "demo-idle-0011",
+    "title": "示例：等待新触发的工单",
+    "state": "open",
+    "stage": "idle",
+    "kind": "feature",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": false,
+     "rework": false
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-idle-0011",
+    "summary": "没有新触发，先待命。",
+    "createdAt": "2026-11-09T16:00:00.000Z",
+    "updatedAt": "2026-11-14T16:00:00.000Z",
+    "threads": []
+   }
+  ],
+  "pool": [
+   {
+    "id": "demo-pool-0013",
+    "title": "示例：闲时池里的 P2 缺陷",
+    "state": "open",
+    "stage": "working",
+    "action": "queued",
+    "kind": "feature",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [
+     "plan"
+    ],
+    "priority": {
+     "level": "P2",
+     "code": "P2",
+     "word": "闲时",
+     "hint": "闲时处理 / 排期",
+     "source": "default"
+    },
+    "pool": true,
+    "actions": {
+     "retry": false,
+     "stop": true,
+     "confirm": false,
+     "verify": false,
+     "rework": false
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "",
+    "summary": "",
+    "createdAt": "2026-11-14T16:00:00.000Z",
+    "updatedAt": "2026-11-18T11:00:00.000Z",
+    "threads": []
+   }
+  ],
+  "parked": [],
+  "ended": [
+   {
+    "id": "demo-ended-0014",
+    "title": "示例：一小时前完成并验收",
+    "state": "ended",
+    "stage": "ended",
+    "kind": "feature",
+    "kindSource": "rule",
+    "phase": "implement",
+    "phaseBack": [],
+    "priority": {
+     "level": "P1",
+     "code": "P1",
+     "word": "主线",
+     "hint": "今天的主线工作",
+     "source": "default"
+    },
+    "pool": false,
+    "actions": {
+     "retry": false,
+     "stop": false,
+     "confirm": false,
+     "verify": false,
+     "rework": false
+    },
+    "strength": "explicit",
+    "source": "feishu",
+    "ended": {
+     "at": "2026-11-18T15:00:00.000Z",
+     "by": "executor",
+     "outcome": "completed"
+    },
+    "verification": {
+     "at": "2026-11-18T14:00:00.000Z",
+     "state": "passed",
+     "by": "person"
+    },
+    "provenance": "person",
+    "assignments": 1,
+    "inputs": 0,
+    "undelivered": 0,
+    "sessionId": "worker-demo-ended-0014",
+    "directory": "/tmp/demo-ended-14",
+    "summary": "已交付 CL 619880 / Swarm 619880。",
+    "createdAt": "2026-11-13T16:00:00.000Z",
+    "updatedAt": "2026-11-18T15:00:00.000Z",
+    "delivery": {
+     "lease": [],
+     "changelist": 619880,
+     "review": "619880"
+    },
+    "threads": []
+   }
+  ],
+  "endedStats": {
+   "completed": 2,
+   "verified": 1,
+   "pending": 1,
+   "agent": 1,
+   "none": 1,
+   "changelist": 2,
+   "archived": 0
+  },
+  "executor": {
+   "running": 2,
+   "queued": 2,
+   "maxWorkers": 3,
+   "idle": 2
+  },
+  "flow": {
+   "received": 0,
+   "filtered": 0,
+   "triggers": 0,
+   "judged": 0,
+   "accepted": 0,
+   "evaluating": 0,
+   "dropped": 0
+  },
+  "editor": null,
+  "policyVersion": "78a0b9a1c3f8f001ccc424f4b7b98680"
+ }
+}

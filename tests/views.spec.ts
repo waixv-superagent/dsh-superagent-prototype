@@ -222,6 +222,28 @@ it('classifies delivered work awaiting the local check as verification, not as i
   expect(page.person).toEqual([])
   expect(page.pipeline).toEqual([])
 })
+it('leads the verification lane with the handovers that still block work and folds older and ended ones into the queue', () => {
+  const host = views()
+  const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString()
+  const handover = (id: string, title: string, handedAt: string, priority?: { level: 'P0'; source: 'human'; at: string; by: string }) => {
+    live(id)
+    store.tickets.save({ ...store.tickets.get(id)!, title, ...priority ? { priority } : {},
+      execution: { name: 'w', directory: '/w', assignment: '', changelist: 42, verification: 'Automation 19/19 passed' },
+      verification: { at: handedAt, state: 'pending' } })
+  }
+  handover('fresh', '刚交付', hoursAgo(2))
+  handover('stale', '一周前交付', hoursAgo(7 * 24))
+  handover('urgent', '紧急交付', hoursAgo(3 * 24), { level: 'P0', source: 'human', at, by: 'ou_alice' })
+  // An ended delivery always waits in the queue: its check records a fact about work already closed.
+  handover('ended', '已结束的交付', hoursAgo(1))
+  store.tickets.save({ ...store.tickets.get('ended')!, ended: { at, by: 'human', outcome: 'completed' } })
+  const page = overview(host, {}, 'v1', load)
+  // Only a live handover from the last day, or an urgent one, asks for the check now.
+  expect(page.verifyNow.map(ticket => ticket.title)).toEqual(['刚交付', '紧急交付'])
+  expect(page.verifyLater.map(ticket => ticket.title)).toEqual(['一周前交付', '已结束的交付'])
+  // The lane's full list keeps that order: what asks now first, the queue oldest first behind it.
+  expect(page.verification.map(ticket => ticket.title)).toEqual(['刚交付', '紧急交付', '一周前交付', '已结束的交付'])
+})
 it('does not offer a merged pipeline gate again after a person\'s message resumed the ticket', () => {
   const host = views()
   live('t1')
