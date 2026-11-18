@@ -71,8 +71,10 @@ export async function openFeishuTopic(ctx: SourceContext, ticket: Ticket, receip
     const url = feishuTopicLink({ chatId: topicChat, threadId, url: appLink })
     // The Feishu thread the request started from points at the topic, since the person now answers there. A ticket from
     // another Source has no Feishu thread to point back; its panel page is where its record stays.
-    const abandoned = settleTopicLink(ctx.state, ticket.id, url ? { url, title: ticket.title } : undefined)
-    if (url && trigger?.source === SOURCE && trigger.channel && (abandoned || !carried)) {
+    const abandoned = settleTopicLink(ctx.state, ticket.id, url ? { url, title: ticket.title, chatId: topicChat, messageId } : undefined)
+    // A request that already came from the ticket's own topic needs no way into it: the person is already there.
+    const inTopic = trigger?.channel?.address.chatId === topicChat && trigger?.channel?.address.messageId === messageId
+    if (url && !inTopic && trigger?.source === SOURCE && trigger.channel && (abandoned || !carried)) {
       ctx.notify({ id: `topic-link-${ticket.id}`, channel: trigger.channel, text: topicLinkLine(ticket.title, url), kind: 'reply', ticketId: ticket.id })
     }
   } catch (error) {

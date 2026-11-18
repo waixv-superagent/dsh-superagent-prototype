@@ -102,8 +102,11 @@ export async function sendFeishu(host: ChannelHost, message: OutboundMessage, co
   // says what was accepted and where the conversation continues. The link line goes on after the limit check, like the
   // footer, and a receipt that waited too long goes out without it while the opener posts its notice instead.
   const topic = message.kind === 'acknowledgement' && message.ticketId ? await takeTopicLink(host.state, message.ticketId) : undefined
+  // A receipt delivered into the ticket's own topic is already where the link would take the person, so it skips the
+  // line and replies with its content alone.
+  const inTopic = !!topic && message.channel.address.chatId === topic.chatId && message.channel.address.messageId === topic.messageId
   // The ticket link goes on after the limit check, so the footer never takes words from the message itself.
-  const text = withTicketFooter(topic ? `${checked}\n${topicLinkLine(topic.title, topic.url)}` : checked, panelUrl, message.ticketId)
+  const text = withTicketFooter(topic && !inTopic ? `${checked}\n${topicLinkLine(topic.title, topic.url)}` : checked, panelUrl, message.ticketId)
   const chatId = message.channel.address.chatId ?? ''
   /** Keeps the way back from the bot's message to its ticket, for the panel's search. */
   const remember = (output: unknown): void => {
