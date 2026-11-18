@@ -48,7 +48,7 @@ Once the PR is self-reviewed, validated and ready for human review, report its a
 Do not wait for approval or merge to report an available reviewed PR.
 For an incomplete draft report blocked and name what remains.
 Do not leave the question only in summary, GitHub or the Session and wait.
-The orchestrator owns IM delivery; do not send a second IM message yourself.
+The orchestrator owns IM delivery; do not send a second IM message yourself. Post a deliverable a reply cannot carry — an inquiry's report — in the ticket's own Feishu conversation: reply to the ticket card's `reply_channel` message with `--reply-in-thread`, never in the source thread.
 Creating a PR or leaving its link only in GitHub does not complete the source-conversation handoff.
 
 Read repository AGENTS.md. Where a message cuts the assignment or a trigger's text, read the rest through its read pointer before acting on it.

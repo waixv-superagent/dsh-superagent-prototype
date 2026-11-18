@@ -179,6 +179,12 @@ it('shows a ticket card\'s state from a closed set: the open ticket\'s stage, th
   expect(ticketCard(ticket)).not.toHaveProperty('attention')
   expect(ticketCard({ ...ticket, attention: { id: 'q', question: 'Desktop too?' } })).toMatchObject({ attention: { question: 'Desktop too?' } })
 })
+it('shows the conversation the ticket\'s own replies go to, so a deliverable is not posted in the source thread', () => {
+  const replyChannel = { source: 'feishu' as const, thread: 'feishu:oc_topic', address: { chatId: 'oc_topic', messageId: 'om_topic' } }
+  expect(ticketCard({ ...ticket, replyChannel })).toMatchObject({ reply_channel: replyChannel })
+  // A ticket no Source moved keeps no reply channel, and the card names none.
+  expect(ticketCard(ticket)).not.toHaveProperty('reply_channel')
+})
 it('shows a decision with snake_case keys and a reference to its details', () => {
   const decision: Decision = { id: 'd1', evalId: 'e1', threadKey: 'github:42', triggerIds: ['request-1'], policyVersion: 'v1', at: 'a', kind: 'accept', reason: [said('r')],
     strength: 'explicit', ticketId: 'ticket-1', audit: { matches: [] } }

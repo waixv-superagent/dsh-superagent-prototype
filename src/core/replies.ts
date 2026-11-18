@@ -27,11 +27,12 @@ export interface Reply { id: string; status: ReplyStatus; reused: boolean }
  */
 export class Replies extends EnginePart {
   /**
-   * Queue a message for the Channel its purpose names: an acknowledgement or an answer goes where that person's message was
-   * written, attention where the message that raised the question was (or to the ticket's starting conversation), and a
-   * result to the conversation where the ticket started (`result` is allowed only for a ticket in `ready`, `completed`,
-   * `merged`, or `dropped`). Each message is queued at most once (idempotent). An acknowledgement, even one already queued,
-   * records that the ticket's worker took the message up.
+   * Queue a message for the Channel its purpose names: an acknowledgement goes to the ticket's own conversation when it
+   * has one on the same Source (the Feishu topic a Source opened for the ticket), else where that person's message was
+   * written; an answer goes where that person's message was written, attention where the message that raised the question
+   * was (or to the ticket's starting conversation), and a result to the ticket's own conversation (`result` is allowed only
+   * for a ticket in `ready`, `completed`, `merged`, or `dropped`). Each message is queued at most once (idempotent). An
+   * acknowledgement, even one already queued, records that the ticket's worker took the message up.
    * @throws UserError when the ticket or trigger is unknown or the purpose's rule refuses it, such as a result of a ticket
    * that is not ready, completed, merged, or dropped.
    */
@@ -86,8 +87,11 @@ export class Replies extends EnginePart {
     const id = key('ack', trigger.id)
     const existing = this.options.outbox.status(id)
     if (!existing && !trigger.human) throw new UserError('ackNotPerson')
+    // A Ticket's later replies go to the conversation its Source opened for it — the Feishu topic — and the source thread
+    // keeps only the acceptance receipt that links it; a message from another Source still answers where it was written.
+    const channel = ticket.replyChannel?.source === trigger.channel.source ? ticket.replyChannel : trigger.channel
     // Preserve the automatic or first queued acknowledgement.
-    if (!existing) this.options.outbox.send({ id, channel: trigger.channel, text: request.text, kind: 'acknowledgement', ticketId: ticket.id })
+    if (!existing) this.options.outbox.send({ id, channel, text: request.text, kind: 'acknowledgement', ticketId: ticket.id })
     this.takeUp(ticket.id, trigger.id)
     return { id, status: this.options.outbox.status(id) ?? 'pending', reused: existing !== undefined }
   }

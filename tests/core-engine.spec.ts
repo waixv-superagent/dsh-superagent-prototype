@@ -1674,6 +1674,21 @@ describe('replies', () => {
     h.engine.stopTicket(ticketId)
     expect(() => h.engine.reply({ purpose: 'acknowledgement', ticketId, triggerId: '2', text: 'x' })).toThrow(new UserError('ackEnded'))
   })
+  it('acknowledges a follow-up in the ticket\'s own conversation, and a message from another Source where it was written', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    // A Source opened the ticket its own conversation — a Feishu topic — and moved the ticket's replies there.
+    const topic = { source: 'chat' as const, thread: 'chat:topic', address: { chatId: 'topic', messageId: 'om_topic' } }
+    h.repo.tickets.save({ ...h.repo.tickets.get(ticketId)!, replyChannel: topic })
+    h.engine.receive(trigger('2', { actor: guest }))
+    h.engine.reply({ purpose: 'acknowledgement', ticketId, triggerId: '2', text: 'Looking' })
+    expect(h.outbox.at(-1)).toMatchObject({ channel: topic, text: 'Looking' })
+    // A Feishu topic does not carry a GitHub comment's acknowledgement: that one answers where the person wrote.
+    h.repo.tickets.save({ ...h.repo.tickets.get(ticketId)!, replyChannel: { ...topic, source: 'feishu' } })
+    h.engine.receive(trigger('3', { actor: guest }))
+    h.engine.reply({ purpose: 'acknowledgement', ticketId, triggerId: '3', text: 'Fixed' })
+    expect(h.outbox.at(-1)).toMatchObject({ channel: trigger('3').channel, text: 'Fixed' })
+  })
   it('sends an answer only after the worker reported it, a result only for a ready ticket, and attention only for its current question', () => {
     const h = harness()
     const ticketId = accepted(h).ticketId!
