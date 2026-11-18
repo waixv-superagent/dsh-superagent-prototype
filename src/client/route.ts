@@ -7,7 +7,7 @@ import type { T } from './text.ts'
 
 export const TABS = ['editor', 'source', 'trigger', 'eval', 'execution', 'settings'] as const
 export type Tab = typeof TABS[number]
-export const SETTINGS_GROUPS = ['source', 'eval', 'execution', 'prompts', 'deployment'] as const
+export const SETTINGS_GROUPS = ['source', 'eval', 'execution', 'knowledge', 'prompts', 'deployment'] as const
 export type SettingsGroup = typeof SETTINGS_GROUPS[number]
 /** The views the 概览 tab switches between: the editor page, the duty-desk board, and the ticket relation graph. */
 export const HOME_VIEWS = ['editor', 'board', 'graph'] as const

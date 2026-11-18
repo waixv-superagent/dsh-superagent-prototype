@@ -1,0 +1,14 @@
+{
+    "at":  "2026-11-18T08:01:57Z",
+    "viewport":  "1440x1200@2",
+    "theme":  "light",
+    "branchClient":  "lib/client.js sha256 2A979A41E28B31C67C455F9288675885FD329ED330402E520865C482FDD9516E (922488 bytes)",
+    "deployedBatchBytes":  3364812,
+    "patchedBatchBytes":  3388862,
+    "fixture":  "live GET state/settings; quiet state, neutral executor block, added knowledge block",
+    "files":  [
+                  "before-settings.png",
+                  "after-settings.png",
+                  "after-enabled.png"
+              ]
+}
