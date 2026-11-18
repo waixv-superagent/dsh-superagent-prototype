@@ -72,6 +72,9 @@ const RouteItemSchema = z.object({
   reason: z.string().nullish().describe('chat, ignore and stop: why, at most 500 characters; an ignore needs it.'),
   ticket_kind: z.string().nullish().describe('accept: the kind of work, for counting and filtering only: feature (something new), bug (existing behavior is wrong), '
     + 'self (this agent\'s own iteration), inquiry (an answer, analysis or review); left out, the host derives it from the Source and title.'),
+  execution_mode: z.enum(['standard', 'phased']).nullish().describe('accept: how this ticket\'s worker executes. Name `phased` only when the person\'s own message '
+    + 'explicitly asks for the phased agent-team run of this work; it gates code behind a P1 plan on every backend, and the worker plans 2–4 phases whose model '
+    + 'routes the person approves. Omit for the standard flow, which is the default and today\'s behavior; never infer it from complexity or size.'),
   parts: z.array(z.object({
     title: z.string().trim().min(1).max(200).describe('The further goal as one short label, without added requirements or implementation advice.'),
     worktree_name: WorktreeNameSchema,
@@ -95,6 +98,7 @@ const FIELDS: Record<Field, { check: z.ZodType; reads: readonly Kind[]; needs: r
   target: { check: z.string().trim().min(1).max(300), reads: ['accept'], needs: [] },
   reason: { check: z.string().max(500), reads: ['chat', 'ignore', 'stop'], needs: ['ignore'] },
   ticket_kind: { check: z.enum(TICKET_KINDS), reads: ['accept'], needs: [] },
+  execution_mode: { check: z.enum(['standard', 'phased']), reads: ['accept'], needs: [] },
   parts: { check: z.array(z.unknown()).max(3), reads: ['accept'], needs: [] },
 }
 /** Why an item cannot run: a field its kind needs is missing, or one it reads breaks its limit. */
@@ -151,6 +155,7 @@ function route(host: MainToolsHost, item: RouteItem, decided: ReadonlyMap<string
       const decision = host.engine.decide(item.trigger_id, { kind: 'accept', title: item.title!, scope: item.title!, reason: { code: 'explicitRouted' },
         acknowledgement: item.acknowledgement!, name: item.worktree_name!, ...note, ...(item.paths?.length ? { paths: item.paths } : {}),
         ...(target ? { target: target.target } : {}), ...(parts.length ? { parts } : {}),
+        ...(item.execution_mode ? { mode: item.execution_mode } : {}),
         ...(item.ticket_kind ? { ticketKind: item.ticket_kind as TicketKind } : {}) })
       // A Decision that created no ticket is the item's refusal; one that existed before keeps what it was accepted with.
       if (decision.kind !== 'accept' || !decision.ticketId) return { refused: `Ticket was not created: ${reasonText(decision.reason)}` }

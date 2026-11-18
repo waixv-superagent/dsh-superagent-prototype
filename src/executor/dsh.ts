@@ -160,7 +160,7 @@ export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutco
   const sharing = sharingInstructions(settings, backend)
   const lease = (outcome.paths ?? []).map(normalizePath).filter(Boolean)
   return { name, directory: join(executionRoot(settings, stateDir), name), assignment: assignment + sharing, lease, backend,
-    ...(target ? { target } : {}) }
+    ...(target ? { target } : {}), ...(outcome.mode ? { mode: outcome.mode } : {}) }
 }
 /**
  * The delivery instructions a worker gets for its ticket's environment, composed at each launch so a ticket moved to
@@ -379,9 +379,10 @@ export class DshExecutor implements Executor {
     const delivery = resolveDelivery({ settings, repository: this.host.repository, source: sourceTrigger(this.host, ticket)?.source,
       target: outcome.target })
     const prepared = { ...ticket, execution: ticketExecution(ticket, outcome, settings, this.host.machine.stateDir, delivery.backend, delivery.target) }
-    // The p4 pipeline gates code changes behind the P1 plan: its tickets start in the plan phase (docs/012). The GitHub path
-    // keeps the phases it had, so an upgrade does not change how its workers report.
-    return delivery.backend === 'p4' ? { ...prepared, phase: 'plan' as const } : prepared
+    // The p4 pipeline gates code changes behind the P1 plan: its tickets start in the plan phase (docs/012). A ticket
+    // accepted in the phased flow takes the same gate on every backend, because approving its phase plan is what
+    // authorizes the routes its phases run on. The GitHub path of the standard flow keeps the phases it had.
+    return delivery.backend === 'p4' || outcome.mode === 'phased' ? { ...prepared, phase: 'plan' as const } : prepared
   }
   /**
    * Rebuilds the Execution of a ticket a person moved to another delivery environment: its assignment keeps what the accept

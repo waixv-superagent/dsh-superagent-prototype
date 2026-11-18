@@ -1,4 +1,4 @@
-﻿# 013 — Agent Teams and the ticket board
+# 013 — Agent Teams and the ticket board
 
 Status: draft, nothing below is implemented. Written 2026-11-02 after measuring `@deepseek-ai/dsh-experimental-agent-team@0.2.1-rc.5` against the harness this deployment runs.
 
@@ -135,3 +135,8 @@ Separately, `@deepseek-ai/dsh-llm-pi-ai` maps `./src/*` in its `exports` but doe
 
 What exists is neither the upstream Team nor the board above. A Ticket's Executor proposes one to four teammates, each with a role, a one-line job and a model route; a person allows the roster on one card, and each allowed route becomes a grant on that Ticket. The Executor is the leader: it starts each teammate with `subagent`, partitions the files, steers them, and runs the verification itself. The shared task board, dependency edges and `waitForChange` are still absent, and the upstream packages stay uninstalled because a teammate's model route cannot be selected through `spawn_teammate`, which is the capability the request needs. [003 Execution](003-execution.md#an-agent-team) has the implemented flow; the board sketched above remains the candidate for cross-Ticket visibility.
 
+## Appendix C — a phased ticket, and why it is opt-in (2026-11-17)
+
+A Ticket accepted with `execution_mode: 'phased'` collapses the roster card into the P1 plan: the plan carries 2–4 phases with their files, dependencies and model routes, and approving it records those routes as grants, so the worker dispatches one teammate per phase and a verifier accepts each. That is the "plan splits the work, key phases run on stronger models, the main Session only schedules" flow, and it stays behind the creation entry: the standard accept omits the mode, so a Ticket nobody opted in behaves exactly as Appendix B describes.
+
+Two reasons it is not the default yet. The phased flow gates code behind the P1 plan on every backend, which is a workflow change for GitHub Tickets that never had that gate; and the pilot is how a person judges whether planning the phases up front is worth the card. Making it the default is a later change to the accept's default, not a change to this mechanism.

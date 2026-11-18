@@ -7,8 +7,9 @@ import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, Li
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { classifyTicket } from './kind.ts'
-import { missingPlanLabels, pendingPlan, phaseRank, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planSettleable, planTemplate, ticketPhase,
-  validPlanOptions, validQuestionSections, type Plan, type PlanDecision, type PlanOption, type PlanTemplate, type PlanVia, type TicketPhase } from './plan.ts'
+import { missingPlanLabels, pendingPlan, phaseRank, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planPhaseProblem, planSettleable, planTemplate,
+  ticketMode, ticketPhase, validPlanOptions, validQuestionSections, type Plan, type PlanDecision, type PlanOption, type PlanPhase, type PlanTemplate,
+  type PlanVia, type TicketPhase } from './plan.ts'
 import { parsePlanDiff, type PlanDiff } from './diff.ts'
 import { defaultPriority, priorityAskDeadline, PRIORITY_ASK_MINUTES, priorityAskOverdue, systemPriority, waitsForIdle, type PriorityLevel,
   type PriorityVia } from './priority.ts'
@@ -545,10 +546,17 @@ export class Tickets extends EnginePart {
    * or diff are not a card's.
    */
   private planOf(ticket: Ticket, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[],
-    template: PlanTemplate = 'fix', diffText?: string, diffBase?: string): Plan {
+    template: PlanTemplate = 'fix', diffText?: string, diffBase?: string, phases?: PlanPhase[]): Plan {
     if (ticket.plan?.approved) throw new UserError('phaseOutOfOrder', { from: ticketPhase(ticket) })
     const missing = missingPlanLabels(text, template)
     if (missing.length) throw new UserError('planIncomplete', { template, labels: missing.join(', ') })
+    // A phased ticket's plan splits the work into a team a person decides on: the phases are checked here, so the card
+    // never shows a plan the ticket cannot dispatch, and the standard flow never carries phases it would not use.
+    const phased = ticketMode(ticket) === 'phased'
+    if (!phased && phases?.length) throw new UserError('planPhasesStandard')
+    if (phased && !phases?.length) throw new UserError('planPhasesRequired')
+    const problem = phases?.length ? planPhaseProblem(phases) : undefined
+    if (problem) throw new UserError('planPhases', { problem })
     // A diff a person will review is parsed now, so the card and the panel never receive half a change or a summary
     // dressed up as one; text that cannot be a unified diff is refused with the line that broke it.
     let diff: PlanDiff | undefined
@@ -567,8 +575,12 @@ export class Tickets extends EnginePart {
       || choices.some(option => !['approve', 'revise', 'stop'].includes(option.decision)))) throw new UserError('planOptions')
     if (sections && !validQuestionSections(sections)) throw new UserError('planSections')
     const context = sections?.map(section => ({ ...section, label: section.label.trim(), text: section.text.trim() }))
+    const team = phases?.map(phase => ({ name: phase.name.trim(), job: phase.job.trim(), route: { ...phase.route },
+      ...(phase.files?.length ? { files: phase.files.map(file => file.trim()) } : {}),
+      ...(phase.after?.length ? { after: phase.after.map(name => name.trim()) } : {}) }))
     return { text, at: this.now(), ...(template !== 'fix' ? { template } : {}), ...(asked ? { question: asked } : {}),
-      ...(choices?.length ? { options: choices } : {}), ...(context?.length ? { sections: context } : {}), ...(diff ? { diff } : {}) }
+      ...(choices?.length ? { options: choices } : {}), ...(context?.length ? { sections: context } : {}), ...(diff ? { diff } : {}),
+      ...(team?.length ? { phases: team } : {}) }
   }
   /**
    * A worker's P1 plan, as the fixed template with evidence, now waits for a person: the ticket stays in `plan`, its
@@ -579,10 +591,10 @@ export class Tickets extends EnginePart {
    * the question or choices are not a card's, or the attached diff is not a unified diff this panel can render.
    */
   submitPlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[], template: PlanTemplate = 'fix',
-    diffText?: string, diffBase?: string): Ticket {
+    diffText?: string, diffBase?: string, phases?: PlanPhase[]): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
-    const plan = this.planOf(ticket, text, question, options, sections, template, diffText, diffBase)
+    const plan = this.planOf(ticket, text, question, options, sections, template, diffText, diffBase, phases)
     const previous = ticket.attention
     ticket.plan = { ...plan, waiting: true, deadline: new Date(Date.parse(plan.at) + PLAN_GATE_HOURS * 3_600_000).toISOString() }
     ticket.phase = 'plan'
@@ -600,11 +612,11 @@ export class Tickets extends EnginePart {
    * one the gate accepts.
    */
   settlePlan(ticketId: string, text: string, question?: string, options?: PlanOption[], sections?: QuestionSection[],
-    template: PlanTemplate = 'fix', diffText?: string, diffBase?: string): Ticket {
+    template: PlanTemplate = 'fix', diffText?: string, diffBase?: string, phases?: PlanPhase[]): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     if (!planSettleable(ticket)) throw new UserError('planGateRequired')
-    const plan = this.planOf(ticket, text, question, options, sections, template, diffText, diffBase)
+    const plan = this.planOf(ticket, text, question, options, sections, template, diffText, diffBase, phases)
     ticket.plan = { ...plan, approved: { at: plan.at, via: 'session' } }
     ticket.phase = 'implement'
     ticket.updatedAt = plan.at
@@ -630,9 +642,17 @@ export class Tickets extends EnginePart {
       delete plan.waiting
       ticket.phase = 'implement'
       ticket.updatedAt = at
+      // Approving a phased plan is the person's authorization of exactly the routes the card showed: the plan text names
+      // every phase and its model, so the worker may start those teammates without a second roster card (docs/003).
+      const phased = ticketMode(ticket) === 'phased'
+      const granted = phased ? this.grantPlanModels(ticket, at, plan) : []
       this.repo.tickets.save(ticket)
+      const routes = granted.length ? `方案里的阶段模型已授权：${granted.map(grant => `${grant.role}=${modelRoute(grant)}`).join('、')}；` : ''
+      const dispatch = phased ? `${routes}本单是 phased 模式：按方案的阶段派发 sub agent，复核由独立的复核 sub agent 做；`
+        + '若你选的是「主会话只调度」，你只调度、不自己实现或验证，各阶段结果与 diff 都要自己读过再报 ready。' : ''
       this.addInput(ticket, { id: key('input', ticketId, 'plan-approved', at), kind: 'text', at,
-        text: `人已通过 P1 方案（${where}${choice ? ` · ${choice}` : ''}）。进入实现阶段：可以改文件。实现完成后调用 orchestrator_phase 进入 verify，验证通过后进入 deliver。` })
+        text: `人已通过 P1 方案（${where}${choice ? ` · ${choice}` : ''}）。进入实现阶段：可以改文件。${dispatch}`
+          + '实现完成后调用 orchestrator_phase 进入 verify，验证通过后进入 deliver。' })
     } else if (decision === 'revise') {
       plan.feedback = [...plan.feedback ?? [], { text: note || '请换一个方向，重新给方案。', at, via, ...(choice ? { option: choice } : {}) }]
       delete plan.waiting
@@ -735,6 +755,25 @@ export class Tickets extends EnginePart {
       const grant = this.grantModel(ticket, attention, at, { provider: item.provider, model: item.model, role: item.role })
       return grant ? [grant] : []
     })
+  }
+  /**
+   * Record the routes a phased plan names, each with the phase it runs, when a person approves the plan. The card shows
+   * every phase and its model in the plan text, so this is the same authorization a roster card gives, decided once.
+   * @returns the grants recorded now; routes already allowed on the ticket are left alone.
+   */
+  private grantPlanModels(ticket: Ticket, at: string, plan: Plan): ModelGrant[] {
+    if (ticketMode(ticket) !== 'phased' || !plan.phases?.length) return []
+    const execution = ticket.execution ?? { name: '', directory: '', assignment: '' }
+    const grants = [...execution.modelGrants ?? []]
+    const added: ModelGrant[] = []
+    for (const phase of plan.phases) {
+      const role = phase.name.trim()
+      if (grants.some(item => item.provider === phase.route.provider && item.model === phase.route.model && item.role === role)) continue
+      const grant: ModelGrant = { provider: phase.route.provider, model: phase.route.model, at, planAt: plan.at, role }
+      grants.push(grant); added.push(grant)
+    }
+    if (added.length) ticket.execution = { ...execution, modelGrants: grants }
+    return added
   }
   /**
    * A person's own message named `route` on the ticket: that is an authorization too, beside a click on the card's 允许
@@ -1029,10 +1068,12 @@ export class Tickets extends EnginePart {
     const current = latestAssignment(ticket)
     if (current && (current.state === 'running' || current.state === 'pending')) this.endAssignment(ticket, current, 'redispatched')
     // The p4 pipeline gates code changes behind the P1 plan; a git dispatch drops that gate and keeps any later phase.
-    // Moving the channel never decides a plan that waits for a person: that gate stays until the card is answered.
+    // Moving the channel never decides a plan that waits for a person: that gate stays until the card is answered. A
+    // phased ticket keeps its gate on every backend, so its phase already says whether the plan is approved.
     const pendingPlan = ticket.plan?.waiting && !ticket.plan.approved
-    if (backend === 'p4') ticket.phase = 'plan'
-    else if (ticket.phase === undefined || (ticket.phase === 'plan' && !pendingPlan)) ticket.phase = 'implement'
+    const phased = ticketMode(ticket) === 'phased'
+    if (backend === 'p4') { if (!phased) ticket.phase = 'plan' }
+    else if (!phased && (ticket.phase === undefined || (ticket.phase === 'plan' && !pendingPlan))) ticket.phase = 'implement'
     // The previous environment's delivery instructions are dropped, so the next launch reads only the new channel's.
     ticket.execution = this.options.reprepareTicket?.(ticket, backend, target)
       ?? { ...(ticket.execution ?? { name: '', directory: '', assignment: '' }), backend, ...(target ? { target } : {}) }

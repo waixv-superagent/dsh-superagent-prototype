@@ -2,8 +2,8 @@
 import { z } from 'zod'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { LINKED_RELATION_KINDS, analysisRunning, liveTicket, missingVerifyLabels, modelRoute, PLAN_DIFF_LIMITS, TEAM_ROLE_CHARS, TEAM_ROLES_MAX,
-  TEAM_TASK_CHARS, ticketPhase, VERIFY_LABELS, type EngineForExecutor, type ModelGrant, type ModelRoute, type ReceiveResult, type TeamRoute,
-  type Ticket } from '../../core/index.ts'
+  TEAM_TASK_CHARS, ticketMode, ticketPhase, VERIFY_LABELS, type EngineForExecutor, type ModelGrant, type ModelRoute, type PlanPhase, type ReceiveResult,
+  type TeamRoute, type Ticket } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
 import { matchDeliveryTarget, deliveryTargets } from '../delivery-targets.ts'
 import { claimPull, readPull } from '../../sources/github-pull.ts'
@@ -90,6 +90,15 @@ function teamQuestion(team: readonly TeamRoute[], names: readonly string[], ques
   return [`模型授权：允许在本工单用以下 agent 团队吗？`,
     ...team.map((item, index) => `- ${item.role}：${names[index]}（${modelRoute(item)}）— ${item.task}`),
     question].join('\n')
+}
+/**
+ * Whether a phased plan's text names a phase and the model route that runs it. The card a person approves is the plan
+ * text, so a route it never names must not be authorized by that approval; the display name, the `provider/model` form
+ * and the bare model id all count as naming it.
+ */
+function phaseMentioned(text: string, phase: { name: string; route: ModelRoute; display: string }): boolean {
+  const route = `${phase.route.provider}/${phase.route.model}`
+  return text.includes(phase.name) && (text.includes(phase.display) || text.includes(route) || text.includes(phase.route.model))
 }
 
 export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
@@ -186,7 +195,7 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
     }),
     tool({
       name: 'orchestrator_plan',
-      description: 'Submit the P1 plan before any code change: fix uses 现象/代码线/资产线/配置线/修复锚点/影响面/验证方案/预算; analysis uses 问题/结论/依据/建议; design uses 问题/选项/证据/推荐. One label per line with evidence. A person answers 1 (approve), 2 (change direction) or 3 (stop); the card question and 2–4 choices may use your own wording. Pass the change as a real unified diff (`diff`) so the person reads code. Files and shells stay refused until 1, or until `decided` settles a self-iteration plan whose direction the person already decided.',
+      description: 'Submit the P1 plan before any code change: fix uses 现象/代码线/资产线/配置线/修复锚点/影响面/验证方案/预算; analysis uses 问题/结论/依据/建议; design uses 问题/选项/证据/推荐. One label per line with evidence. A person answers 1 (approve), 2 (change direction) or 3 (stop); the card question and 2–4 choices may use your own wording. Pass the change as a real unified diff (`diff`) so the person reads code. A ticket accepted in the phased flow must also pass `phases`, and its plan text must name every phase and its model. Files and shells stay refused until 1, or until `decided` settles a self-iteration plan whose direction the person already decided.',
       schema: z.object({
         plan: z.string().trim().min(40).max(6000).describe('The plan as label：content lines, in the chosen template order, each with evidence; a long line is broken into points on the card.'),
         template: z.enum(['fix', 'analysis', 'design']).optional()
@@ -204,13 +213,51 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           .describe('The proposed change as one real unified diff (`git diff -U3` / `p4 diff -du`, or the real file against the edited text); the card summarizes it and the panel renders it, so never hand-write it.'),
         diff_base: z.string().trim().min(1).max(PLAN_DIFF_LIMITS.base).optional()
           .describe('What the diff compares against, such as `origin/main`; shown above the diff.'),
+        phases: z.array(z.object({
+          name: z.string().trim().min(1).max(20).describe('The phase name the plan text and the card use; unique in the plan.'),
+          job: z.string().trim().min(1).max(300).describe('The one-line job this phase owns, as its teammate will be briefed with it.'),
+          files: z.array(z.string().trim().min(1).max(300)).max(20).optional()
+            .describe('The files or directories this phase writes; two phases that may run side by side may not overlap.'),
+          after: z.array(z.string().trim().min(1).max(20)).max(3).optional()
+            .describe('Names of earlier phases this one waits for; omit for a phase that may start beside the others.'),
+          route: z.object({ provider: z.string().trim().min(1).max(100), model: z.string().trim().min(1).max(200) }).strict()
+            .describe('The model route that runs this phase, from list_subagent_models; approving the plan authorizes it.'),
+        }).strict()).min(2).max(4).optional()
+          .describe('Phased tickets only: split the work into 2–4 phases, each with its job, files and model route, and write every phase name and model in the plan '
+            + 'text so the card a person approves shows what will run. The standard flow omits this: it keeps today\'s single-worker plan.'),
       }).strict(),
       execute: async args => {
+        const current = host.store.tickets.get(ticketId)
+        if (!current || !liveTicket(current)) throw new Error('Ticket ended; do not resume it')
+        // A phased plan names the model routes a person will authorize by approving it: resolve them against this
+        // deployment's catalog, and require the plan text to name each phase and route, so the card never hides a route.
+        let phases: PlanPhase[] | undefined
+        if (args.phases?.length) {
+          if (ticketMode(current) !== 'phased') {
+            throw new Error('Phases belong to a ticket accepted in the phased flow; this ticket runs the standard flow, so describe the change in the plan template instead')
+          }
+          if (args.decided) throw new Error('A phased plan always takes the card: approving it is what authorizes its phases\' model routes')
+          const known = routableModels(await host.models())
+          const resolved = args.phases.map(phase => {
+            const route = { provider: phase.route.provider.trim(), model: phase.route.model.trim() }
+            const name = known.find(item => item.provider === route.provider && item.model === route.model)?.name
+            if (!name) throw new Error(`Unknown model route "${modelRoute(route)}" for the phase "${phase.name.trim()}". list_subagent_models lists the routes this deployment provides`)
+            return { name: phase.name.trim(), job: phase.job.trim(), route, display: name,
+              ...(phase.files?.length ? { files: phase.files.map(file => file.trim()) } : {}),
+              ...(phase.after?.length ? { after: phase.after.map(item => item.trim()) } : {}) }
+          })
+          const missing = resolved.filter(phase => !phaseMentioned(args.plan, phase))
+            .map(phase => `${phase.name}（${phase.display}）`)
+          if (missing.length) {
+            throw new Error(`The plan text must name every phase and the model route that runs it, so the card a person approves shows what will run; missing: ${missing.join('、')}`)
+          }
+          phases = resolved.map(({ display: _display, ...phase }) => phase)
+        }
         // A decided plan records the same plan the card would show, approved at once: no card goes out and the worker
         // implements without waiting. Every other plan takes the gate.
         const updated = args.decided
-          ? host.engine.settlePlan(ticketId, args.plan, args.question, args.options, args.sections, args.template, args.diff, args.diff_base)
-          : host.engine.submitPlan(ticketId, args.plan, args.question, args.options, args.sections, args.template, args.diff, args.diff_base)
+          ? host.engine.settlePlan(ticketId, args.plan, args.question, args.options, args.sections, args.template, args.diff, args.diff_base, phases)
+          : host.engine.submitPlan(ticketId, args.plan, args.question, args.options, args.sections, args.template, args.diff, args.diff_base, phases)
         const message = args.decided ? undefined : await host.notifyPlan(updated)
         return { submitted: true, phase: ticketPhase(updated), ...args.decided ? { settled: true } : { notified: message !== undefined } }
       },
