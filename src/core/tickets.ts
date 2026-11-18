@@ -2,11 +2,12 @@
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, latestReport, liveTicket, MODEL_APPROVAL_OPTIONS, modelRoute, personNamesRoute, readUntil, routesNamedIn, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
-import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, LinkedRelationKind, Mandate, ModelGrant, ModelRelay, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, TeamRoute, ThreadRef, Ticket, TicketEndBy,
+import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, LinkedRelationKind, Mandate, ModelGrant, ModelRelay, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, TeamRoute, ThreadRef, Ticket, TicketDeploy, TicketEndBy,
   TicketInput, TicketOutcome, TicketPhaseReset, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import { classifyTicket } from './kind.ts'
+import { ticketUpdateTrack } from './update-track.ts'
 import { missingPlanLabels, pendingPlan, phaseRank, PLAN_GATE_HOURS, PLAN_QUESTION, planOverdue, planPhaseProblem, planSettleable, planTemplate,
   ticketMode, ticketPhase, validPlanOptions, validQuestionSections, type Plan, type PlanDecision, type PlanOption, type PlanPhase, type PlanTemplate,
   type PlanVia, type TicketPhase } from './plan.ts'
@@ -73,6 +74,9 @@ export class Tickets extends EnginePart {
     const kind = classifyTicket({ ...outcome.ticketKind ? { routed: outcome.ticketKind } : {}, ...outcome.category ? { category: outcome.category } : {},
       source: primary?.source ?? mandate.actor.source, ...ticket.execution?.backend ? { backend: ticket.execution.backend } : {}, title: ticket.title })
     ticket = { ...ticket, kind: kind.kind, kindSource: kind.source }
+    // The router that accepted the request may already know how its change reaches the running system (docs/020); a worker
+    // declares it later when its diff decides, and the host defaults the agent's own work to hot.
+    if (outcome.updateTrack) ticket = { ...ticket, update: { track: outcome.updateTrack, source: 'router', at } }
     const assignment = this.newAssignment(ticket)
     this.repo.tickets.save(ticket)
     for (const triggerId of triggerIds) for (const ref of this.repo.triggers.get(triggerId)?.threads ?? []) this.subscribe(id, ref)
@@ -278,6 +282,21 @@ export class Tickets extends EnginePart {
       this.repo.tickets.save(ticket)
     }
     return this.require(ticketId)
+  }
+  /**
+   * Records what the host did to deploy a merged hot change, on the ticket that delivered it. The ticket has usually ended
+   * by then: the deployment follows its merged change and is not new work, so a closed ticket still keeps this record for
+   * the board and a person (docs/006).
+   */
+  recordDeploy(ticketId: string, deploy: TicketDeploy): Ticket {
+    const ticket = this.require(ticketId)
+    const track = ticketUpdateTrack(ticket)
+    if (!track) throw new Error(`Ticket ${ticketId} has no update track; only a hot change is deployed`)
+    const at = this.now()
+    ticket.update = { track: ticket.update?.track ?? track.track, source: ticket.update?.source ?? track.source, at: ticket.update?.at ?? at, deploy }
+    ticket.updatedAt = at
+    this.repo.tickets.save(ticket)
+    return ticket
   }
   /**
    * Start following a delivered change's pipeline without waiting for a person: the host polls Swarm and Jenkins itself, so a

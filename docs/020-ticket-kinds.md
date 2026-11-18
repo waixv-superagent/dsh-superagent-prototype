@@ -42,6 +42,25 @@ migration.
   decision cards carry a kind tag, and its tooltip says who decided it.
 - Ticket cards for the main Session carry `kind`.
 
+## Update track
+
+A second label says how a ticket's change reaches the running system, recorded as `update.track` on the ticket:
+
+| Track | Meaning |
+| --- | --- |
+| `hot` | The plugin package carries the change, and the host's one-click update replaces it in place after the pull request merges (docs/006). |
+| `package` | The change needs a new desktop app build — an installer or App-shell change, or a dependency change the switch cannot install. |
+
+The router may name it at accept (`ticket_update`); otherwise the worker names it with `update_track` on its ready report,
+because its diff is what decides. A ticket that names neither is `hot` when its work is the agent's own (`ticketKind` is
+`self`), since this repository is the package the deployment updates, and has no track otherwise: this host does not deploy
+work in another repository.
+
+The track is read through `ticketUpdateTrack` (`core/update-track.ts`) and shown as `update` on ticket rows, ticket cards
+and the main Session's ticket card. `update.deploy` records what the host did after a merged hot change: `preparing`,
+`ready`, `applying`, `applied` or `failed`, with the built commit and why it stopped. A `package` change keeps no
+deployment: it waits for its app build and a person's install.
+
 ## Limits
 
 The title rule is a heuristic: a title that names neither a defect nor a question reads as a `feature`. When the router

@@ -1,7 +1,7 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
 import { isoTime, liveTicket } from './model.ts'
-import type { Backend, ChannelRef, Decision, LinkedRelationKind, ModelGrant, ModelRelay, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, ThreadRef, Ticket, TicketPipeline, TicketRepair, Trigger } from './model.ts'
+import type { Backend, ChannelRef, Decision, LinkedRelationKind, ModelGrant, ModelRelay, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, ThreadRef, Ticket, TicketDeploy, TicketPipeline, TicketRepair, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
 import type { PlanDecision, PlanOption, PlanPhase, PlanTemplate, PlanVia } from './plan.ts'
@@ -222,6 +222,13 @@ export class Engine {
    */
   observePipeline(ticketId: string, observation: PipelineObservation): Ticket {
     return this.repo.atomic(() => this.tickets.observePipeline(ticketId, observation))
+  }
+  /**
+   * The host's record of the deployment it ran for a merged hot change, on the ticket that delivered it, whose own PR merge
+   * has usually ended it. A package change needs no record here: it waits for a person to build and install its app.
+   */
+  recordDeploy(ticketId: string, deploy: TicketDeploy): Ticket {
+    return this.repo.atomic(() => this.tickets.recordDeploy(ticketId, deploy))
   }
   /**
    * A worker asked Swarm to rerun the current version's checks; the next failure of the same version wakes it once more.

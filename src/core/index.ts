@@ -17,6 +17,7 @@ export { ANALYSIS_PLAN_LABELS, DESIGN_PLAN_LABELS, missingPlanLabels, pendingPla
 export { key } from './ids.ts'
 export { pipelineNotice, rerunNotice, reviewLabel, type PipelineChoices, type PipelineNotice } from './pipeline-notice.ts'
 export { classifyTicket, ticketKind, TICKET_KINDS, type KindInput, type TicketKind, type TicketKindOf, type TicketKindSource } from './kind.ts'
+export { ticketUpdateTrack, UPDATE_TRACKS, type UpdateTrack, type UpdateTrackOf, type UpdateTrackSource } from './update-track.ts'
 export { missingVerifyLabels, verifyLines, VERIFY_LABELS, VERIFY_LIMITS } from './verification.ts'
 export { REPAIR_LIMIT, REPROJECT_AFTER_MS, reprojectable, type Liveness, type Reprojection } from './invariants.ts'
 export { PRIORITY_LEVELS, PRIORITY_LABELS, PRIORITY_ASK_MINUTES, defaultPriority, priorityAnswer, priorityAskDeadline, priorityAskOverdue, priorityIsMainline,

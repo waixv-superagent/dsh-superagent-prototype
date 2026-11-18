@@ -204,6 +204,8 @@ export class Upgrade {
     this.current = this.readLast()
   }
   get enabled(): boolean { return this.config.checkout !== '' }
+  /** Whether a merged hot change is deployed on its own; the panel's own button stays available either way. */
+  get autoDeploy(): boolean { return this.config.autoDeploy }
   private get dir(): string { return join(this.host.stateDir, 'upgrade') }
   private get statusFile(): string { return join(this.dir, 'status.json') }
   /** Where the prepare phase builds the target commit: a detached worktree of the configured checkout. */

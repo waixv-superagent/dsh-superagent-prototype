@@ -3,8 +3,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { z } from 'zod'
-import { TICKET_KINDS, UserError, followupOwners, key, reasonText, type Decision, type DecisionKind, type EngineForMainSession, type EngineForPeople,
-  type TicketKind } from '../../core/index.ts'
+import { TICKET_KINDS, UPDATE_TRACKS, UserError, followupOwners, key, reasonText, type Decision, type DecisionKind, type EngineForMainSession, type EngineForPeople,
+  type TicketKind, type UpdateTrack } from '../../core/index.ts'
 import { IM_WORDS, NOTE_WORDS, wordCount } from '../../infra/text.ts'
 import { AssessmentSchema, EscalationSchema, EvalReadSchema, WorktreeNameSchema, type MasterAssessor } from '../assessment.ts'
 import { ticketCard } from '../cards.ts'
@@ -72,6 +72,8 @@ const RouteItemSchema = z.object({
   reason: z.string().nullish().describe('chat, ignore and stop: why, at most 500 characters; an ignore needs it.'),
   ticket_kind: z.string().nullish().describe('accept: the kind of work, for counting and filtering only: feature (something new), bug (existing behavior is wrong), '
     + 'self (this agent\'s own iteration), inquiry (an answer, analysis or review); left out, the host derives it from the Source and title.'),
+  ticket_update: z.enum(UPDATE_TRACKS).nullish().describe('accept: how this change reaches the running system: hot (this plugin\'s package carries it, and the host '
+    + 'deploys it automatically after the merge) or package (it needs a new desktop app build); left out, the worker declares it and the agent\'s own work defaults to hot.'),
   execution_mode: z.enum(['standard', 'phased']).nullish().describe('accept: how this ticket\'s worker executes. Name `phased` only when the person\'s own message '
     + 'explicitly asks for the phased agent-team run of this work; it gates code behind a P1 plan on every backend, and the worker plans 2–4 phases whose model '
     + 'routes the person approves. Omit for the standard flow, which is the default and today\'s behavior; never infer it from complexity or size.'),
@@ -98,6 +100,7 @@ const FIELDS: Record<Field, { check: z.ZodType; reads: readonly Kind[]; needs: r
   target: { check: z.string().trim().min(1).max(300), reads: ['accept'], needs: [] },
   reason: { check: z.string().max(500), reads: ['chat', 'ignore', 'stop'], needs: ['ignore'] },
   ticket_kind: { check: z.enum(TICKET_KINDS), reads: ['accept'], needs: [] },
+  ticket_update: { check: z.enum(UPDATE_TRACKS), reads: ['accept'], needs: [] },
   execution_mode: { check: z.enum(['standard', 'phased']), reads: ['accept'], needs: [] },
   parts: { check: z.array(z.unknown()).max(3), reads: ['accept'], needs: [] },
 }
@@ -156,6 +159,7 @@ function route(host: MainToolsHost, item: RouteItem, decided: ReadonlyMap<string
         acknowledgement: item.acknowledgement!, name: item.worktree_name!, ...note, ...(item.paths?.length ? { paths: item.paths } : {}),
         ...(target ? { target: target.target } : {}), ...(parts.length ? { parts } : {}),
         ...(item.execution_mode ? { mode: item.execution_mode } : {}),
+        ...(item.ticket_update ? { updateTrack: item.ticket_update as UpdateTrack } : {}),
         ...(item.ticket_kind ? { ticketKind: item.ticket_kind as TicketKind } : {}) })
       // A Decision that created no ticket is the item's refusal; one that existed before keeps what it was accepted with.
       if (decision.kind !== 'accept' || !decision.ticketId) return { refused: `Ticket was not created: ${reasonText(decision.reason)}` }

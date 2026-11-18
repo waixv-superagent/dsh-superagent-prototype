@@ -9,6 +9,7 @@ import { REPAIR_LIMIT } from './invariants.ts'
 import { pendingPlan, planTemplate, validCardOptions, validQuestionSections, ticketPhase } from './plan.ts'
 import type { Replies } from './replies.ts'
 import { automatic, type Tickets } from './tickets.ts'
+import type { UpdateTrack } from './update-track.ts'
 
 /** What an Assignment reports: a worker's report, or the Executor's own (`waiting` after an idle turn, `failed` after an error). */
 /**
@@ -42,6 +43,12 @@ export interface WorkerReport {
   answers?: string
   /** What it delivered, which the ticket keeps on its execution so the board and a person's confirmation see it. */
   delivery?: DeliveryFacts
+  /**
+   * How the change reaches the running system (docs/020): `hot` ships by replacing this plugin's package, which the host
+   * deploys on its own after the merge, and `package` needs a new desktop app build. A worker that changed a hot ticket's
+   * code names it so the host can deploy it; left out, the agent's own work defaults to hot.
+   */
+  update?: UpdateTrack
 }
 /**
  * Whether a team request is well-formed: one to four teammates, each with a unique role, a one-line job and a model route.
@@ -248,6 +255,9 @@ export class Assignments extends EnginePart {
     // A replaced or cleared attention question withdraws any pending unsent reply for the previous question from the outbox.
     if (previous && previous.id !== attention?.id) this.replies.withdrawAttention(previous.id)
     assignment.report = { state: report.state, summary: report.summary, at }
+    // The track the worker named decides what the host does once the change merges: a hot one is deployed automatically, a
+    // package one waits for its desktop app build. A deploy already recorded on the ticket stays with it.
+    if (report.update) ticket.update = { track: report.update, source: 'worker', at, ...(ticket.update?.deploy ? { deploy: ticket.update.deploy } : {}) }
     // Delivery facts live on the ticket's execution: the board, a person's confirmation and a later assignment all read them.
     if (report.delivery && ticket.execution) ticket.execution = { ...ticket.execution, ...report.delivery }
     ticket.updatedAt = at

@@ -3,6 +3,7 @@ import type { Assignment, ChannelRef, Decision, DecisionKind, Escalation, Execut
   from './model.ts'
 import type { Reason } from './reasons.ts'
 import type { TicketKind } from './kind.ts'
+import type { UpdateTrack } from './update-track.ts'
 
 /** Gate admission result: either inadmissible with a reason code, or admissible with strength and MandateBasis. */
 export type GateResult = { admissible: false; reason: string } | { admissible: true; strength: Strength; basis: MandateBasis }
@@ -47,10 +48,11 @@ export type AssessmentOutcome =
    * and `target` the configured repository or workspace its work belongs to, which the executor resolves to a delivery
    * environment; absent means the Source or the deployment's configured backend decides.
    * `category` marks the ticket a defect or a feature, set only by an escalation; `ticketKind` the kind of work the
-   * router judged it, which the host otherwise derives (`core/kind.ts`).
+   * router judged it, which the host otherwise derives (`core/kind.ts`); `updateTrack` how the change reaches the running
+   * system, which the host otherwise derives (`core/update-track.ts`).
    */
   | { kind: 'accept'; title: string; scope: string; reason: string | Reason; acknowledgement?: string; rules?: string[]; audit?: Record<string, unknown>;
-    name?: string; note?: string; paths?: string[]; category?: 'bug' | 'feature'; target?: string; ticketKind?: TicketKind
+    name?: string; note?: string; paths?: string[]; category?: 'bug' | 'feature'; target?: string; ticketKind?: TicketKind; updateTrack?: UpdateTrack
     /**
      * How the ticket's worker executes: `phased` is the opt-in agent-team flow, whose P1 plan splits the work into phases
      * with model routes a person authorizes; absent is `standard`, today's single-worker flow (docs/003).

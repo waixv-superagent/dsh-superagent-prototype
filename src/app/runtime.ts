@@ -61,6 +61,7 @@ import { PipelineChecks, pipelineChoices } from './pipeline.ts'
 import { PipelineWatch } from './pipeline-watch.ts'
 import { Watchdog } from './watchdog.ts'
 import { Upgrade } from './upgrade.ts'
+import { DeployWatch } from './deploy-watch.ts'
 import { AppUpgrade } from './app-upgrade.ts'
 import { StallWatch } from './stall-watch.ts'
 import { Settings } from './settings.ts'
@@ -114,6 +115,8 @@ export class Runtime extends Service implements SourceHost {
   readonly watchdog: Watchdog
   /** Checks the fork for a newer build and runs the one-click update the sidebar badge offers. */
   readonly upgrade: Upgrade
+  /** Deploys a merged hot self-iteration change on its own and records the outcome on its ticket (docs/006). */
+  readonly deployWatch: DeployWatch
   /** Checks the DSH fork and the official upstream and builds a new desktop installer on request. */
   readonly appUpgrade: AppUpgrade
   readonly stallWatch: StallWatch
@@ -323,6 +326,8 @@ export class Runtime extends Service implements SourceHost {
             const request = store.triggers.get(ended.origin.triggerId)?.text ?? ''
             for (const message of pullEndNotices(ended, request, setup.deployment.repository)) outbox.send(message)
           }
+          // A merged hot change is deployed at once; a package change waits for the build a person installs (docs/006).
+          if (ended) this.deployWatch?.ended(ended)
         } })
       // Update the `evals` health entry on every pass if an evaluation failed as unavailable within the last hour.
       const evals = board.claim('evals', { state: 'ready', detail: 'No unavailable Eval in the last hour' })
@@ -353,6 +358,11 @@ export class Runtime extends Service implements SourceHost {
         exit: () => { const exit = ctx.get('appExit') as ((code: number) => void) | undefined; if (exit) exit(0); else process.kill(process.pid, 'SIGTERM') },
         warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       this.appUpgrade = new AppUpgrade({ config: machine.upgrade ?? NO_UPGRADE, stateDir: machine.stateDir,
+        warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
+      // A merged hot self-iteration change is deployed on its own: the build runs in the background, then the restart waits
+      // for running workers exactly as the panel's update does (docs/006). A package change waits for its app build instead.
+      this.deployWatch = new DeployWatch({ stateDir: machine.stateDir, upgrade: this.upgrade,
+        record: (ticketId, deploy) => { engine.recordDeploy(ticketId, deploy) },
         warn: message => ctx.logger.warn('dsh-superagent: %s', message) })
       const passes = this.passes = new Passes({ engine: { receive: trigger => engine.receive(trigger), evaluateDue }, effects,
         health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing(),
@@ -475,6 +485,7 @@ export class Runtime extends Service implements SourceHost {
     this.passes.start()
     this.effects.start()
     this.pipelineWatch.start()
+    this.deployWatch.start()
     this.editorScheduler.start()
     this.editorGatekeeper.start()
     this.repro.start()
@@ -502,6 +513,7 @@ export class Runtime extends Service implements SourceHost {
     this.stallWatch.stop()
     this.nightRepro.stop()
     this.billing.stop()
+    this.deployWatch.stop()
     this.upgrade.stop()
     this.appUpgrade.stop()
     this.stopped.abort()
