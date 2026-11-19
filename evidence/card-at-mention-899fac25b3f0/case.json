@@ -1,0 +1,4 @@
+{
+  "command": "node --experimental-transform-types evidence/card-at-mention-899fac25b3f0/generate-evidence.mjs",
+  "report": "evidence/card-at-mention-899fac25b3f0/README.md"
+}

@@ -24,6 +24,26 @@ describe('pipeline stage cards', () => {
     expect(elements.some(element => element.tag === 'form')).toBe(false)
     expect(text).toContain('待人工审核')
   })
+  it('mentions the person at the top of the card when one is resolved', () => {
+    const { card, mention } = pipelineStageCard(notice(), 'x', undefined, ['ou_abc', 'zhangsan'])
+    expect(elementsOf(card)[0]).toMatchObject({ tag: 'markdown', content: '<at id=ou_abc></at>' })
+    expect(mention).toEqual(['ou_abc'])
+    expect(elementsOf(pipelineStageCard(notice(), 'x').card).some(element => JSON.stringify(element).includes('<at'))).toBe(false)
+  })
+  it('resolves the ticket person for a pipeline card from the host, and keeps the at on the text fallback', async () => {
+    const state: Record<string, unknown> = {}
+    const lark = vi.fn(async (args: string[]) => {
+      if (args.includes('interactive')) throw new Error('bad card')
+      return { data: { message_id: 'om_text' } }
+    })
+    const host = { commands: { lark }, state: { get: (key: string) => state[key], set: (key: string, value: unknown) => { state[key] = value } },
+      mentionTarget: (id: string) => id === 't1' ? 'ou_abc' : undefined } as never
+    const message: OutboundMessage = { id: 'p2', channel: { source: 'feishu', thread: 'feishu:oc_1', address: { chatId: 'oc_1', messageId: 'om_1' } },
+      text: '待人工审核', kind: 'reply', ticketId: 't1', pipeline: notice() }
+    expect(await sendFeishu(host, message)).toBe('sent')
+    const post = lark.mock.calls[1]![0] as string[]
+    expect(JSON.parse(post[post.indexOf('--content') + 1]!).zh_cn.content[0][0]).toEqual({ tag: 'at', user_id: 'ou_abc' })
+  })
   it('offers a reviewer picker, package recipients, rerun and close only when the notice asks for them', () => {
     const { card } = pipelineStageCard(notice({ reviewers: [{ label: '张三', value: 'zhangsan' }], rerun: true }), 'x')
     const elements = elementsOf(card)

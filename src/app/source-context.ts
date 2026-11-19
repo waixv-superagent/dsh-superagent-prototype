@@ -6,6 +6,7 @@ import type { SetupProblem } from '../setup.ts'
 import type { SourceContext } from '../sources/host.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import { sameName } from '../infra/text.ts'
+import { mentionTargetOf } from './mentions.ts'
 import type { Outbox } from './outbox.ts'
 import { pipelineChoices, type PipelineChecks } from './pipeline.ts'
 import type { Store } from './store.ts'
@@ -123,6 +124,10 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
       if (ticket.mandate.actor.source === kind.kind) return sameName(ticket.mandate.actor.id, actor)
       const allowed = store.settings().policy.sources[kind.kind]?.allowed ?? []
       return allowed.some(entry => sameName(entry.id, actor))
+    },
+    mentionTarget: id => {
+      const ticket = store.tickets.get(id)
+      return ticket ? mentionTargetOf(store, ticket) : undefined
     },
     report: (entry, value) => {
       if (!kind.health.includes(entry)) throw new Error(`The ${kind.kind} Source has no health entry ${entry}`)

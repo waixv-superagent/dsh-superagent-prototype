@@ -9,7 +9,9 @@ import type { Commands } from '../infra/commands.ts'
 import { KV } from '../kv.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import { grillCard, planCard, messageLink, sendCard } from '../sources/feishu-card.ts'
+import { claimMention, mentionIds } from '../sources/feishu-mention.ts'
 import { ticketOpenLink } from '../sources/feishu-sent.ts'
+import { mentionTargetOf } from './mentions.ts'
 import type { SurfaceState } from './surface.ts'
 import type { Store } from './store.ts'
 
@@ -61,7 +63,9 @@ export async function notifyPlan(host: PlanHost, ticket: Ticket): Promise<string
   const replyTo = channel?.address.messageId
   if (!chat) { host.warn(`Ticket ${ticket.id}: no Feishu conversation for its plan card; set the Topic chat or a private chat in the Feishu Source`); return undefined }
   try {
-    const message = await sendCard(host, chat, planCard(ticket, plan, panelLinkOf(host, ticket.id)), `plan-${key('plan', ticket.id, plan.at)}`, replyTo)
+    const target = mentionIds([mentionTargetOf(host.store, ticket) ?? ''])
+    const mention = target.length && claimMention(host.store, ticket.id) ? target : undefined
+    const message = await sendCard(host, chat, planCard(ticket, plan, panelLinkOf(host, ticket.id), mention), `plan-${key('plan', ticket.id, plan.at)}`, replyTo)
     // Remember which plan the card asks about, so its buttons can decide without matching a chat thread, and drop old entries.
     if (message) {
       host.store.set(KV.feishu.sent(message), { ticketId: ticket.id, chatId: chat, at: new Date().toISOString() })
@@ -94,7 +98,9 @@ export async function notifyGrill(host: PlanHost, ticket: Ticket): Promise<strin
   const replyTo = channel?.address.messageId
   if (!chat) { host.warn(`Ticket ${ticket.id}: no Feishu conversation for its grill card; set the Topic chat or a private chat in the Feishu Source`); return undefined }
   try {
-    const message = await sendCard(host, chat, grillCard(ticket, grill, panelLinkOf(host, ticket.id)), `grill-${key('grill', ticket.id, grill.at)}`, replyTo)
+    const target = mentionIds([mentionTargetOf(host.store, ticket) ?? ''])
+    const mention = target.length && claimMention(host.store, ticket.id) ? target : undefined
+    const message = await sendCard(host, chat, grillCard(ticket, grill, panelLinkOf(host, ticket.id), mention), `grill-${key('grill', ticket.id, grill.at)}`, replyTo)
     if (message) {
       host.store.set(KV.feishu.sent(message), { ticketId: ticket.id, chatId: chat, at: new Date().toISOString() })
       const url = await messageLink(host, message).catch(() => undefined)

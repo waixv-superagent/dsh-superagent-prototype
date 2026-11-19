@@ -51,6 +51,8 @@ export type ChannelLinks = Partial<Pick<Deployment, 'repository' | 'feishu'>>
 export type ChannelHost = Pick<SourceContext, 'commands' | 'state'> & {
   /** The configured panel address, or the browser origin the panel last reported; empty adds no link. */
   panelBase?(configured: string): string
+  /** The Feishu open_id a ticket's milestone message should mention; absent on a host that cannot resolve one. */
+  mentionTarget?(ticketId: string): string | undefined
 }
 /** Outbound messaging adapter for a source kind's threads. */
 export interface SourceChannel<C> {

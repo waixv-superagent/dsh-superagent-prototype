@@ -6,6 +6,7 @@
 import { grillAnswerLines, PLAN_CARD_QUESTION, PLAN_REPLY_HINT, PLAN_TEMPLATES, PRIORITY_LABELS, PRIORITY_LEVELS, planLines, planTemplate, type Grill, type Plan, type PlanDecision,
   type PlanDiff, type PlanOption, type PlanTemplate, type PipelineCard, type PriorityAsk, type PriorityLevel, type QuestionSection, type Ticket } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
+import { mentionIds, mentionLine } from './feishu-mention.ts'
 import { browserLink, feishuPostContent, jsonForCmd, textSafe } from './feishu-text.ts'
 
 /** Re-exported for the status card's script, which builds the same system-browser switch. */
@@ -13,8 +14,8 @@ export { browserLink }
 
 /** What sending a card needs: the deployment's bot CLI. */
 export interface CardHost { readonly commands: Pick<Commands, 'lark'> }
-/** A card with the plain-text version used when Feishu rejects the card itself. */
-export interface CardMessage { card: Record<string, unknown>; text: string }
+/** A card with the plain-text version used when Feishu rejects the card itself; `mention` keeps the @ on that fallback too. */
+export interface CardMessage { card: Record<string, unknown>; text: string; mention?: string[] }
 /** The short ticket id a card shows, as the panel links it: the first eight characters of the full id. */
 const shortId = (ticket: Pick<Ticket, 'id'>): string => ticket.id.slice(0, 8)
 /**
@@ -105,6 +106,14 @@ const linkify = (text: string): string => text.replace(
 const markdown = (content: string, extra: Record<string, unknown> = {}): Record<string, unknown> =>
   ({ tag: 'markdown', content: textSafe(linkify(content)), ...extra })
 const plain = (content: string): Record<string, unknown> => ({ tag: 'plain_text', content: textSafe(content) })
+/**
+ * The line that mentions the person a card is for: `mentionLine` builds the `<at>` tags as card structure, so they are not
+ * rewritten the way message text is. Undefined when no valid open_id was resolved, which keeps the card text-only.
+ */
+const mentionElement = (ids: readonly string[] | undefined, note = ''): Record<string, unknown> | undefined => {
+  const valid = mentionIds(ids)
+  return valid.length ? { tag: 'markdown', content: mentionLine(valid, note) } : undefined
+}
 /** How short a sentence may be before it joins the point before it, so a card gets no one-word bullets like "推荐。". */
 const POINT_MIN = 12
 /** How long a point may get before it splits at its own semicolons; a point reads like a sentence, not a wall of text. */
@@ -264,7 +273,7 @@ const buttonRow = (buttons: readonly Record<string, unknown>[]): Record<string, 
  * who cannot see the card reads it.
  */
 export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 'text' | 'template' | 'question' | 'options' | 'deadline' | 'sections' | 'diff' | 'grill'>,
-  ticketLink?: string): CardMessage {
+  ticketLink?: string, mention?: readonly string[]): CardMessage {
   const template = planTemplate(plan)
   const lines = linesOf(plan.text, template)
   const get = (label: string): string => lines.get(label) ?? ''
@@ -274,10 +283,13 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
   const custom = plan.sections?.length ? plan.sections : undefined
   const body = custom?.filter(section => !section.fold) ?? []
   const folded = custom?.filter(section => section.fold) ?? []
+  const mentioned = mentionIds(mention)
+  const at = mentionElement(mentioned, '请确认这张方案')
   const card = {
     ...shell({
       title: `待确认 · ${PLAN_KIND[template]}`, subtitle: ticketSubtitle(ticket, !!ticketLink), template: 'blue', summary: `待确认：${question}`,
       elements: [
+        ...at ? [at] : [],
         markdown(`**${question}**`, { text_size: 'heading' }),
         ...plan.grill?.answers.length ? [confirmedBlock(plan.grill)] : [],
         ...body.length ? body.map(section => block(section.label, section.text))
@@ -309,7 +321,7 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
     `选项：${choices.map(choice => choice.description ? `${choice.label}（${choice.description}）` : choice.label).join(' ｜ ')}`,
     custom ? '' : `证据（${layout.fold.join('/')}）在卡片折叠与工单面板里。`, PLAN_REPLY_HINT].filter(Boolean).join('\n'))
     + (ticketLink ? `\n${ticketLinkText(ticket.id, ticketLink)}` : '')
-  return { card, text }
+  return { card, text, ...mentioned.length ? { mention: mentioned } : {} }
 }
 /**
  * The card a click on 改一下 turns into: it keeps the original question and the whole plan one tap away, so switching views
@@ -435,11 +447,14 @@ export function priorityStaleCard(ticketId: string): CardMessage {
  * worker's recommendation, and one submit. The person answers everything in one pass, so the old drip of one blocking
  * question card at a time (or a long grill document) becomes a single, bounded round.
  */
-export function grillCard(ticket: Pick<Ticket, 'id' | 'title'>, grill: Pick<Grill, 'id' | 'questions'>, ticketLink?: string): CardMessage {
+export function grillCard(ticket: Pick<Ticket, 'id' | 'title'>, grill: Pick<Grill, 'id' | 'questions'>, ticketLink?: string,
+  mention?: readonly string[]): CardMessage {
   const count = grill.questions.length
   const linked = !!ticketLink
   const question = `开工前 ${count} 个问题`
   const intro = '先定这几件事，方案卡就只问「能不能开工」。每题选一个。'
+  const mentioned = mentionIds(mention)
+  const at = mentionElement(mentioned, '请回答这几个问题')
   const fields = grill.questions.flatMap((item, index): Record<string, unknown>[] => [
     markdown(`**Q${index + 1} · ${item.title}**\n${item.question}`),
     markdown(`推荐：${item.options[item.recommended] ?? '—'}`, { text_size: 'notation' }),
@@ -451,6 +466,7 @@ export function grillCard(ticket: Pick<Ticket, 'id' | 'title'>, grill: Pick<Gril
   const card = shell({
     title: `待你答 · ${question}`, subtitle: ticketSubtitle(ticket, linked), template: 'orange', summary: `待你答：${question}`,
     elements: [
+      ...at ? [at] : [],
       markdown(intro),
       { tag: 'form', name: 'grill_form', vertical_spacing: '8px', elements: [
         ...fields,
@@ -465,7 +481,7 @@ export function grillCard(ticket: Pick<Ticket, 'id' | 'title'>, grill: Pick<Gril
       ...item.options.map((option, optionIndex) => `  ${String.fromCharCode(65 + optionIndex)} ${option}${optionIndex === item.recommended ? '（推荐）' : ''}`)]),
     `回 q1=A q2=B（或直接按题目回答），也可以点卡片一次提交。`].join('\n'))
     + (linked ? `\n${ticketLinkText(ticket.id, ticketLink)}` : '')
-  return { card, text }
+  return { card, text, ...mentioned.length ? { mention: mentioned } : {} }
 }
 
 /** The card that replaces a submitted grill: every answer in one place, and the next step. */
@@ -563,8 +579,10 @@ const choiceForm = (name: string, placeholder: string, options: readonly { label
  * and the actions this stage offers — pick reviewers to add on Swarm, rerun the checks, send the editor package to people or
  * chats, or close the ticket. The text fallback is the same one-line notice the chat used to get.
  */
-export function pipelineStageCard (notice: PipelineCard, text: string, ticketLink?: string): CardMessage {
+export function pipelineStageCard (notice: PipelineCard, text: string, ticketLink?: string, mention?: readonly string[]): CardMessage {
   const id = notice.ticketId
+  const mentioned = mentionIds(mention)
+  const at = mentioned.length ? { tag: 'markdown', content: mentionLine(mentioned) } : undefined
   const links = notice.links.map((link, index) => linkButton(link.label, link.url, index === 0 && !notice.reviewers && !notice.targets))
   const actions: Record<string, unknown>[] = []
   if (notice.reviewers?.length) {
@@ -586,6 +604,7 @@ export function pipelineStageCard (notice: PipelineCard, text: string, ticketLin
     body: {
       direction: 'vertical', padding: '12px 12px 16px 12px', vertical_spacing: '10px',
       elements: [
+        ...at ? [at] : [],
         ...notice.lines.length ? [markdown(notice.lines.join('\n'))] : [],
         ...links.length ? [buttonRow(links)] : [],
         ...actions,
@@ -594,7 +613,7 @@ export function pipelineStageCard (notice: PipelineCard, text: string, ticketLin
       ],
     },
   }
-  return { card, text: textSafe(text) }
+  return { card, text: textSafe(text), ...mentioned.length ? { mention: mentioned } : {} }
 }
 /** The card that replaces a pipeline card after a click: what was done, or why it could not be. */
 export function pipelineResultCard (ticket: Pick<Ticket, 'id' | 'title'>, outcome: { ok: boolean; heading: string; line: string }): CardMessage {
@@ -650,7 +669,8 @@ export async function sendCard(host: CardHost, chat: string, message: CardMessag
   try {
     return messageIdOf(await send('--content', jsonForCmd(message.card), 'interactive'))
   } catch {
-    // A card Feishu refuses (such as a schema change) still reaches the person as text; anything else would fail there too.
-    return messageIdOf(await send('--content', feishuPostContent(message.text), 'post'))
+    // A card Feishu refuses (such as a schema change) still reaches the person as text, with its @ when it had one; anything
+    // else would fail there too.
+    return messageIdOf(await send('--content', feishuPostContent(message.text, message.mention), 'post'))
   }
 }

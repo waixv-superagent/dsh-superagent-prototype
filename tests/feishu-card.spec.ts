@@ -442,3 +442,32 @@ describe('structured grill card', () => {
   })
 })
 
+describe('mentioning the person a card is for', () => {
+  it('puts the open_id at the top of a plan card and in the text fallback', async () => {
+    const message = planCard(ticket, { text: PLAN }, undefined, ['ou_abc'])
+    expect((message.card.body as { elements: Element[] }).elements[0]).toMatchObject({
+      tag: 'markdown', content: '<at id=ou_abc></at> 请确认这张方案' })
+    expect(message.mention).toEqual(['ou_abc'])
+    const lark = vi.fn(async (args: string[]) => {
+      if (args[args.indexOf('--msg-type') + 1] === 'interactive') throw new Error('bad card')
+      return '{"data":{"message_id":"om_text"}}'
+    })
+    expect(await sendCard({ commands: { lark } as never }, 'oc_1', message, 'plan-1')).toBe('om_text')
+    const retry = lark.mock.calls[1]![0] as string[]
+    const content = JSON.parse(retry[retry.indexOf('--content') + 1]!)
+    expect(content.zh_cn.content[0][0]).toEqual({ tag: 'at', user_id: 'ou_abc' })
+    expect(content.zh_cn.content[0][1].text).toContain('待确认')
+  })
+
+  it('puts it at the top of a grill card too, and drops anything that is not an open_id', () => {
+    const grill = { id: 'g1', at: '2026-09-23T00:00:00Z', answers: [], questions: [] }
+    const message = grillCard(ticket, grill, undefined, ['zhangsan', 'ou_xyz'])
+    expect((message.card.body as { elements: Element[] }).elements[0]).toMatchObject({
+      tag: 'markdown', content: '<at id=ou_xyz></at> 请回答这几个问题' })
+    expect(message.mention).toEqual(['ou_xyz'])
+    const plain = planCard(ticket, { text: PLAN }, undefined, ['zhangsan'])
+    expect(JSON.stringify(plain.card)).not.toContain('<at')
+    expect(plain.mention).toBeUndefined()
+  })
+})
+
