@@ -180,7 +180,9 @@ beforeEach(async () => {
       // The worker preset's tools, as the agent's own view resolves them; the non-work ones prove the restriction filters.
       const inherited = [shell, 'read', 'write', 'edit', 'read_image', 'glob', 'grep', 'skill', 'job_output', 'job_list', 'job_kill', 'web_search',
         'todo_write', 'subagent', 'list_subagent_models', 'send_message', 'list_agents', 'interrupt_agent',
-        'ask_user_question', 'plugin_manager', 'schedule_create', 'create_goal', 'session_create', 'session_send_message', 'feishu_doc_edit']
+        'ask_user_question', 'plugin_manager', 'schedule_create', 'create_goal', 'session_create', 'session_send_message', 'feishu_doc_edit',
+        // The knowledge base's MCP server is one profile entry; its tools are global like any other (docs/033).
+        'mcp__knowledge__search', 'mcp__knowledge__read', 'mcp__other__search']
       const sessionTools = new Map<string, RegisteredTool>()
       tools.set(sessionId, sessionTools)
       agentCtx.reflect.provide('tools', { register: (tool: RegisteredTool) => { sessionTools.set(tool.name,
@@ -190,6 +192,9 @@ beforeEach(async () => {
           const view = scope === preset || scope === agents.get(sessionId)
           return view && inherited.includes(name) ? { name } : undefined
         },
+        // The agent's visible tools, as the knowledge base's MCP prefix filter reads them (docs/033).
+        definitions: (scope?: object) => (scope === preset || scope === agents.get(sessionId))
+          ? [...inherited, ...sessionTools.keys()].map(name => ({ name })) : [],
         restrict: vi.fn((rule: { allow: string[] }) => {
           if (rule.allow.some(name => !inherited.includes(name))) throw new Error('Restriction names a non-inherited tool')
           restricts.set(sessionId, [...restricts.get(sessionId) ?? [], rule]); return () => {}
@@ -254,6 +259,22 @@ it('relays an explicit member mention as a candidate and creates the ticket, ack
     thread: `feishu:${CHAT}:om_1`, text: trigger.text }) })
   expect(first.trigger).not.toHaveProperty('read')
   expect(await route({ kind: 'accept', trigger_id: trigger.id, title: 'again', worktree_name: worktreeName, acknowledgement: 'x' })).toMatchObject({ ticket: { ticket_id: ticket.id } })
+})
+
+it('admits the knowledge base MCP tools and its prompt line only while the knowledge block enables them', async () => {
+  const settings = runtime.store.settings()
+  runtime.store.saveSettings({ ...settings, knowledge: { enabled: true, server: 'knowledge' } })
+  const { sessionId } = await acceptedTicket(feishu('7', '@bot 修一下知识库'))
+  const allow = (restricts.get(sessionId) ?? []).at(-1) as { allow: string[] }
+  expect(allow.allow).toEqual(expect.arrayContaining(['mcp__knowledge__search', 'mcp__knowledge__read']))
+  expect(allow.allow).not.toContain('mcp__other__search')
+  expect(sections.get(sessionId)!.text({})).toContain('mcp__knowledge__*')
+  // Off again: the next worker sees neither the tools nor the pointer.
+  runtime.store.saveSettings({ ...runtime.store.settings(), knowledge: { enabled: false, server: 'knowledge' } })
+  const second = await acceptedTicket(feishu('8', '@bot 再修一下知识库'))
+  const secondAllow = (restricts.get(second.sessionId) ?? []).at(-1) as { allow: string[] }
+  expect(secondAllow.allow).not.toContain('mcp__knowledge__search')
+  expect(sections.get(second.sessionId)!.text({})).not.toContain('mcp__knowledge__*')
 })
 
 it('hands the accept receipt to the Source that opens the ticket conversation, so its link travels in that message', async () => {

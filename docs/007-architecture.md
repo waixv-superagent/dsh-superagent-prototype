@@ -220,7 +220,7 @@ Its `context`, `read` and `decide` methods serve `orchestrator_eval`, `orchestra
 
 ### Settings
 
-`Settings` (`src/app/settings.ts`) reads and writes revisioned settings blocks. `current` and `view` read them; `save(block, value, revision, origin)` validates a save; `pause(paused, origin)` changes the separate `paused` setting.
+`Settings` (`src/app/settings.ts`) reads and writes revisioned settings blocks. `current` and `view` read them; `save(block, value, revision, origin)` validates a save; `pause(paused, origin)` changes the separate `paused` setting. The blocks are `policy`, `eval`, `executor`, `knowledge`, `pause` and each `source:<id>`; `knowledge` holds only the switch and the MCP server name (docs/033).
 
 Every save declares its origin: `panel`, `tool` or `sync`. Only `panel` can change the execution environment or fields listed in `SETUP_FIELDS` (`src/deployment.ts`).
 
@@ -228,7 +228,7 @@ A Policy-version change calculates `policyEffects`, records which Tickets were n
 
 ### Prompts
 
-`Prompts` (`src/app/prompts.ts`) stores configurations as `Versions`. `current`, `version` and `history` read them; `validate`, `preview` and `save(value, baseRevision, source)` check and save them. `compose` and `skills` build Session text.
+`Prompts` (`src/app/prompts.ts`) stores configurations as `Versions`. `current`, `version` and `history` read them; `validate`, `preview` and `save(value, baseRevision, source)` check and save them. `compose` and `skills` build Session text. `skills` also registers the built-in `knowledge` skill while the team knowledge base is enabled; its text is packaged, its `{server}` placeholder is filled from the block, and its name is reserved from team skills.
 
 `builtInParts` lists override keys, roles, default text and required template placeholders. Each override stores team `text` and a `base`: the `builtInBase` key of its original default. Saves preserve that default under `KV.prompts.builtIn`. `defaultChanged` then reports changed defaults, their old text when available, and removed parts.
 
@@ -240,7 +240,7 @@ Validation inherits an omitted base from the saved override, drops removed parts
 
 `prompt` delivers once per request id. `relay` and `notify` enqueue main-Session messages handled by the `relay` and `notice` effects. `src/app/notices.ts` defines their content; `delivery` checks whether a message arrived.
 
-Each model request binds the Session to the current prompt revision. The revisions it used are stored durably: `promptVersion` identifies the active one and `mayRead` restricts which versions a worker can inspect. Registrations are tracked in one map per agent.
+Each model request binds the Session to the current prompt revision. The revisions it used are stored durably: `promptVersion` identifies the active one and `mayRead` restricts which versions a worker can inspect. Registrations are tracked in one map per agent. While the team knowledge base is enabled, a worker's tool view and the main Session's allow-list also admit its MCP server's `mcp__<server>__*` tools, and its one-line pointer follows the setting at each request (docs/033).
 
 `status` and `promptVersion` serve prompt pages. Saves go through `Prompts.save` and notify the main Session. `modelRetry` exposes model-budget retry state.
 
@@ -362,6 +362,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/settings-history.ts` | `policyHistory`: each saved settings revision with what it changed from the one before |
 | `src/app/prompts.ts` | Prompts, `builtInParts`, the built-in parts a team may override, and `promptParts`, the order of a role's prompt sections |
 | `src/app/context.ts` | The built-in prompt text, read from `prompts/`, and the transcript entries Sessions read |
+| `src/app/knowledge.ts` | The team knowledge base's model-facing gate (docs/033): the MCP server's tool prefix and the visible MCP tools a Session may use while the base is enabled. The notes, index and search live in a separate repository behind an MCP server; this module stores nothing |
 | `src/app/skill-files.ts` | Packaged text: `promptFile`, which joins a file's one-sentence lines into paragraphs, and the bundled skills |
 | `src/app/sessions.ts` | Sessions |
 | `src/app/session-recovery.ts` | Session store recovery: the bounded reopen attempts for a Session DSH cannot open, `SessionUnavailable` when it stays unreadable, and the backoff between attempts |
@@ -476,6 +477,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/repro.tsx` | The 复现用例 card of the editor view (docs/024): the local cases with their problems and latest runs, run and stop, the live output of the run in flight, each run's output on demand, report links, and the refusal while an agent or a host job holds the editor |
 | `src/client/settings.tsx` | The Settings tab: the group navigation and the group on screen |
 | `src/client/settings-kit.tsx` | The building blocks of settings blocks: the settings the stage groups share, `useBlockDraft`, the fields, among them a Source kind's, and the history of saves |
+| `src/client/knowledge.tsx` | The Knowledge settings group (docs/033): the switch that lets the knowledge base's MCP tools reach Sessions, the MCP server name, and the block's own save bar and history |
 | `src/client/prompts.tsx` | The Prompts settings: the page owns the view it read and its editor the draft, and the Edit, Full prompt and History tabs render from them; a built-in part's editor shows a changed default and keeps or drops the override |
 | `src/client/prompt-config.ts` | The prompt configuration by section, by the team sections, skill names, built-in parts (`part/<key>`, with `withOverride`) and part headings the prompt views give, and the line diff of the full prompt, as pure functions |
 | `src/client/deployment.tsx` | The Deployment settings, also shown in DeepSeek Harness's Plugin Manager |
@@ -559,6 +561,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/migration.spec.ts` | The schema 11 migration: every stored record in its current shape, and the refusal of older schemas |
 | `tests/store.spec.ts` | Repositories and their working sets, in SQLite as in memory, the kv area, with every key of `KV` spelled only in `src/kv.ts` and the migration, settings history and queries |
 | `tests/prompts.spec.ts` | Prompt validation, assembly and versions |
+| `tests/knowledge.spec.ts` | The team knowledge base's settings block and validation, the MCP-tool prefix gate, the built-in skill with its server substitution, the prompt line and the reserved skill name (docs/033) |
+| `tests/panel-knowledge.spec.tsx` | The Knowledge settings group: its navigation entry, switch, MCP server field, save block and save bar |
 | `tests/cards.spec.ts` | The rules the built-in text must state, file by file |
 | `tests/model-surface.spec.ts` | Everything models read: tools, prompts, skills and inputs, checked against the tool schemas, the execution environment and the glossary, within a size budget per role |
 | `tests/feishu-card.spec.ts` | The P1 plan card's decision brief, folded evidence and buttons, the direction form and recorded answer, its text fallback, and sending it with an idempotency key |
@@ -664,7 +668,7 @@ The main Session has 14 application tools:
 
 `orchestrator_route` accepts 1–20 decisions in order. Each accept, chat, attach, stop or ignore runs as a separate Engine command. It also permits chatting to or ignoring an inferred candidate directly from its card; a chat item needs `reply`, and takes `escalation` (with an optional `worktree_name`) when the conversation established something that deserves its own ticket. `orchestrator_ticket_note` sends a fact as context, not authority.
 
-Settings saves select `policy`, `eval`, `executor`, `pause`, or `source`; the last also names its Source id. A prompt save with `preview: true` composes text without saving.
+Settings saves select `policy`, `eval`, `executor`, `knowledge`, `pause`, or `source`; the last also names its Source id. A prompt save with `preview: true` composes text without saving.
 
 The main Session also has DeepSeek Harness's `skill`, `bash`, `read`, `read_image`, `job_output`, `job_list` and `job_kill`. Avoiding code reads is a prompt rule, not a tool restriction.
 
@@ -742,6 +746,10 @@ Every id a page shows reads through one of these, so a Session walks from one ob
 A text page has 4,000 UTF-16 code units by default and 8,000 at most, a list 20 items by default and 50 at most.
 
 The names `event/`, `task/` and `observation/` of earlier versions still resolve.
+
+### Knowledge base
+
+While `knowledge.enabled` is true, both roles see the MCP server's tools as `mcp__<server>__*` — registered by `@deepseek-ai/dsh-mcp-client` from the deployment's profile, not by this plugin — the built-in `dsh-superagent-knowledge` skill, and one prompt line naming the prefix. The switch decides all three; the notes themselves are never injected, and an agent reads them through the MCP tools. 033 Knowledge base describes the repository, the server and the setup.
 
 ### Messages delivered to Sessions
 

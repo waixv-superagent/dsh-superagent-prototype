@@ -19,6 +19,8 @@ import { ProviderFailover, type FailoverSwitch } from './provider-failover.ts'
 import { initializeRoleModel } from './role-models.ts'
 import { bundledSkills } from './skill-files.ts'
 import { SKILL_PREFIX, type PromptVersion, type Prompts } from './prompts.ts'
+import { knowledgeToolNames } from './knowledge.ts'
+import { knowledgeInstructions } from './context.ts'
 import type { Store } from './store.ts'
 import { KV } from '../kv.ts'
 import type { RegisterTool, Tool } from './tools/tool.ts'
@@ -55,7 +57,7 @@ export interface SessionsHost {
  * What Sessions registered for an agent it decorated: the releases of its prompt section, tools and skill scope, the scope
  * its skills are registered in, and the skills of one prompt revision; for a worker's subagent, only its tool limits.
  */
-interface SessionBinding { disposers: (() => void)[]; scope?: Context; skills?: { revision: number; dispose: () => void }; subagent?: true }
+interface SessionBinding { disposers: (() => void)[]; scope?: Context; skills?: { revision: number; knowledge: string; dispose: () => void }; subagent?: true }
 
 /** The agent presets Executor Sessions and the main Session are created with, which the bundle's patch defines. */
 export const WORKER_PRESET = 'dsh-superagent-worker', ROUTER_PRESET = 'dsh-superagent-router'
@@ -419,8 +421,11 @@ export class Sessions {
       const version = this.promptFor(agent, context.signal !== undefined)
       const current = ticket && host.store.tickets.get(ticket.id)
       const composed = host.prompts.compose(version.config, master ? 'orchestrator' : 'worker', current ? host.environment(current) : undefined)
+      // The knowledge base's pointer follows the setting at each request; its notes stay on demand (docs/033).
+      const knowledge = host.store.settings().knowledge
       // A running idle analysis replaces this turn's delivery and handoff expectations with the read-only dossier (docs/025).
       return `[dsh-superagent prompt revision ${version.revision}]\n${composed}\n${current ? mandateInstructions(current.mandate) : ''}`
+        + (knowledge.enabled ? `\n${knowledgeInstructions(knowledge.server)}` : '')
         + (current && analysisRunning(current) ? `\n\n${analysisSection()}` : '')
     }, ...(master ? { complete: true } : {}) }))
     // A recreated skill scope (e.g. after the skills service restarts) starts empty, so reset `binding.skills` before rebinding.
@@ -439,7 +444,8 @@ export class Sessions {
       // DSH refuses a restriction that names a tool this profile does not register, so keep only the ones it has:
       // a Windows profile registers `pwsh`, a POSIX one `bash`. The Agent is the scope key its tools resolve in, so
       // asking its own view reads the preset's tools whatever module instance mounted them.
-      const keep = MASTER_TOOLS.filter(name => agent.ctx.tools.get(name, agent) !== undefined)
+      const keep = [...MASTER_TOOLS, ...knowledgeToolNames(host.store.settings(),
+        agent.ctx.tools.definitions(agent).map(tool => tool.name))].filter(name => agent.ctx.tools.get(name, agent) !== undefined)
       binding.disposers.push(agent.ctx.tools.restrict({ allow: keep }),
         agent.ctx.tools.guard(execution => noWait(execution, () => this.routed(agent))))
     } else {
@@ -462,7 +468,10 @@ export class Sessions {
   }
   /** The tools a worker Session resolves and the required ones it lacks, read through the Agent's own scope. */
   private workTools(agent: Agent): { allow: string[]; missing: string[] } {
-    const allow = WORK_TOOLS.filter(name => agent.ctx.tools.get(name, agent))
+    const visible = WORK_TOOLS.filter(name => agent.ctx.tools.get(name, agent))
+    // The knowledge base's MCP tools belong to the profile; a worker may see them only while the deployment enables it (docs/033).
+    const knowledge = knowledgeToolNames(this.host.store.settings(), agent.ctx.tools.definitions(agent).map(tool => tool.name))
+    const allow = [...visible, ...knowledge]
     return { allow, missing: missingWorkerTools(allow) }
   }
   /** Records the worker tool check on the `worker-tools` health entry, red while a required tool is missing. */
@@ -545,20 +554,24 @@ export class Sessions {
     void this.ensureModelSelectionPolicy(agent).catch(error => this.ctx.logger.warn(
       'dsh-superagent could not seed a subagent\'s model-selection policy: %s', String(error)))
   }
-  /** Register the skills of a prompt version in the agent's skill scope, in place of an earlier version's. */
+  /** Register the skills of a prompt version in the agent's skill scope, in place of an earlier version's; the knowledge
+   * setting is part of the key, so switching the team knowledge base on or off rebinds its skill without a save. */
   private bindSkills(binding: SessionBinding, version: PromptVersion): void {
     const { scope, skills: previous } = binding
-    if (!scope || previous?.revision === version.revision) return
+    const knowledge = this.host.store.settings().knowledge
+    const knowledgeState = `${knowledge.enabled ? 'on' : 'off'}:${knowledge.server}`
+    if (!scope || (previous?.revision === version.revision && previous.knowledge === knowledgeState)) return
     previous?.dispose()
     const disposers: (() => void)[] = []
     for (const [name, content] of this.host.prompts.skills(version.config)) {
       const bundled = name === 'feishu' || name === 'github' ? bundledSkills[name] : undefined
       const body = version.config.skills[name] ?? ''
-      const description = bundled?.description ?? (body.replace(/\s+/g, ' ').slice(0, 120) || 'Custom dsh-superagent operational skill.')
+      const text = name === 'knowledge' ? content : body
+      const description = bundled?.description ?? (text.replace(/\s+/g, ' ').slice(0, 120) || 'Custom dsh-superagent operational skill.')
       disposers.push(scope.skills.register({ name: `${SKILL_PREFIX}${name}`, description, content, source: 'runtime',
         ...(bundled ? { resourceBase: { kind: 'directory' as const, path: dirname(bundled.path) } } : {}) }))
     }
-    binding.skills = { revision: version.revision, dispose: () => { disposers.forEach(dispose => dispose()) } }
+    binding.skills = { revision: version.revision, knowledge: knowledgeState, dispose: () => { disposers.forEach(dispose => dispose()) } }
   }
   /** Return the current prompt version, updating the agent's skills and recording the revision in Store when bound to a model request. */
   private promptFor(agent: Agent, bind: boolean): PromptVersion {

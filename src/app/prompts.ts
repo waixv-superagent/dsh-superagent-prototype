@@ -2,7 +2,8 @@
 import { z } from 'zod'
 import { UserError, key } from '../core/index.ts'
 import { policyVersion, type Settings, type SettingsOrigin } from '../policy.ts'
-import { masterPrompt, workerPrompt, sharedPrompt, guides, mainAdmissionPolicy, handoffPolicy, teamDefaults, sourceSkills, cliNotes } from './context.ts'
+import { masterPrompt, workerPrompt, sharedPrompt, guides, mainAdmissionPolicy, handoffPolicy, teamDefaults, sourceSkills, cliNotes,
+  knowledgeSkill } from './context.ts'
 import { environmentLines, type Variable } from './execution-environment.ts'
 import { promptsNotice } from './notices.ts'
 import type { Sessions } from './sessions.ts'
@@ -18,7 +19,10 @@ const TEAM_HEADINGS: Record<TeamSection, string> = { communication: 'Communicati
 export const SKILL_NAME = /^[a-z][a-z0-9-]*$/
 /** Prefix prepended to skill names when registering them in DSH Sessions. */
 export const SKILL_PREFIX = 'dsh-superagent-'
-const SkillNameSchema = z.string().regex(SKILL_NAME).refine(name => !(Object.keys(sourceSkills) as string[]).includes(name),
+/** Built-in skill names a team skill may not take: the two Source skills and the knowledge skill (docs/033); read lazily, as
+ * `sourceSkills` is initialized after this module in the import cycle. */
+const reservedSkill = (name: string): boolean => name === 'knowledge' || Object.hasOwn(sourceSkills, name)
+const SkillNameSchema = z.string().regex(SKILL_NAME).refine(name => !reservedSkill(name),
   'This name belongs to a built-in skill')
 /** The built-in parts a team may override, by key: both roles' parts, the Source skills, and the generated parts' templates. */
 const PART_KEYS = ['runtime/shared', 'runtime/orchestrator', 'runtime/worker', 'runtime/subscriptions', 'runtime/replies',
@@ -117,7 +121,8 @@ export function promptParts(config: PromptConfig, role: Role, environment?: stri
 export function composePrompt(config: PromptConfig, role: Role, environment?: string, policy?: { key: string; text: string }): string {
   return promptParts(config, role, environment, policy).map(part => part.text).join('\n\n')
 }
-export function composeSkill(config: PromptConfig, name: string): string {
+export function composeSkill(config: PromptConfig, name: string, server = 'knowledge'): string {
+  if (name === 'knowledge') return knowledgeSkill.replaceAll('{server}', server)
   return name === 'feishu' || name === 'github' ? builtIn(config, `skill/${name}`) : config.skills[name] ?? ''
 }
 
@@ -142,9 +147,12 @@ export class Prompts {
   compose(config: PromptConfig, role: Role, variables = this.environment()): string {
     return composePrompt(config, role, environmentSection(config, variables), role === 'orchestrator' ? policySection(this.store.settings(), config) : undefined)
   }
-  /** Returns skills to register in every Session: built-in Source skills (`feishu` only when a Feishu bot is configured) followed by team skills. */
+  /** Returns skills to register in every Session: built-in Source skills (`feishu` only when a Feishu bot is configured), the
+   * knowledge skill while the team knowledge base is enabled, followed by team skills. */
   skills(config: PromptConfig): [string, string][] {
-    return [...this.feishu() ? ['feishu'] : [], 'github', ...Object.keys(config.skills)].map(name => [name, composeSkill(config, name)])
+    const knowledge = this.store.settings().knowledge
+    return [...this.feishu() ? ['feishu'] : [], 'github', ...knowledge.enabled ? ['knowledge'] : [], ...Object.keys(config.skills)]
+      .map(name => [name, composeSkill(config, name, knowledge.server)])
   }
   current(): PromptVersion {
     const revision = this.versions.revision()

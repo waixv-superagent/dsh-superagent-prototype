@@ -275,15 +275,30 @@ export const ExecutorConfigSchema = z.object({
   editor: EditorConfigSchema.default(() => EditorConfigSchema.parse({})),
 }).strict()
 export const SourceInstanceSchema = z.object({ enabled: z.boolean().default(true), config: z.record(z.string(), z.unknown()).default({}) }).strict()
+/**
+ * The team knowledge base (docs/033): a separate repository of Markdown notes, served by an MCP server the deployment
+ * configures. dsh-superagent stores no knowledge itself; this block only decides whether that server's tools reach the
+ * Sessions and which MCP server name they have.
+ */
+export const KnowledgeConfigSchema = z.object({
+  /** When false, no knowledge MCP tool, skill or prompt line reaches a Session. */
+  enabled: z.boolean().default(false)
+    .describe('When false, the knowledge MCP tools, the built-in knowledge skill and its prompt line are absent from every Session.'),
+  /** The MCP client's `serverName`; its tools are named `mcp__<server>__<tool>`. */
+  server: z.string().trim().regex(/^[A-Za-z0-9_-]{1,32}$/).default('knowledge')
+    .describe('The `serverName` of the MCP client entry that serves the knowledge base, as the profile configures it.'),
+}).strict()
+export type KnowledgeConfig = z.infer<typeof KnowledgeConfigSchema>
 export const SettingsSchema = z.object({
   paused: z.boolean().default(false),
   sources: z.record(z.string().regex(/^[a-z][a-z0-9-]*$/), SourceInstanceSchema).default({}),
   policy: PolicyConfigSchema.default(() => PolicyConfigSchema.parse({})),
   eval: EvalConfigSchema.default(() => EvalConfigSchema.parse({})),
   executor: ExecutorConfigSchema.default(() => ExecutorConfigSchema.parse({})),
+  knowledge: KnowledgeConfigSchema.default(() => KnowledgeConfigSchema.parse({})),
 }).strict()
 export type Settings = z.infer<typeof SettingsSchema>
-export type SettingsBlock = 'policy' | 'eval' | 'executor' | `source:${string}`
+export type SettingsBlock = 'policy' | 'eval' | 'executor' | 'knowledge' | `source:${string}`
 export type SettingsSave = SettingsBlock | 'pause'
 export type SettingsOrigin = 'panel' | 'tool' | 'sync' | 'command'
 

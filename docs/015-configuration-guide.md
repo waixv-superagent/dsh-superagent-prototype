@@ -4,7 +4,7 @@ This is the practical guide to changing a running deployment's configuration: wh
 
 ## 1. Where settings live
 
-Open the panel and choose **Superagent** in the sidebar, then **Settings** (设置). Its groups are **Sources** (来源), **Eval** (评估), **Execution** (执行), **Prompts** (提示词) and **Deployment** (部署).
+Open the panel and choose **Superagent** in the sidebar, then **Settings** (设置). Its groups are **Sources** (来源), **Eval** (评估), **Execution** (执行), **Knowledge** (知识库), **Prompts** (提示词) and **Deployment** (部署).
 
 - Each group keeps one unsaved draft; **Save** (保存) applies it. Navigate away and the panel keeps the draft.
 - A save that changes a field setup reads, namely the GitHub repository and agent CLI and the Feishu bot CLI, runs the account check and restarts dsh-superagent. Other fields apply without a restart.
@@ -130,7 +130,18 @@ Click a variable in the panel to insert it. **Check:** accept a Ticket and open 
 
 **Check:** **Full prompt** (完整提示词) shows the assembled text, and **History** (历史) lists versions. A save applies to the next model request without restarting; a Session that is mid-turn reads it on its next step. [004 Prompts](004-prompts.md) covers overrides and upgrades.
 
-## 8. What restarts and what does not
+## 8. Knowledge base: what the agent already learned
+
+**Settings → Knowledge** (知识库) has one switch and the MCP server name the tools come from; 033 describes the repository, the server and the notes themselves. The knowledge base is a **separate repository**, not a dsh-superagent store: people edit Markdown in Obsidian, and an MCP server the profile configures serves it.
+
+1. **MCP entry**: add the `@deepseek-ai/dsh-mcp-client` row to the profile's `cordis.patch.yml` (006 shows the profile file; the entry names `serverName`, e.g. `knowledge`, and the server command). Restart dsh-superagent so the host loads it. The row lives in the profile, not in this repository.
+2. **Switch**: open **Settings → Knowledge**, turn **Enable knowledge base access** on, set **MCP server name** to that `serverName`, and save. The block has its own revision and history.
+3. **What changes**: both roles see the server's `mcp__<server>__*` tools, the built-in `knowledge` skill and one prompt line pointing at them. With the switch off, none of the three appears; the notes stay where they are.
+4. **Who edits what**: a person edits the knowledge repository (Obsidian, Git), an agent saves a note through the MCP tool when a person teaches one. The panel shows no content: the repository's history is the review surface.
+
+**Check:** with the switch on, start a new Ticket and ask its worker to search the knowledge base; the call returns a note. Edit that note in Obsidian and ask again; the change is visible. Turn the switch off, start another Ticket, and confirm the `mcp__` tools and the skill are gone. Hovering a save in **Configuration history** shows the block's own revision.
+
+## 9. What restarts and what does not
 
 | Change | Takes effect | Restarts dsh-superagent |
 | --- | --- | --- |
@@ -139,12 +150,14 @@ Click a variable in the panel to insert it. **Check:** accept a Ticket and open 
 | Policy: rules, allowed lists, admission, accept mode | a new Policy version; open Tickets are notified | no |
 | Execution: directory root, prepare command, backend | new Tickets | no |
 | Execution: blocked commands, concurrency | worker command shims and the queue | no |
+| Knowledge base switch or server name | the next model request (skill and prompt line) and the next Session decoration (tools); no restart | no |
+| A new or changed MCP entry in the profile | after the host reloads the profile | yes |
 | Prompts | the next model request | no |
 | Deployment limits: saved prompt size, assessment context | immediately | no |
 
 `stateDir` is the exception: it lives only in the profile's `cordis.patch.yml`, and changing it needs the profile edit and a restart described in [006 Deployment](006-deployment.md#machine-configuration).
 
-## 9. First request, and what to check when nothing happens
+## 10. First request, and what to check when nothing happens
 
 | Source | The first request | What you should see |
 | --- | --- | --- |
@@ -161,6 +174,6 @@ When nothing happens, check in this order:
 
 The [Troubleshooting](006-deployment.md#troubleshooting) table in 006 maps setup problems and their fixes. A Source or Executor error that a restart does not clear appears in `scripts/dsh-superagent status` under `errors`.
 
-## 10. Where to read more
+## 11. Where to read more
 
 Read the numbered documents in order from [000 Philosophy](000-philosophy.md); this guide is a task-oriented companion to [006 Deployment](006-deployment.md). For one topic directly: [001 Domain](001-domain.md) for Threads, Triggers and Tickets; [002 Authorization](002-authorization.md) for the Policy and admission; [003 Execution](003-execution.md) for Assignments, worktrees and delivery; [009 p4 and Swarm delivery](009-p4-swarm.md) for the p4 backend; [010 The TAPD Source](010-tapd-source.md) for TAPD.
