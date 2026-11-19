@@ -10,6 +10,7 @@ import { Icon } from './controls.tsx'
 import DOCK_STYLES from './dock.css?raw'
 import { activeAgo, ticketMark, type Mark } from './marks.ts'
 import { useApiCall } from './panel-call.ts'
+import { useSurfaceLink } from './surface.ts'
 import { fullTime, type T } from './text.ts'
 
 const DOCK_STYLE_ID = 'dsh-superagent-dock'
@@ -72,6 +73,8 @@ export function ActiveTicketsDock({ t, openWorker, openTicket, openBoard }: Acti
   const call = useApiCall(t)
   // Transient failures keep the last answer (usePoll preserves it); with no answer at all the dock stays absent.
   const { data } = usePoll(() => call('GET overview'), [call], DOCK_POLL_MS)
+  // The frame's one bottom-strip entry also carries the client report and the app's handoff; both outlive its rows.
+  useSurfaceLink(t, openTicket)
   const tickets = data?.active ?? []
   if (!tickets.length) return null
   return <section className="dt-dock" aria-label={t('dockRegion')}>

@@ -30,6 +30,8 @@ import { TextCache } from './cache.ts'
 import { Effects } from './effects.ts'
 import { Prompts } from './prompts.ts'
 import { registerHttp, type HttpHost } from './http.ts'
+import { SurfaceState } from './surface.ts'
+import { focusDesktopApp } from './app-focus.ts'
 import type { LinkTarget } from './views/records.ts'
 import { candidateCard, repliedTo, sourceLink, type LinkHost } from './links.ts'
 import { eventNotice, followupNotice } from './notices.ts'
@@ -96,6 +98,8 @@ export class Runtime extends Service implements SourceHost {
   readonly editor: Editor
   /** The person's last keyboard or mouse input, so the scheduler can yield an editor they left open (docs/021). */
   readonly presence: EditorPresence
+  /** Which panel client the person is using (the desktop app or a browser), for ticket links from Feishu. */
+  readonly surfaces = new SurfaceState()
   readonly editorScheduler: EditorScheduler
   /** Owns the editor processes a lease starts and reclaims them when the lease lapses (docs/021). */
   readonly editorGatekeeper: EditorGatekeeper
@@ -271,7 +275,8 @@ export class Runtime extends Service implements SourceHost {
         agent: () => sessions.master(),
         deliver: (id, text, images) => sessions.prompt(masterId, id, text, 'steer', undefined, undefined, images),
         candidateCard: candidate => candidateCard(links, candidate) })
-      const outbox = this.outbox = new Outbox({ store, effects, sources, commands, state: sourceState(store), paused: () => this.paused() })
+      const outbox = this.outbox = new Outbox({ store, effects, sources, commands, state: sourceState(store),
+        panelBase: configured => this.surfaces.panelBase(configured), paused: () => this.paused() })
       const { assessor, executor } = this
       const policy = () => settingsPolicy(store.settings(), sources)
       const engine = this.engine = new Engine({ repo: store, scope: sources, policy, assessor, executor,
@@ -315,7 +320,7 @@ export class Runtime extends Service implements SourceHost {
             // conversation; a TAPD ticket has none of its own, so the Source's intervention chat carries it.
             if (ticket?.priorityAsk?.state === 'pending') {
               const id = ticket.id
-              void sendPriorityCard({ store, sources, commands, warn: message => ctx.logger.warn('dsh-superagent: %s', message) }, ticket)
+              void sendPriorityCard({ store, sources, commands, surfaces: this.surfaces, warn: message => ctx.logger.warn('dsh-superagent: %s', message) }, ticket)
                 .then(message => { if (message) runtime.engine.priorityCardSent(id, message) })
                 .catch(error => ctx.logger.warn('dsh-superagent: could not record the priority card of ticket %s: %s', id, String(error)))
             }
@@ -370,6 +375,7 @@ export class Runtime extends Service implements SourceHost {
         observe: () => { const load = this.executor.load(); this.idlePool.observe(load.running, load.max) },
         reproject: () => this.executor.reproject() })
       this.sourceDeps = { store, engine, outbox, commands, sources, get ready() { return runtime.ready },
+        panelBase: configured => runtime.surfaces.panelBase(configured),
         get deployment() { return setup.deployment }, configured: () => setup.configured(),
         get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => passes.receive(trigger),
         // A conversation control, such as the Feishu resume word, is a person's command; only a person the Policy lets
@@ -387,8 +393,8 @@ export class Runtime extends Service implements SourceHost {
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
         handbackRequest: (ticketId, request, reason) => runtime.handbackRequest(ticketId, request, reason),
-        notifyPlan: ticket => sendPlanCard({ store, sources, commands, warn: message => ctx.logger.warn('dsh-superagent: %s', message) }, ticket),
-        notifyGrill: ticket => sendGrillCard({ store, sources, commands, warn: message => ctx.logger.warn('dsh-superagent: %s', message) }, ticket),
+        notifyPlan: ticket => sendPlanCard({ store, sources, commands, surfaces: this.surfaces, warn: message => ctx.logger.warn('dsh-superagent: %s', message) }, ticket),
+        notifyGrill: ticket => sendGrillCard({ store, sources, commands, surfaces: this.surfaces, warn: message => ctx.logger.warn('dsh-superagent: %s', message) }, ticket),
         quietly: run => { this.quiet++; try { return run() } finally { this.quiet-- } } }
       this.ready = this.initialize()
     } catch (error) {
@@ -498,6 +504,10 @@ export class Runtime extends Service implements SourceHost {
     const runtime = this
     const { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, repro, build, health, machine, masterId, ready, sourceLinks, setup, passes, watchdog, billing, stallWatch, upgrade, appUpgrade } = this
     return { store, sources, prompts, sessions, settings, engine, outbox, executor, activity, editor, editorScheduler, repro, build, billing, upgrade, appUpgrade, health, machine, masterId, ready, sourceLinks, watchdog, stallWatch,
+      surfaces: this.surfaces,
+      // Best effort: the app registers `dsh`, and a launch of its focus URL reaches the running instance. A machine without
+      // the app, or a platform without a known launcher, still has the handoff page's own button.
+      focusApp: () => focusDesktopApp((program, args) => { void this.commands.run(program, args).catch(() => { /* the page stays the fallback */ }) }),
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),

@@ -7,7 +7,8 @@ function trigger(overrides: Partial<Trigger> = {}): Trigger {
   return { id: 't1', source: 'feishu', threads: [{ source: 'feishu', id: 'c1' }], actor: { source: 'feishu', id: 'u1' }, human: true,
     at: '2026-09-23T00:00:00Z', text: 'fix it', channel: { source: 'feishu', thread: 'c1', address: { chatId: 'oc_dm' } }, meta: { direct: true }, ...overrides }
 }
-function makeHost({ config = {} as Record<string, unknown>, source = trigger(), enabled = true, send = vi.fn(async (_args: string[]) => '{"data":{"message_id":"om_9"}}') } = {}) {
+function makeHost({ config = {} as Record<string, unknown>, source = trigger(), enabled = true, learned = '',
+  send = vi.fn(async (_args: string[]) => '{"data":{"message_id":"om_9"}}') } = {}) {
   const warn = vi.fn()
   const cards: Record<string, { ticketId: string; planAt: string; url?: string }> = {}
   const host: PlanHost = {
@@ -15,6 +16,7 @@ function makeHost({ config = {} as Record<string, unknown>, source = trigger(), 
       get: () => cards, set: (_key: string, value: typeof cards) => { Object.assign(cards, value) } } as never,
     sources: { instance: () => ({ enabled }) as never },
     commands: { lark: send } as never,
+    surfaces: { panelBase: (configured: string) => configured.trim() || learned },
     warn,
   }
   return { host, warn, send, cards }
@@ -66,6 +68,14 @@ describe('notifying a waiting plan', () => {
     const card = JSON.parse(args[args.indexOf('--content') + 1]!)
     expect(JSON.stringify(card)).toContain('先上 A 还是先上 B？')
     expect(JSON.stringify(card)).toContain('先上 B')
+  })
+  it('links the ticket through the browser origin the panel last reported when no address is configured', async () => {
+    const { host, send } = makeHost({ learned: 'https://10.104.0.40:9443' })
+    expect(await notifyPlan(host, { ...ticket, plan })).toBe('om_9')
+    const args = send.mock.calls[0]![0] as string[]
+    const card = JSON.parse(args[args.indexOf('--content') + 1]!)
+    expect(JSON.stringify(card)).toContain('https://10.104.0.40:9443/orchestrator/ticket/')
+    expect(JSON.stringify(card)).toContain('lk_jump_to_browser=true')
   })
   it('replies in the ticket topic when its replies moved there', async () => {
     const { host, send } = makeHost()

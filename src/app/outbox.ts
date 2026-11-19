@@ -14,6 +14,8 @@ export interface OutboxHost {
   readonly commands: Commands
   /** The Source's own records, which a Channel settles with the reply it sent, such as a Feishu receipt reaction. */
   readonly state: ChannelHost['state']
+  /** The panel address a message may link: configured, or the browser origin the panel last reported. */
+  panelBase?(configured: string): string
   paused(): boolean
 }
 
@@ -54,7 +56,7 @@ export class Outbox implements OutboxPort {
     if (!sources.channelAllowed(receipt.channel)) { store.receipts.settle(receipt, 'channelIgnored'); return }
     // A permanently unreachable target (such as a recalled message or deleted Issue) settles as `channelGone` so its receipt prevents retries.
     // A CLI that refused its arguments refuses the same message again, so the message waits for a fix instead of a timer.
-    const result = await sources.send(receipt, { commands, state }).catch((error: unknown) => {
+    const result = await sources.send(receipt, { commands, state, panelBase: this.host.panelBase }).catch((error: unknown) => {
       throw error instanceof CliError && error.type === 'validation' ? new Rejected(error.message) : error
     })
     if (result === 'waiting') throw new Later('The Source is not installed')

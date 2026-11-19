@@ -2,7 +2,7 @@
 import type { ChannelRef, Ticket, ThreadRef } from '../core/index.ts'
 import type { SourceContext } from './host.ts'
 import { feishuPostContent, feishuTopicLink } from './feishu-channel.ts'
-import { ticketPanelLink } from './feishu-sent.ts'
+import { ticketOpenLink } from './feishu-sent.ts'
 import { expectTopicLink, settleTopicLink, topicLinkLine } from './feishu-topic-link.ts'
 import { SOURCE, feishuChannel } from './feishu-trigger.ts'
 import type { FeishuConfig } from './feishu.ts'
@@ -37,8 +37,8 @@ export async function openFeishuTopic(ctx: SourceContext, ticket: Ticket, receip
   const topicChat = config?.topicChat
   if (!topicChat || ticket.replyChannel) return
   const trigger = ctx.triggers.get(ticket.origin.triggerId)
-  const panel = config?.panelUrl?.trim()
-  const requestLink = trigger?.url ?? (panel ? ticketPanelLink(panel, ticket.id) : undefined)
+  const panel = ctx.panelBase(config?.panelUrl ?? '')
+  const requestLink = trigger?.url ?? (panel ? ticketOpenLink(panel, ticket.id) : undefined)
   // The receipt is queued before this runs, so registering here is what lets it wait instead of posting a second notice.
   const carried = receipt?.source === SOURCE
   if (carried) expectTopicLink(ticket.id)

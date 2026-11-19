@@ -67,19 +67,19 @@ describe('p4 execution variables', () => {
   })
   it('names the task center workspace and its client for a ticket pinned there', () => {
     const settings = settingsWith({ backend: 'p4', p4: { depot: '//depot/mainline', clientTemplate: 'dsh-<name>' },
-      workspaces: [{ id: 'sun', directory: 'E:/sun_mainline', p4Client: 'wanghuaiyang_sun_mainline' }] })
+      workspaces: [{ id: 'sun', directory: 'E:/workspace', p4Client: 'agent_workspace' }] })
     const variables = ticketEnvironment({ deployment: testDeployment(), sources: noSources, settings, stateDir: '/state',
-      ticket: { id: 't1', execution: { name: 'fix-thing', directory: 'E:/sun_mainline', assignment: '', workspace: 'sun',
+      ticket: { id: 't1', execution: { name: 'fix-thing', directory: 'E:/workspace', assignment: '', workspace: 'sun',
         lease: [], backend: 'p4', target: '//depot/mainline' } } as never })
-    expect(valueOf(variables, 'DSH_SUPERAGENT_DIR')).toBe('E:/sun_mainline')
-    expect(valueOf(variables, 'DSH_SUPERAGENT_P4_CLIENT')).toBe('wanghuaiyang_sun_mainline')
+    expect(valueOf(variables, 'DSH_SUPERAGENT_DIR')).toBe('E:/workspace')
+    expect(valueOf(variables, 'DSH_SUPERAGENT_P4_CLIENT')).toBe('agent_workspace')
     expect(valueOf(variables, 'DSH_SUPERAGENT_LEASE')).toBe('')
   })
   it('keeps the ticket client of a workspace that configures none, from the template and its id', () => {
     const settings = settingsWith({ backend: 'p4', p4: { clientTemplate: 'dsh-<name>' },
-      workspaces: [{ id: 'sun', directory: 'E:/sun_mainline' }] })
+      workspaces: [{ id: 'sun', directory: 'E:/workspace' }] })
     const variables = ticketEnvironment({ deployment: testDeployment(), sources: noSources, settings,
-      ticket: { id: 't1', execution: { name: 'fix-thing', directory: 'E:/sun_mainline', assignment: '', workspace: 'sun' } } as never })
+      ticket: { id: 't1', execution: { name: 'fix-thing', directory: 'E:/workspace', assignment: '', workspace: 'sun' } } as never })
     expect(valueOf(variables, 'DSH_SUPERAGENT_P4_CLIENT')).toBe('dsh-sun')
   })
   it('keeps the per-ticket client and directory of a ticket with no workspace', () => {

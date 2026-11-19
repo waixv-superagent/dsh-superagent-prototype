@@ -220,7 +220,7 @@ Its `context`, `read` and `decide` methods serve `orchestrator_eval`, `orchestra
 
 ### Settings
 
-`Settings` (`src/app/settings.ts`) reads and writes revisioned settings blocks. `current` and `view` read them; `save(block, value, revision, origin)` validates a save; `pause(paused, origin)` changes the separate `paused` setting.
+`Settings` (`src/app/settings.ts`) reads and writes revisioned settings blocks. `current` and `view` read them; `save(block, value, revision, origin)` validates a save; `pause(paused, origin)` changes the separate `paused` setting. The blocks are `policy`, `eval`, `executor`, `knowledge`, `pause` and each `source:<id>`; `knowledge` holds only the switch and the MCP server name (docs/033).
 
 Every save declares its origin: `panel`, `tool` or `sync`. Only `panel` can change the execution environment or fields listed in `SETUP_FIELDS` (`src/deployment.ts`).
 
@@ -228,7 +228,7 @@ A Policy-version change calculates `policyEffects`, records which Tickets were n
 
 ### Prompts
 
-`Prompts` (`src/app/prompts.ts`) stores configurations as `Versions`. `current`, `version` and `history` read them; `validate`, `preview` and `save(value, baseRevision, source)` check and save them. `compose` and `skills` build Session text.
+`Prompts` (`src/app/prompts.ts`) stores configurations as `Versions`. `current`, `version` and `history` read them; `validate`, `preview` and `save(value, baseRevision, source)` check and save them. `compose` and `skills` build Session text. `skills` also registers the built-in `knowledge` skill while the team knowledge base is enabled; its text is packaged, its `{server}` placeholder is filled from the block, and its name is reserved from team skills.
 
 `builtInParts` lists override keys, roles, default text and required template placeholders. Each override stores team `text` and a `base`: the `builtInBase` key of its original default. Saves preserve that default under `KV.prompts.builtIn`. `defaultChanged` then reports changed defaults, their old text when available, and removed parts.
 
@@ -240,7 +240,7 @@ Validation inherits an omitted base from the saved override, drops removed parts
 
 `prompt` delivers once per request id. `relay` and `notify` enqueue main-Session messages handled by the `relay` and `notice` effects. `src/app/notices.ts` defines their content; `delivery` checks whether a message arrived.
 
-Each model request binds the Session to the current prompt revision. The revisions it used are stored durably: `promptVersion` identifies the active one and `mayRead` restricts which versions a worker can inspect. Registrations are tracked in one map per agent.
+Each model request binds the Session to the current prompt revision. The revisions it used are stored durably: `promptVersion` identifies the active one and `mayRead` restricts which versions a worker can inspect. Registrations are tracked in one map per agent. While the team knowledge base is enabled, a worker's tool view and the main Session's allow-list also admit its MCP server's `mcp__<server>__*` tools, and its one-line pointer follows the setting at each request (docs/033).
 
 `status` and `promptVersion` serve prompt pages. Saves go through `Prompts.save` and notify the main Session. `modelRetry` exposes model-budget retry state.
 
@@ -362,6 +362,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/settings-history.ts` | `policyHistory`: each saved settings revision with what it changed from the one before |
 | `src/app/prompts.ts` | Prompts, `builtInParts`, the built-in parts a team may override, and `promptParts`, the order of a role's prompt sections |
 | `src/app/context.ts` | The built-in prompt text, read from `prompts/`, and the transcript entries Sessions read |
+| `src/app/knowledge.ts` | The team knowledge base's model-facing gate (docs/033): the MCP server's tool prefix and the visible MCP tools a Session may use while the base is enabled. The notes, index and search live in a separate repository behind an MCP server; this module stores nothing |
 | `src/app/skill-files.ts` | Packaged text: `promptFile`, which joins a file's one-sentence lines into paragraphs, and the bundled skills |
 | `src/app/sessions.ts` | Sessions |
 | `src/app/session-recovery.ts` | Session store recovery: the bounded reopen attempts for a Session DSH cannot open, `SessionUnavailable` when it stays unreadable, and the backoff between attempts |
@@ -408,7 +409,9 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/tools/main.ts` | The main Session's tools |
 | `src/app/tools/executor.ts` | An Executor Session's tools, including the read-only pipeline check that keeps the Jenkins token on the host |
 | `src/app/tools/sentry.ts` | The read-only Sentry tool of an Executor Session: issue search by text, stack or event GUID, and one issue or event with its stack, crash GUID and tags; the token stays in the host |
-| `src/app/http.ts` | The `/orchestrator/api` routes: the same-origin check, request limits and one status per kind of failure; a Ticket page carries the local cases its verification package names |
+| `src/app/http.ts` | The `/orchestrator/api` routes: the same-origin check, request limits and one status per kind of failure; a Ticket page carries the local cases its verification package names; also the plain `/orchestrator/ticket/<id>` a bot message links to, which opens the browser page or hands the Ticket to the desktop app |
+| `src/app/surface.ts` | Which panel client the person is using (the desktop app or a browser) from the reports each page sends, the origin each client was last used at (the fallback panel address a message links), and the one Ticket a handoff leaves for the app's panel, both with their expiry |
+| `src/app/app-focus.ts` | Bringing the desktop app forward for a handoff: the fixed `dsh://open` protocol launch per platform, and whether one was attempted |
 | `src/app/api.ts` | `Api`, every route with its parameters, query, body and response, and the filters of the lists; it imports only types, so the panel bundles it |
 | `src/app/views/text.ts` | The two forms of a view's text: `preview`, plain text on one line, and `markdown` without HTML; `plain` and `readable` |
 | `src/app/views/records.ts` | The rows the views share: Triggers, Tickets, Threads, Decisions and Channel links, and `ownersOf`, the owners of follow-ups as one request reads them |
@@ -444,11 +447,11 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/feishu-control.ts` | Pauses or resumes processing from a Feishu conversation (`挂起`, `恢复`): it runs before the Engine, so the resume word gets through while paused, answers in the same thread, and records no Trigger; only a person on the Policy's allowed list may switch processing |
 | `src/sources/feishu-loops.ts` | The Feishu loops: the message and card-action event consumers, history recovery, chat names and polling of subscribed topics |
 | `src/sources/feishu-channel.ts` | The Feishu Channel: topic replies, `sent` or `gone`, and a ticket's acceptance receipt carrying the link of the topic opened for it |
-| `src/sources/feishu-sent.ts` | The ticket link a bot message ends with (`?ticket=` on the configured panel address), the record of each bot message sent for a ticket (`KV.feishu.sent`), and the Feishu ids a pasted text names |
+| `src/sources/feishu-sent.ts` | The ticket link a bot message ends with (`/orchestrator/ticket/<id>` on the configured panel address, which picks the browser or the desktop app), the record of each bot message sent for a ticket (`KV.feishu.sent`), and the Feishu ids a pasted text names |
 | `src/sources/feishu-topic.ts` | Opens a Feishu topic for every accepted ticket, not only a Feishu one: the root message carries the ticket brief, short id and the request's link or the panel page, the ticket's replies move there (`Ticket.replyChannel`, `Tickets.retarget`), and a Feishu origin thread's acceptance receipt carries the topic's described link, the ticket brief as the label instead of the long AppLink |
 | `src/sources/feishu-topic-link.ts` | The one-message join between an accept receipt and the topic it opens: the opener registers before its first Feishu call, the receipt waits for the link and folds it in, and an opener whose receipt gave up waiting posts the notice itself |
 | `src/sources/feishu-card.ts` | Feishu interactive cards: the decision-brief P1 plan card, the direction form, the recorded answer, the text fallback and `sendCard` to a chat or into a thread |
-| `src/sources/feishu-text.ts` | The text both a Feishu reply and a card share: the cmd-safe rewrite and the post-content JSON |
+| `src/sources/feishu-text.ts` | The text both a Feishu reply and a card share: the cmd-safe rewrite, the post-content JSON and the switch that opens a link in the system browser |
 | `src/sources/feishu-cards.ts` | `card.action.trigger` handling: a button or form answer decides a waiting plan without a Trigger or Eval, then replaces the card in place |
 | `src/sources/feishu-read.ts` | The `feishu/` reads of a Trigger's message, its root, parent and topic, and `feishuThreadContext`, which gives them to assessments with their images |
 | `src/sources/admission-context.ts` | The bounded window an assessment starts from: the first pages of a Trigger's Thread, read through its kind, and the messages around the Trigger |
@@ -476,6 +479,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/repro.tsx` | The 复现用例 card of the editor view (docs/024): the local cases with their problems and latest runs, run and stop, the live output of the run in flight, each run's output on demand, report links, and the refusal while an agent or a host job holds the editor |
 | `src/client/settings.tsx` | The Settings tab: the group navigation and the group on screen |
 | `src/client/settings-kit.tsx` | The building blocks of settings blocks: the settings the stage groups share, `useBlockDraft`, the fields, among them a Source kind's, and the history of saves |
+| `src/client/knowledge.tsx` | The Knowledge settings group (docs/033): the switch that lets the knowledge base's MCP tools reach Sessions, the MCP server name, and the block's own save bar and history |
 | `src/client/prompts.tsx` | The Prompts settings: the page owns the view it read and its editor the draft, and the Edit, Full prompt and History tabs render from them; a built-in part's editor shows a changed default and keeps or drops the override |
 | `src/client/prompt-config.ts` | The prompt configuration by section, by the team sections, skill names, built-in parts (`part/<key>`, with `withOverride`) and part headings the prompt views give, and the line diff of the full prompt, as pure functions |
 | `src/client/deployment.tsx` | The Deployment settings, also shown in DeepSeek Harness's Plugin Manager |
@@ -483,7 +487,9 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/controls.tsx` | Local copies of DeepSeek Harness's controls, which follow its markup, keyboard behaviour and design tokens, since the bundle does not import `@deepseek-ai/dsh-client-ui-primitives`; they read no context |
 | `src/client/widgets.tsx` | The small components the pages share, which read the panel's context: sections, page heads, load states, times, links, confirmed actions, the setup check and Markdown |
 | `src/client/upgrade.tsx` | The update badge at the sidebar foot beside Settings and its dialog: the commits the installed build lacks, the prepare button that builds without touching the running service, the restart a prepared build waits for, and the steps of a running or the last update |
-| `src/client/dock.tsx` | The active-Tickets dock in DSH's frame-wide bottom strip: the board's six recently active Tickets as one row each, with status, a loud pill for a Ticket waiting on a person and the relative age; it hides with no active Ticket |
+| `src/client/dock.tsx` | The active-Tickets dock in DSH's frame-wide bottom strip: the board's six recently active Tickets as one row each, with status, a loud pill for a Ticket waiting on a person and the relative age; it hides with no active Ticket, and its mounted state also carries the client report and the app's handoff poll |
+| `src/client/surface.ts` | The frame-wide client report (app or browser, focused or hidden) and, in the desktop shell, the poll that takes the Ticket a Feishu link handed over and moves the panel to it |
+| `src/client/navigate.ts` | The one slot through which a control outside the panel moves the mounted panel, and the fallback of opening the panel at a stored route |
 | `src/client/rows.tsx` | The rows the pages share: a Ticket, a Thread and a Decision, a Thread's chip, and the folding of runs of automated messages |
 | `src/client/markdown.ts` | The Markdown subset of reports and questions, and the bare addresses in messages, as blocks and inline parts |
 | `src/client/text.ts` | Copy by key and the wording of domain values, reasons, senders and times |
@@ -542,6 +548,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/sentry.spec.ts` | The read-only Sentry tool: its environment configuration, the issue query it builds from text, stack and window, event-id and short-id resolution, the stack and crash facts it shapes, and its refusals |
 | `tests/runtime-concurrency.spec.ts` | Work that overlaps: Triggers during a pass, Tickets that change during deliveries and launches |
 | `tests/http.spec.ts` | The same-origin and loopback checks, the status of each kind of failure, the body limit, path parameters and queries |
+| `tests/surface.spec.ts` | The panel's client reports and the smart ticket link: the newest focused or visible client wins, a hidden one does not, both expire, a browser gets the `?ticket=` page, the app gets the handoff page and one handoff only, and a broken or unknown Ticket is refused |
+| `tests/app-focus.spec.ts` | Bringing the app forward: the fixed protocol launch per platform, the platform without one, and a launch that fails |
 | `tests/settings.spec.ts` | Settings saves that race a model or account check, a Policy sync that a save outran, and the refusals of the pause, a sync and a block |
 | `tests/views.spec.ts` | What the management views derive from the Store, such as the Thread a dropped message belongs to and the question link the answer button opens |
 | `tests/editor-schedule.spec.ts` | The editor schedule: grants, queueing, heartbeats and expiry, a person's editor and claim outranking agents, front and cancel, batched builds per workspace, command placeholders and summaries, ue-mcp bridge files, the auto yield of an absent person's editor or claim and its exemptions, and the scheduler running a batched job and recovering an interrupted one |
@@ -559,13 +567,15 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/migration.spec.ts` | The schema 11 migration: every stored record in its current shape, and the refusal of older schemas |
 | `tests/store.spec.ts` | Repositories and their working sets, in SQLite as in memory, the kv area, with every key of `KV` spelled only in `src/kv.ts` and the migration, settings history and queries |
 | `tests/prompts.spec.ts` | Prompt validation, assembly and versions |
+| `tests/knowledge.spec.ts` | The team knowledge base's settings block and validation, the MCP-tool prefix gate, the built-in skill with its server substitution, the prompt line and the reserved skill name (docs/033) |
+| `tests/panel-knowledge.spec.tsx` | The Knowledge settings group: its navigation entry, switch, MCP server field, save block and save bar |
 | `tests/cards.spec.ts` | The rules the built-in text must state, file by file |
 | `tests/model-surface.spec.ts` | Everything models read: tools, prompts, skills and inputs, checked against the tool schemas, the execution environment and the glossary, within a size budget per role |
 | `tests/feishu-card.spec.ts` | The P1 plan card's decision brief, folded evidence and buttons, the direction form and recorded answer, its text fallback, and sending it with an idempotency key |
 | `tests/feishu-cards.spec.ts` | A card callback decides its own plan through the button or form, answers a stale card, and ignores anyone but the ticket actor |
 | `tests/feishu-channel.spec.ts` | The outbound reply payload: Markdown as one post content JSON with no literal newline, the reply's thread and idempotency arguments, the acceptance receipt carrying the topic link it waited for, the question card's own message link, and the client scheme that skips the browser landing page |
 | `tests/feishu-links.spec.ts` | Message links versus chat links and topic links: a Thread keeping the opening message's AppLink, asking Feishu for its root, falling back to the chat, opening the topic at its root message while cards keep their position, and the pass that fills cards and Threads stored before their message link was known |
-| `tests/feishu-trace.spec.ts` | Finding a ticket from Feishu: the ticket link on replies and cards outside the word limit, the record of the bot's own message, and the search from a bot message id, a person's message, a direct-chat link, a topic link or a chat id |
+| `tests/feishu-trace.spec.ts` | Finding a ticket from Feishu: the ticket link on replies and cards outside the word limit, including the whole-card link of a plan card, the record of the bot's own message, and the search from a bot message id, a person's message, a direct-chat link, a topic link or a chat id |
 | `tests/feishu-topic.spec.ts` | Opening a ticket's Feishu topic: the root brief and link, the retargeted reply channel and thread, the topic link a receipt takes instead of a notice, a receipt that gave up waiting, the described link label, a failed link lookup rebuilt from the thread id, idempotence, a ticket from another Source with the panel link, and the config requiring a receive-all topic chat |
 | `tests/plan-host.spec.ts` | Where a plan card goes: the ticket's topic reply channel, the configured private chat, the direct chat a ticket started in, the fixed topic chat, and what a send failure reports |
 | `tests/priority.spec.ts` | Priority and idle: level parsing, source defaults and stickiness, P0 only from a person, TAPD's suggestion, the five-signal judgement and its windows, the idle scheduler's hold/admit answers, its concurrency counting only the launches that left the queue and its daily budget, the priority card and its button parsing, taking back the idle records of work that never started, and the Executor holding a pending-question launch without failing it |
@@ -577,6 +587,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/client.spec.tsx`, `tests/navigation.spec.ts`, `tests/controls.spec.tsx` | The client plugin's registration and polling, Session navigation and route memory, the `?view=board` deep link, the local controls, the child Session model chip (the route from the model-selection projection, and nothing on a root Session), and the panel's imports, which have no cycle |
 | `tests/client-diff.spec.tsx` | The panel's plan diff: the file index and line numbers, token-level marks, the inline/side-by-side switch and the layout it remembers, and a binary file with no hunks |
 | `tests/client-links.spec.tsx` | The panel's external links: a Feishu AppLink becomes the client scheme in a browser and keeps its https form inside the DSH desktop shell, whose window opens http(s) in the browser and drops any other scheme |
+| `tests/client-surface.spec.tsx` | The frame-wide client report and the app's handoff poll: a browser reports itself as web and never asks for a handoff, the desktop shell reports app and moves the panel to the Ticket the host hands over |
 | `tests/panel-dock.spec.tsx` | The active-Tickets dock: its rows from the board's active list, its absence without one, and where each control goes |
 | `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx` | Each page of the panel, against a fake management API answered by route |
 | `tests/panel-navigation.spec.tsx` | Panel navigation through browser history: Back/Forward, the mouse side buttons and the page Back button on the same entries, the parent menu behind a page opened without history, filters replacing their entry, each page's entrance, and a crashed page that recovers in place |
@@ -664,7 +675,7 @@ The main Session has 14 application tools:
 
 `orchestrator_route` accepts 1–20 decisions in order. Each accept, chat, attach, stop or ignore runs as a separate Engine command. It also permits chatting to or ignoring an inferred candidate directly from its card; a chat item needs `reply`, and takes `escalation` (with an optional `worktree_name`) when the conversation established something that deserves its own ticket. `orchestrator_ticket_note` sends a fact as context, not authority.
 
-Settings saves select `policy`, `eval`, `executor`, `pause`, or `source`; the last also names its Source id. A prompt save with `preview: true` composes text without saving.
+Settings saves select `policy`, `eval`, `executor`, `knowledge`, `pause`, or `source`; the last also names its Source id. A prompt save with `preview: true` composes text without saving.
 
 The main Session also has DeepSeek Harness's `skill`, `bash`, `read`, `read_image`, `job_output`, `job_list` and `job_kill`. Avoiding code reads is a prompt rule, not a tool restriction.
 
@@ -742,6 +753,10 @@ Every id a page shows reads through one of these, so a Session walks from one ob
 A text page has 4,000 UTF-16 code units by default and 8,000 at most, a list 20 items by default and 50 at most.
 
 The names `event/`, `task/` and `observation/` of earlier versions still resolve.
+
+### Knowledge base
+
+While `knowledge.enabled` is true, both roles see the MCP server's tools as `mcp__<server>__*` — registered by `@deepseek-ai/dsh-mcp-client` from the deployment's profile, not by this plugin — the built-in `dsh-superagent-knowledge` skill, and one prompt line naming the prefix. The switch decides all three; the notes themselves are never injected, and an agent reads them through the MCP tools. 033 Knowledge base describes the repository, the server and the setup.
 
 ### Messages delivered to Sessions
 

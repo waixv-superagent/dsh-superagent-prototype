@@ -35,7 +35,7 @@ Read the numbered documents in order; each builds only on the ones before it. Th
 - [008 Cookbook](docs/008-cookbook.md): adding a Source
 - [009 p4 and Swarm delivery](docs/009-p4-swarm.md): the Perforce backend, shelved changelists and reviews
 
-Practical companions: [015 Configuration guide](docs/015-configuration-guide.md) and [032 Sentry search](docs/032-sentry-search.md), the read-only Sentry tool an Executor Session can use.
+Practical companions: [015 Configuration guide](docs/015-configuration-guide.md), [032 Sentry search](docs/032-sentry-search.md), the read-only Sentry tool an Executor Session can use, and [033 Knowledge base](docs/033-knowledge.md), the team knowledge base's MCP integration and switch.
 
 ## Development
 

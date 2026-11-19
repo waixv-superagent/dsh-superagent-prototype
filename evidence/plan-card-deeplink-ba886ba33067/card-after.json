@@ -1,0 +1,202 @@
+{
+  "schema": "2.0",
+  "config": {
+    "update_multi": true,
+    "width_mode": "default",
+    "summary": {
+      "content": "待确认：合成验证：点这张方案卡，工单页应该在哪里打开？"
+    }
+  },
+  "header": {
+    "title": {
+      "tag": "plain_text",
+      "content": "待确认 · 方案"
+    },
+    "subtitle": {
+      "tag": "plain_text",
+      "content": "合成验证：方案卡跳转（假工单）"
+    },
+    "template": "blue"
+  },
+  "body": {
+    "direction": "vertical",
+    "padding": "12px 16px 16px 16px",
+    "vertical_spacing": "12px",
+    "elements": [
+      {
+        "tag": "markdown",
+        "content": "**合成验证：点这张方案卡，工单页应该在哪里打开？**",
+        "text_size": "heading"
+      },
+      {
+        "tag": "markdown",
+        "content": "**现象**\n方案卡上的工单页链接没有出现（合成验证内容）。"
+      },
+      {
+        "tag": "markdown",
+        "content": "**修复锚点**\nsrc/sources/feishu-sent.ts 与 src/app/http.ts，2 个文件"
+      },
+      {
+        "tag": "markdown",
+        "content": "**影响面**\n只影响机器人消息里的工单链接",
+        "text_size": "notation"
+      },
+      {
+        "tag": "markdown",
+        "content": "**预算**\n0 次编译",
+        "text_size": "notation"
+      },
+      {
+        "tag": "markdown",
+        "content": "**代码改动 · 1 个文件 · +2 −1**\n对比基线：origin/main\n• src/sources/feishu-sent.ts +2 −1"
+      },
+      {
+        "tag": "markdown",
+        "content": "[在面板看完整 diff（内联 / 并排）](https://10.104.0.40:9443/orchestrator/ticket/ffffffffffffffffffffffffffffffff?lk_jump_to_browser=true&lk_mobile_jump_to_browser=true)",
+        "text_size": "notation"
+      },
+      {
+        "tag": "collapsible_panel",
+        "expanded": false,
+        "header": {
+          "title": {
+            "tag": "plain_text",
+            "content": "证据 · 4 项"
+          },
+          "icon": {
+            "tag": "standard_icon",
+            "token": "down-small-ccm_outlined",
+            "size": "16px 16px"
+          },
+          "icon_position": "right",
+          "icon_expanded_angle": -180
+        },
+        "border": {
+          "color": "grey",
+          "corner_radius": "5px"
+        },
+        "vertical_spacing": "8px",
+        "padding": "8px 8px 8px 8px",
+        "elements": [
+          {
+            "tag": "markdown",
+            "content": "**代码线**\nsrc/sources/feishu-sent.ts:11"
+          },
+          {
+            "tag": "markdown",
+            "content": "**资产线**\n无"
+          },
+          {
+            "tag": "markdown",
+            "content": "**配置线**\n飞书 Source 的面板地址为空"
+          },
+          {
+            "tag": "markdown",
+            "content": "**验证方案**\n点方案卡 → 工单页"
+          }
+        ]
+      },
+      {
+        "tag": "hr",
+        "margin": "0px 0px 0px 0px"
+      },
+      {
+        "tag": "column_set",
+        "flex_mode": "trisect",
+        "horizontal_spacing": "8px",
+        "columns": [
+          {
+            "tag": "column",
+            "elements": [
+              {
+                "tag": "button",
+                "text": {
+                  "tag": "plain_text",
+                  "content": "通过"
+                },
+                "type": "primary_filled",
+                "width": "fill",
+                "behaviors": [
+                  {
+                    "type": "callback",
+                    "value": {
+                      "v": 1,
+                      "decision": "approve",
+                      "choice": 0
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "tag": "column",
+            "elements": [
+              {
+                "tag": "button",
+                "text": {
+                  "tag": "plain_text",
+                  "content": "改一下"
+                },
+                "type": "default",
+                "width": "fill",
+                "behaviors": [
+                  {
+                    "type": "callback",
+                    "value": {
+                      "v": 1,
+                      "decision": "revise",
+                      "choice": 1
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "tag": "column",
+            "elements": [
+              {
+                "tag": "button",
+                "text": {
+                  "tag": "plain_text",
+                  "content": "停"
+                },
+                "type": "danger",
+                "width": "fill",
+                "behaviors": [
+                  {
+                    "type": "callback",
+                    "value": {
+                      "v": 1,
+                      "decision": "stop",
+                      "choice": 2
+                    }
+                  }
+                ],
+                "confirm": {
+                  "title": {
+                    "tag": "plain_text",
+                    "content": "停止工单？"
+                  },
+                  "text": {
+                    "tag": "plain_text",
+                    "content": "停止后这个工单不再继续，需要重新接单。"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "通过后开始实现，交付前再请你确认，不会直接 submit\n[工单 ffffffff ↗](https://10.104.0.40:9443/orchestrator/ticket/ffffffffffffffffffffffffffffffff?lk_jump_to_browser=true&lk_mobile_jump_to_browser=true)",
+        "text_size": "notation"
+      }
+    ]
+  },
+  "card_link": {
+    "url": "https://10.104.0.40:9443/orchestrator/ticket/ffffffffffffffffffffffffffffffff?lk_jump_to_browser=true&lk_mobile_jump_to_browser=true"
+  }
+}

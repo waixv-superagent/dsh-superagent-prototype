@@ -55,6 +55,7 @@ import { executorLoad, runningP0, ticketDetail, ticketList, ticketSearch } from 
 import { ticketGraph } from './views/graph.ts'
 import { reproPage } from './views/repro.ts'
 import { ticketRepro } from './views/ticket-repro.ts'
+import type { SurfaceState } from './surface.ts'
 
 export interface HttpHost {
   readonly store: Store
@@ -96,6 +97,10 @@ export interface HttpHost {
   readonly receive: (trigger: Trigger) => ReceiveResult
   /** Whether the Policy admits a Trigger now, so a panel action can refuse before it records one that would only be ignored. */
   readonly admissible: (trigger: Trigger) => boolean
+  /** Which client the person is using, and the Ticket an app handoff asked the app's panel to show. */
+  readonly surfaces: Pick<SurfaceState, 'touch' | 'active' | 'open' | 'take'>
+  /** Brings the desktop app forward for a handoff; false when this platform has no known way to. */
+  readonly focusApp: () => boolean
   /** Publishes the display name a Source gives one of its Threads, such as the first line of a Web panel request. */
   readonly describeThread: (thread: ThreadRef, description: ThreadDescription) => void
   /** Resolved deployment; throws if read while waiting for setup (`!configured()`). */
@@ -245,8 +250,12 @@ const DecisionsQuery = z.object({ kind: z.string().default(''), window: z.litera
 const count = z.coerce.number().int().nonnegative()
 const PromptsQuery = z.object({ revision: count.optional(), offset: count.default(0) })
 const SourceBlock = z.templateLiteral(['source:', z.string().regex(/^[a-z][a-z0-9-]*$/)])
-const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), SourceBlock])
+const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor', 'knowledge']), SourceBlock])
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
+/** One panel page's report of the client it runs in: the Electron app or a browser, focused and visible or not, and where. */
+const SurfaceRequest = z.object({ surface: z.enum(['app', 'web']), focused: z.boolean(), visible: z.boolean(),
+  origin: z.string().trim().max(300).optional() }).strict()
+const AppOpenQuery = z.object({ surface: z.enum(['app', 'web']).catch('web') })
 const PlanRequest = z.object({ decision: z.enum(['approve', 'revise', 'stop']), note: z.string().trim().max(2000).optional() })
 /** A person's move of a ticket back a phase from its page: only the earlier phases, with why in one line (docs/031). */
 const PhaseRequest = z.object({ phase: z.enum(['plan', 'implement']), note: z.string().trim().max(500).optional() }).strict()
@@ -301,6 +310,14 @@ function routes(runtime: HttpHost): Routes {
   const promptBody = (input: { body: (maxBytes?: number) => Promise<unknown> }) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096)
   return {
     'GET state': () => stateView(runtime),
+    // A panel page tells the host which client it is and whether its window is in use, so a ticket link can open there.
+    'POST surface': async ({ body }) => { runtime.surfaces.touch(SurfaceRequest.parse(await body(2_048))); return { ok: true as const } },
+    // Only the app's panel asks for a handoff, and only one panel gets it: the request is consumed on the way out.
+    'GET app-open': ({ query }) => {
+      if (AppOpenQuery.parse(query).surface !== 'app') return {}
+      const ticketId = runtime.surfaces.take()
+      return ticketId ? { ticketId } : {}
+    },
     // The billing strip is optional: an older host without the ledger still serves the board.
     'GET overview': async () => {
       const page = overview(views(runtime), runtime.health, policyVersion(store.settings()),
@@ -588,6 +605,73 @@ function notFound(res: ServerResponse): void {
   res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
   res.end('Not found')
 }
+/** The path a bot message links to: the host picks the browser or the desktop app for the person reading it. */
+const TICKET_OPEN_PATH = '/orchestrator/ticket/'
+/** The 32-hex Ticket id a ticket-open URL names, lowercased, or undefined when the path is not one. */
+function ticketIdOf(url: URL): string | undefined {
+  const raw = url.pathname.slice(TICKET_OPEN_PATH.length)
+  return /^[0-9a-f]{32}$/i.test(raw) ? raw.toLowerCase() : undefined
+}
+/**
+ * The page a browser shows when the desktop app took the Ticket: the app is already coming forward, and this tab is only
+ * the manual way in when the browser refused to focus another application. Text is static plus the Ticket's hex id.
+ */
+function handoffPage(ticketId: string): string {
+  const short = ticketId.slice(0, 8)
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>已在 App 中打开工单 ${short}</title>
+<style>
+  :root { color-scheme: light dark }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f5f6f8; color: #1f2329;
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif }
+  main { width: min(30rem, calc(100vw - 3rem)); padding: 2rem; border-radius: 1rem; background: #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 12px 40px rgba(0, 0, 0, .08) }
+  h1 { margin: 0 0 .75rem; font-size: 1.15rem }
+  p { margin: 0 0 1.25rem; color: #646a73 }
+  .actions { display: flex; flex-wrap: wrap; gap: .75rem }
+  a { display: inline-flex; align-items: center; min-height: 2.25rem; padding: 0 1rem; border-radius: .5rem;
+    text-decoration: none; font-weight: 500 }
+  a.primary { background: #3370ff; color: #fff }
+  a.secondary { color: #3370ff; box-shadow: inset 0 0 0 1px rgba(51, 112, 255, .4) }
+  small { display: block; margin-top: 1.25rem; color: #8f959e }
+</style>
+</head>
+<body>
+<main>
+  <h1>已在 App 中打开工单 ${short}</h1>
+  <p>这个工单已经交给正在使用的 DeepSeek Harness App。窗口没有切到前面时，用下面的按钮。</p>
+  <div class="actions">
+    <a class="primary" href="dsh://open">切到 App</a>
+    <a class="secondary" href="/?ticket=${encodeURIComponent(ticketId)}">在网页打开</a>
+  </div>
+  <small>这个标签页可以关掉。</small>
+</main>
+</body>
+</html>`
+}
+/**
+ * The smart ticket link: a person in a browser is sent to the panel's own `?ticket=` page, while a person in the desktop
+ * app has the Ticket handed to the app's panel and the app brought forward. The panel reports its client as it is used, so
+ * the choice follows where the person actually is; with no report yet the browser wins, which every client can open.
+ */
+function serveTicketOpen(runtime: HttpHost, url: URL, res: ServerResponse, method: string): void {
+  const ticketId = ticketIdOf(url)
+  if (!ticketId || !runtime.store.tickets.get(ticketId)) { notFound(res); return }
+  if (runtime.surfaces.active() !== 'app') {
+    res.writeHead(302, { location: `/?ticket=${encodeURIComponent(ticketId)}`, 'cache-control': 'no-store' })
+    res.end()
+    return
+  }
+  // A reload of this page must not focus the app again; only a new handoff does.
+  if (runtime.surfaces.open(ticketId)) runtime.focusApp()
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' })
+  if (method === 'HEAD') { res.end(); return }
+  res.end(handoffPage(ticketId))
+}
 /**
  * Serves one file inside the case folder of a recorded run. The report opens in its own browser tab, so it cannot carry
  * the management header; the loopback host and the run's own folder are the boundary instead. A report HTML runs in a
@@ -637,6 +721,14 @@ export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
         if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { allow: 'GET, HEAD' }); res.end(); return }
         try { await runtime.ready } catch { notFound(res); return }
         serveReproFile(runtime, url, res, req.method)
+        return
+      }
+      // A bot message's ticket link is opened as a plain browser page, so it carries no management header: the panel's own
+      // auth protects it, and the page only names one Ticket and moves the reader to it.
+      if (url.pathname.startsWith(TICKET_OPEN_PATH)) {
+        if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { allow: 'GET, HEAD' }); res.end(); return }
+        try { await runtime.ready } catch { notFound(res); return }
+        serveTicketOpen(runtime, url, res, req.method)
         return
       }
       if (!url.pathname.startsWith('/orchestrator/api/')) { res.writeHead(404); res.end(); return }
