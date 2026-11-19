@@ -92,7 +92,9 @@ interface Skill { name: string; description: string; content: string }
 // measure 71,096 on the main Session and 67,694 on the worker, so the budgets grow to 71,100 and 67,800.
 // The structured grill before the plan card adds `orchestrator_grill` and its one-round rule (docs/012): the worker surface
 // measures 69,760, so its budget grows to 69,800.
-const BUDGET: Record<Role, number> = { orchestrator: 71_100, worker: 69_800 }
+// The plan card's deeplink line and the grill's one-round rule both land on the main Session; the merged surface measures
+// 71,119, so the orchestrator budget grows to 71,200.
+const BUDGET: Record<Role, number> = { orchestrator: 71_200, worker: 69_800 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

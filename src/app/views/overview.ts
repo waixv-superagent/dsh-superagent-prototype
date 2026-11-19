@@ -1,6 +1,7 @@
 /** Overview view: active system problems, tickets awaiting human action, executor load, and 24-hour trigger flow. */
 import { completedArchived, lastActivityAt, reasonText, ticketPriority, ticketStage, waitsForIdle, type Decision, type PriorityLevel, type Thread,
   type Ticket } from '../../core/index.ts'
+import { verifyFocus } from '../../core/verification.ts'
 import type { Health } from '../../sources/host.ts'
 import type { SetupProblem } from '../../setup.ts'
 import type { EditorView } from '../editor.ts'
@@ -110,6 +111,12 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
     const stage = ticketStage(ticket)
     return stage.stage === 'person' && stage.action === 'verify'
   }), ...awaiting]
+  // The lane leads with what the person should check now and folds the standing queue behind a count: a handover still
+  // unblocking its work reads as one ask, while old, pooled and ended deliveries stop looking equally urgent (docs/005).
+  const handoverAt = (ticket: Ticket) => ticket.verification?.at ?? ticket.ended?.at ?? ''
+  const nowMs = Date.parse(now)
+  const verifyNow = verification.filter(ticket => verifyFocus(ticket, nowMs)).sort((left, right) => handoverAt(right).localeCompare(handoverAt(left)))
+  const verifyLater = verification.filter(ticket => !verifyFocus(ticket, nowMs)).sort((left, right) => handoverAt(left).localeCompare(handoverAt(right)))
   // The board's machine lane is the executor itself: a worker turn running now, or mainline work queued for a slot or the
   // next turn. Discretionary P2/P3 work between turns is the idle pool, never a running row (docs/019).
   const pooled = (ticket: Ticket) => waitsForIdle(ticketPriority(ticket))
@@ -149,7 +156,11 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
       const stage = ticketStage(ticket)
       return stage.stage === 'person' && stage.action !== 'verify'
     }).map(ticket => ticketRow(view, ticket)),
-    verification: verification.map(ticket => ticketRow(view, ticket)),
+    verification: [...verifyNow, ...verifyLater].map(ticket => ticketRow(view, ticket)),
+    /** The handovers a person should check now, newest first (docs/005). */
+    verifyNow: verifyNow.map(ticket => ticketRow(view, ticket)),
+    /** The older, pooled and ended deliveries that wait in the lane's folded queue, oldest first. */
+    verifyLater: verifyLater.map(ticket => ticketRow(view, ticket)),
     pipeline: pipeline.map(ticket => ticketRow(view, ticket)),
     working: working.map(ticket => ticketRow(view, ticket)),
     idle: idle.map(ticket => ticketRow(view, ticket)),

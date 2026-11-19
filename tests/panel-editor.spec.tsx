@@ -54,8 +54,9 @@ it('opens the board at the Tickets behind a hero count and rings just those card
 
   await click(tab(zh.homeViewEditor))
   await click(door('verification'))
-  expect(all('.dt-verify-card[data-board-focus]')).toHaveLength(2)
-  expect(all('[data-board-focus]')).toHaveLength(2)
+  // Only the handover that still asks now is a card to ring; the ended delivery waits in the lane's folded queue.
+  expect(all('.dt-verify-card[data-board-focus]')).toHaveLength(1)
+  expect(all('[data-board-focus]')).toHaveLength(1)
 
   await click(tab(zh.homeViewEditor))
   await click(door('queued'))

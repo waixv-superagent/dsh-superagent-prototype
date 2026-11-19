@@ -26,6 +26,7 @@ import { feishuKind } from '../../src/sources/feishu.ts'
 import { githubKind } from '../../src/sources/github.ts'
 import type { Health } from '../../src/sources/host.ts'
 import type { SourceKind } from '../../src/sources/kind.ts'
+import { verifyFocus } from '../../src/core/verification.ts'
 import { testDeployment } from './deployment.ts'
 
 export const MEMBER = 'ou_alice'
@@ -252,6 +253,9 @@ const editorPageView = (): ApiResponse<'GET editor'> => {
 const overviewView = (): ApiResponse<'GET overview'> => {
   const { problem, feishuProblem } = server.setup
   const setup = problem ?? feishuProblem
+  // As the host splits it: a fresh live handover asks now, an older or ended one waits in the queue.
+  const verifyNow = server.verification.filter(ticket => verifyFocus(ticket))
+  const verifyLater = server.verification.filter(ticket => !verifyFocus(ticket))
   return {
     problems: [...setup ? [{ kind: 'setup' as const, ...setup }] : [],
       ...KINDS.some(kind => server.settings.sources[kind.kind]?.enabled !== false) ? [] : [{ kind: 'no-source' as const }],
@@ -268,7 +272,7 @@ const overviewView = (): ApiResponse<'GET overview'> => {
         .map(([name, item]) => ({ kind: 'runtime-error' as const, name, detail: item.detail })),
       ...Object.values(server.settings.policy.sources).some(part => part.allowed.length) ? [] : [{ kind: 'no-allowed' as const }],
       ...server.failing.map(outgoing => ({ kind: 'outgoing' as const, outgoing }))],
-    person: server.person, verification: server.verification, working: server.working, idle: server.idle,
+    person: server.person, verification: server.verification, verifyNow, verifyLater, working: server.working, idle: server.idle,
     active: server.active,
     pool: server.pool, parked: server.parked,
     pipeline: server.pipeline, ended: server.ended, editor: server.editor, billing: server.billing,
@@ -406,8 +410,8 @@ function initial(): PanelServer {
     active: [
       { ...ticketSummary({ id: 't6', title: '升级依赖', summary: '后台 job · 60 秒无输出', updatedAt: '2026-09-22T23:30:00Z' }),
         activeAt: new Date(Date.now() - 4 * 60_000).toISOString() },
-      { ...ticketSummary({ id: 't8', title: '修复移动普攻后接 Q 技能无法起飞' }, { stage: 'person', action: 'verify' }),
-        activeAt: new Date(Date.now() - 30 * 60_000).toISOString() },
+      { ...ticketSummary({ id: 't8', title: '修复移动普攻后接 Q 技能无法起飞', verification: { at: new Date(Date.now() - 30 * 60_000).toISOString(),
+        state: 'pending' } }, { stage: 'person', action: 'verify' }), activeAt: new Date(Date.now() - 30 * 60_000).toISOString() },
     ],
     idle: [], pipeline: [], ended: [ended],
     pool: [ticketSummary({ id: 't2', title: '【战斗】巡逻时偶现步态滑步', priority: { level: 'P2', code: 'P2', word: '闲时', hint: '闲时处理 / 排期', source: 'default' },
@@ -423,7 +427,7 @@ function initial(): PanelServer {
     verification: [ticketSummary({ id: 't8', title: '修复移动普攻后接 Q 技能无法起飞', actions: { retry: false, stop: true, confirm: false,
       verify: true, rework: true }, summary: 'CL 123456 已 shelve，等你在本地 PIE 里验证。',
       delivery: { lease: ['Source/Game/Player/'], changelist: 123456, review: 'Swarm 654321', verification: 'Compile Result: Succeeded; Automation 19/19 passed' },
-      verification: { at: '2026-09-23T00:00:00Z', state: 'pending' } }, { stage: 'person', action: 'verify' }),
+      verification: { at: new Date(Date.now() - 30 * 60_000).toISOString(), state: 'pending' } }, { stage: 'person', action: 'verify' }),
       ticketSummary({ id: 't7', title: 'README 更新', state: 'ended', actions: { retry: false, stop: false, confirm: false, verify: true, rework: false },
         ended: { at: '2026-09-22T20:00:00Z', by: 'executor', outcome: 'completed' }, provenance: 'agent',
         delivery: { lease: [], changelist: 123456, verification: 'Compile Result: Succeeded' } }, { stage: 'ended' })],

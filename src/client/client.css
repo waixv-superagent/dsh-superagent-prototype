@@ -527,6 +527,7 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-run { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 8px; align-items: start; padding: 10px 8px; border-bottom: .5px solid var(--dsw-alias-border-l2); border-radius: 8px; }
 .dt-run:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .dt-run-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-state-success-primary); }
+.dt-run[data-state='working'] .dt-run-dot { animation: dt-live-pulse 2s ease-in-out infinite; }
 .dt-run[data-state='queued'] .dt-run-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dsw-alias-label-caption); }
 .dt-run[data-state='idle'] .dt-run-dot { background: var(--dsw-alias-label-caption); opacity: .5; }
 /* The idle pool: a hollow dot for P3 parked work, and one action row that lifts a ticket into the attention pool. */
@@ -676,6 +677,13 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-active-name:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }
 .dt-active-stage { flex: none; font-size: 10.5px; line-height: 16px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
 .dt-active-age { flex: none; font-size: 10.5px; line-height: 16px; color: var(--dsw-alias-label-caption); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* A row that is moving right now breathes green, so the band separates live work from asks at a glance. */
+.dt-active-row[data-live] .dt-active-dot { background: var(--dsw-alias-state-success-primary); animation: dt-live-pulse 2s ease-in-out infinite; }
+.dt-active-row[data-live] .dt-active-stage { color: var(--dsw-alias-state-success-primary); }
+@keyframes dt-live-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--dsw-alias-state-success-primary) 45%, transparent); } 55% { box-shadow: 0 0 0 4px transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  .dt-active-row[data-live] .dt-active-dot { animation: none; }
+}
 @container (max-width: 700px) {
   .dt-active-list { grid-template-columns: minmax(0, 1fr); }
 }
@@ -776,9 +784,25 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-verify-return-label { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); }
 .dt-verify-return-input { min-height: 56px; resize: vertical; font-size: 12px; line-height: 18px; }
 .dt-verify-return-actions { display: flex; align-items: center; gap: 6px; }
-.dt-backlog { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin-bottom: 6px; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, #d4a300 7%, transparent); }
-.dt-backlog-line { flex: 1 0 100%; margin: 0; min-width: 0; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-secondary); }
-.dt-backlog-detail { margin: 0 0 5px; font-size: 10.5px; line-height: 16px; color: var(--dsw-alias-label-caption); }
+/* The verify lane's standing queue: one quiet, folded line under the handovers that still block current work. */
+.dt-verify-group { margin: 0 0 1px; font-size: 10px; line-height: 15px; font-weight: 600; letter-spacing: .05em; color: #d4a300; }
+.dt-verify-queue { margin-top: 2px; padding-top: 5px; border-top: .5px dashed var(--dsw-alias-border-l3); }
+.dt-verify-queue-head { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 26px; padding: 3px 2px; border: 0; background: none; font: inherit; text-align: left; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.dt-verify-queue-head:hover { color: var(--dsw-alias-label-primary); }
+.dt-verify-queue-head:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; border-radius: 6px; }
+.dt-verify-queue-title { flex: none; font-size: 11.5px; line-height: 17px; font-weight: 500; white-space: nowrap; }
+.dt-verify-queue-age { flex: none; font-size: 10.5px; line-height: 16px; color: var(--dsw-alias-label-caption); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dt-verify-queue-chevron { margin-left: auto; display: inline-flex; color: var(--dsw-alias-label-caption); }
+.dt-verify-queue-list { display: flex; flex-direction: column; gap: 1px; margin: 3px 0 0; padding: 0; list-style: none; }
+.dt-verify-queue-row { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; min-width: 0; padding: 4px 2px; border-bottom: .5px solid var(--dsw-alias-border-l2); }
+.dt-verify-queue-row:last-child { border-bottom: 0; }
+.dt-verify-queue-name { flex: 1 1 120px; min-width: 0; padding: 0; border: 0; background: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font: inherit; font-size: 12px; line-height: 17px; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.dt-verify-queue-name:hover { color: var(--dsw-alias-brand-primary); }
+.dt-verify-queue-name:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }
+.dt-verify-queue-row[data-ended] .dt-verify-queue-name { color: var(--dsw-alias-label-tertiary); }
+.dt-verify-queue-meta { flex: none; display: inline-flex; align-items: baseline; gap: 5px; font-size: 10.5px; line-height: 16px; color: var(--dsw-alias-label-caption); }
+.dt-verify-queue-wait { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dt-verify-queue-note { margin: 4px 2px 0; font-size: 10.5px; line-height: 15px; color: var(--dsw-alias-label-caption); }
 /* The pipeline lane: blocked work is pinned at the top and reads as an intervention, not another progress row. */
 .dt-pipeline-alert { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; margin-bottom: 6px; padding: 7px 9px; border: .5px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 32%, var(--dsw-alias-border-l3)); border-radius: 8px; background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 6%, transparent); }
 .dt-pipeline-alert .dt-pipeline-alert-sub { margin: 0; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-caption); font-weight: 400; }

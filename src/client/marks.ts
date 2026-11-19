@@ -44,6 +44,12 @@ export function activeAgo(t: T, at: string): string {
 }
 export const reportDot = (report: string | undefined): DotState => report === 'failed' ? 'error'
   : report === 'blocked' || report === 'waiting' ? 'warning' : report === 'ready' ? 'done' : 'ongoing'
+/**
+ * Whether a Ticket is moving right now: a worker turn running, or a pipeline check being followed. A queued turn waits
+ * for a slot and an idle Ticket waits for a Trigger, so neither reads as active; the board and the dock both say so.
+ */
+export const ticketLive = (ticket: { stage: TicketStage['stage']; action?: string }): boolean =>
+  (ticket.stage === 'working' && ticket.action !== 'queued') || (ticket.stage === 'pipeline' && ticket.action !== 'blocked')
 
 const THREAD_MARKS: Record<ThreadRow['stage'], Omit<Mark, 'label' | 'tone'> & { label: DshSuperagentKey }> = {
   error: { dot: 'error', icon: 'alert', label: 'threadPollFailed' },

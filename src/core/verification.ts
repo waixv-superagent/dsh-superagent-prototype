@@ -22,3 +22,28 @@ export const missingVerifyLabels = (text: string): string[] => {
   const found = new Set(verifyLines(text).map(line => line.label))
   return VERIFY_LABELS.filter(label => !found.has(label))
 }
+/**
+ * How long a handover still asks for a person's local check now. A Ticket delivered inside this window is the work the
+ * branch just landed and the next step waits on that check; an older live delivery, a pooled P2/P3 one and an ended
+ * Ticket waiting for a backfill are the standing queue, which the board counts and folds away (docs/005).
+ */
+export const VERIFY_FOCUS_MS = 24 * 3_600_000
+/**
+ * What the rule reads: a host Ticket and the panel's row of it both carry these fields; the row keeps only the level,
+ * so the rule names that instead of the host's whole priority record.
+ */
+export interface VerifyCandidate {
+  verification?: { state?: string; at?: string }
+  ended?: unknown
+  priority?: { level?: string }
+}
+/**
+ * Whether a pending local check deserves a person's attention now: the Ticket is live and was handed over within the
+ * day, or it is urgent enough that its age does not matter. Everything else waits in the queue rather than leading.
+ */
+export function verifyFocus(ticket: VerifyCandidate, now = Date.now()): boolean {
+  if (ticket.verification?.state !== 'pending' || ticket.ended) return false
+  if (ticket.priority?.level === 'P0') return true
+  const at = Date.parse(ticket.verification.at ?? '')
+  return Number.isFinite(at) && now - at <= VERIFY_FOCUS_MS
+}
