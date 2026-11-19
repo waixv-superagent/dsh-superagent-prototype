@@ -13,7 +13,7 @@ import type { Store } from './store.ts'
 export interface SourceContextDeps {
   readonly store: Pick<Store, 'atomic' | 'get' | 'set' | 'delete' | 'keys' | 'threads' | 'tickets' | 'triggers' | 'read' | 'settings'>
   readonly outbox: Pick<Outbox, 'send'>
-  readonly engine: Pick<EngineForSources, 'bindThread' | 'retarget' | 'threadClosed' | 'admissible' | 'decidePlan' | 'answerAttention' | 'decidePriority'
+  readonly engine: Pick<EngineForSources, 'bindThread' | 'retarget' | 'threadClosed' | 'admissible' | 'decidePlan' | 'answerAttention' | 'answerGrill' | 'decidePriority'
     | 'rerunPipeline' | 'closePipeline'>
   readonly commands: Commands
   readonly sources: SourceRegistry
@@ -79,6 +79,7 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
     notify: message => { deps.outbox.send(message) },
     decidePlan: (id, decision, note, via, option) => deps.engine.decidePlan(id, decision, note, via, option),
     answerAttention: (id, attentionId, option) => deps.engine.answerAttention(id, attentionId, option),
+    answerGrill: (id, grillId, answers, via) => deps.engine.answerGrill(id, grillId, answers, via),
     decidePriority: (id, level, by, via) => deps.engine.decidePriority(id, level, by, via),
     pipelineAction: async (id, action) => {
       const ticket = store.tickets.get(id)

@@ -100,6 +100,12 @@ export interface SourceContext {
    */
   answerAttention(ticketId: string, attentionId: string, option: string): Ticket
   /**
+   * A person's submit on a structured grill card: every question's option is recorded, and the answers reach the worker as
+   * one message.
+   * @throws UserError when the ticket is unknown or ended, the grill is gone or replaced, or an answer is missing or invalid.
+   */
+  answerGrill(ticketId: string, grillId: string, answers: Readonly<Record<string, number>>, via?: 'feishu' | 'panel'): Ticket
+  /**
    * A person's click on a TAPD ticket's priority card: the level is recorded as theirs, which no assessment or default
    * overwrites, without a Trigger, Decision or Eval. `by` is the Source identity of the person who clicked.
    * @throws UserError when the ticket is unknown or has ended.

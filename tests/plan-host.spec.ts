@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Ticket, Trigger } from '../src/core/index.ts'
-import { notifyChat, notifyPlan, type PlanHost } from '../src/app/plan.ts'
+import { notifyChat, notifyGrill, notifyPlan, type PlanHost } from '../src/app/plan.ts'
 
 const ticket = { id: 'a'.repeat(32), title: 'Fix', origin: { triggerId: 't1', triggerIds: ['t1'] }, channels: [] } as unknown as Ticket
 function trigger(overrides: Partial<Trigger> = {}): Trigger {
@@ -117,5 +117,37 @@ describe('notifying a waiting plan', () => {
     const { host } = makeHost({ send: vi.fn(async (_args: string[]): Promise<string> => { throw new Error('offline') }) })
     expect(await notifyPlan(host, { ...ticket, plan })).toBeUndefined()
     expect(host.warn).toHaveBeenCalledWith(expect.stringContaining('offline'))
+  })
+})
+describe('notifying a waiting grill', () => {
+  const grill = { id: 'g1', at: '2026-09-23T00:00:00Z', answers: [], questions: [
+    { id: 'q1', title: '状态放哪', question: '放 ActionState 还是 ANS 实例？', options: ['ActionState', 'ANS 实例'], recommended: 0 },
+  ] }
+  it('sends one form card into the ticket topic and remembers which grill it asks', async () => {
+    const { host, send, cards } = makeHost()
+    const moved = { ...ticket, grill, replyChannel: { source: 'feishu' as const, thread: 'feishu:oc_topic',
+      address: { chatId: 'oc_topic', messageId: 'om_topic' } } } as Ticket
+    expect(await notifyGrill(host, moved)).toBe('om_9')
+    const args = send.mock.calls[0]![0] as string[]
+    expect(args.slice(0, 6)).toEqual(['im', '+messages-reply', '--message-id', 'om_topic', '--msg-type', 'interactive'])
+    expect(args).toContain('--reply-in-thread')
+    const card = JSON.parse(args[args.indexOf('--content') + 1]!)
+    expect(JSON.stringify(card)).toContain('select_static')
+    expect(JSON.stringify(card)).toContain('submit_grill')
+    expect(cards.om_9).toMatchObject({ ticketId: ticket.id, grillId: 'g1' })
+  })
+  it('does nothing for an answered grill, a ticket with no chat, or a Source that is off, and reports a failed send', async () => {
+    const { host, send } = makeHost()
+    expect(await notifyGrill(host, { ...ticket, grill: { ...grill, answeredAt: '2026-09-23T00:01:00Z' } })).toBeUndefined()
+    expect(send).not.toHaveBeenCalled()
+    const off = makeHost({ enabled: false })
+    expect(await notifyGrill(off.host, { ...ticket, grill })).toBeUndefined()
+    expect(off.warn).toHaveBeenCalledWith(expect.stringContaining('Feishu Source'))
+    const group = makeHost({ source: trigger({ meta: { direct: false } }) })
+    expect(await notifyGrill(group.host, { ...ticket, grill })).toBeUndefined()
+    expect(group.warn).toHaveBeenCalledWith(expect.stringContaining('no Feishu conversation'))
+    const failed = makeHost({ send: vi.fn(async (_args: string[]): Promise<string> => { throw new Error('offline') }) })
+    expect(await notifyGrill(failed.host, { ...ticket, grill })).toBeUndefined()
+    expect(failed.warn).toHaveBeenCalledWith(expect.stringContaining('offline'))
   })
 })

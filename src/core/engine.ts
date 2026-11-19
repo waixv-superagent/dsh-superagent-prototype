@@ -1,7 +1,7 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
 import { isoTime, liveTicket } from './model.ts'
-import type { Backend, ChannelRef, Decision, LinkedRelationKind, ModelGrant, ModelRelay, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, ThreadRef, Ticket, TicketDeploy, TicketPipeline, TicketRepair, Trigger } from './model.ts'
+import type { Backend, ChannelRef, Decision, GrillQuestion, LinkedRelationKind, ModelGrant, ModelRelay, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, ThreadRef, Ticket, TicketDeploy, TicketPipeline, TicketRepair, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
 import type { PlanDecision, PlanOption, PlanPhase, PlanTemplate, PlanVia } from './plan.ts'
@@ -336,6 +336,22 @@ export class Engine {
     return this.repo.atomic(() => this.tickets.answerAttentionText(ticketId, attentionId, text))
   }
   /**
+   * A worker asks its one structured question round before the plan card: at most four decisions, each with 2–4 options
+   * and the worker's recommendation. One round per plan attempt.
+   * @throws UserError when the ticket cannot ask now (a plan waits or was approved, or this attempt already asked) or the
+   * questions are not one a person can answer in one pass.
+   */
+  askGrill(ticketId: string, questions: readonly Pick<GrillQuestion, 'title' | 'question' | 'options' | 'recommended'>[]): Ticket {
+    return this.repo.atomic(() => this.tickets.askGrill(ticketId, questions))
+  }
+  /**
+   * A person answers every question of the waiting grill: the answers are recorded and reach the worker as one Input.
+   * @throws UserError when the ticket is unknown or ended, the grill is gone or replaced, or an answer is missing or invalid.
+   */
+  answerGrill(ticketId: string, grillId: string, answers: Readonly<Record<string, number>>, via: 'feishu' | 'panel' = 'panel'): Ticket {
+    return this.repo.atomic(() => this.tickets.answerGrill(ticketId, grillId, answers, via))
+  }
+  /**
    * A worker moves its ticket one phase forward: `verify` once implementation is done, `deliver` once verification passed.
    * @throws UserError when the ticket is unknown or ended, or the move skips a phase or goes back.
    */
@@ -482,20 +498,20 @@ export class Engine {
 }
 
 /** What Sources ask and tell the Engine. */
-export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThread' | 'retarget' | 'threadClosed' | 'decidePlan' | 'answerAttention' | 'decidePriority'
+export type EngineForSources = Pick<Engine, 'receive' | 'admissible' | 'bindThread' | 'retarget' | 'threadClosed' | 'decidePlan' | 'answerAttention' | 'answerGrill' | 'decidePriority'
   | 'rerunPipeline' | 'closePipeline'>
 /** What the main Session asks of the Engine. */
 export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'>
 /** What people ask of the Engine, through the panel or the main Session. */
 export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'redispatchTicket' | 'confirmTicket' | 'verifyTicket' | 'recordPipeline' | 'resumePipeline'
-  | 'reworkTicket' | 'decidePlan' | 'decidePriority' | 'promoteTicket' | 'answerAttention' | 'answerAttentionText' | 'reevaluate' | 'unsubscribe' | 'dismiss' | 'resetPhase'>
+  | 'reworkTicket' | 'decidePlan' | 'decidePriority' | 'promoteTicket' | 'answerAttention' | 'answerAttentionText' | 'answerGrill' | 'reevaluate' | 'unsubscribe' | 'dismiss' | 'resetPhase'>
 /** What Settings tells the Engine. */
 export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
   | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'reply'
-  | 'submitPlan' | 'settlePlan' | 'advancePhase' | 'resetPhase' | 'redispatchTicket' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch' | 'startIdleAnalysis'
-  | 'widenLease' | 'authorizeModelFromPerson' | 'dropUnstartedIdle'>
+  | 'submitPlan' | 'settlePlan' | 'askGrill' | 'advancePhase' | 'resetPhase' | 'redispatchTicket' | 'widenLease' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch' | 'startIdleAnalysis'
+  | 'authorizeModelFromPerson' | 'dropUnstartedIdle'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>
 /** What the host's watchdog tells the Engine: it recovers a ticket its worker stopped on a passing failure. */

@@ -49,7 +49,7 @@ import { ReproRunner } from './repro-runner.ts'
 import { BuildRunner } from './build-runner.ts'
 import { hostPlatform } from '../core/editor-composition.ts'
 import { reproRoot } from './repro.ts'
-import { notifyPlan as sendPlanCard } from './plan.ts'
+import { notifyPlan as sendPlanCard, notifyGrill as sendGrillCard } from './plan.ts'
 import { notifyPriority as sendPriorityCard } from './priority.ts'
 import { IdleScheduler } from './idle.ts'
 import { NightRepro } from './night-repro.ts'
@@ -394,6 +394,7 @@ export class Runtime extends Service implements SourceHost {
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
         handbackRequest: (ticketId, request, reason) => runtime.handbackRequest(ticketId, request, reason),
         notifyPlan: ticket => sendPlanCard({ store, sources, commands, surfaces: this.surfaces, warn: message => ctx.logger.warn('dsh-superagent: %s', message) }, ticket),
+        notifyGrill: ticket => sendGrillCard({ store, sources, commands, surfaces: this.surfaces, warn: message => ctx.logger.warn('dsh-superagent: %s', message) }, ticket),
         quietly: run => { this.quiet++; try { return run() } finally { this.quiet-- } } }
       this.ready = this.initialize()
     } catch (error) {

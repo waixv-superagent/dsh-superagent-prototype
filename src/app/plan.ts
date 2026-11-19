@@ -4,11 +4,11 @@
  * conversation it uses the private chat the Feishu Source names for intervention cards, or the fixed topic chat, which takes
  * a ticket from another Source as a new topic. The card itself is built by `sources/feishu-card.ts`.
  */
-import { key, pendingPlan, type Ticket } from '../core/index.ts'
+import { grillWaiting, key, pendingPlan, type Ticket } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
 import { KV } from '../kv.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
-import { planCard, messageLink, sendCard } from '../sources/feishu-card.ts'
+import { grillCard, planCard, messageLink, sendCard } from '../sources/feishu-card.ts'
 import { ticketOpenLink } from '../sources/feishu-sent.ts'
 import type { SurfaceState } from './surface.ts'
 import type { Store } from './store.ts'
@@ -75,6 +75,37 @@ export async function notifyPlan(host: PlanHost, ticket: Ticket): Promise<string
     return message
   } catch (error) {
     host.warn(`Ticket ${ticket.id}: its plan card could not be sent: ${String(error)}`)
+    return undefined
+  }
+}
+/**
+ * Sends a ticket's waiting structured grill as one form card in the same Feishu conversation its plan card uses, and its
+ * text when Feishu refuses the card. The message mapping lets a submit answer that grill without a Trigger, and the card's
+ * own link lets the panel open the question.
+ * @returns the sent message's id (card or fallback text), undefined when no chat is configured, nothing went out, or the
+ * grill was already answered.
+ */
+export async function notifyGrill(host: PlanHost, ticket: Ticket): Promise<string | undefined> {
+  const grill = grillWaiting(ticket)
+  if (!grill) return undefined
+  if (!host.sources.instance('feishu')?.enabled) { host.warn(`Ticket ${ticket.id}: its grill card needs the Feishu Source, which is off`); return undefined }
+  const channel = ticket.replyChannel ?? ticket.channels?.find(item => item.source === 'feishu')
+  const chat = channel?.address.chatId ?? notifyChat(host.store, ticket)
+  const replyTo = channel?.address.messageId
+  if (!chat) { host.warn(`Ticket ${ticket.id}: no Feishu conversation for its grill card; set the Topic chat or a private chat in the Feishu Source`); return undefined }
+  try {
+    const message = await sendCard(host, chat, grillCard(ticket, grill, panelLinkOf(host, ticket.id)), `grill-${key('grill', ticket.id, grill.at)}`, replyTo)
+    if (message) {
+      host.store.set(KV.feishu.sent(message), { ticketId: ticket.id, chatId: chat, at: new Date().toISOString() })
+      const url = await messageLink(host, message).catch(() => undefined)
+      const keep = Date.now() - CARD_KEEP_MS
+      const cards = Object.fromEntries(Object.entries(host.store.get(KV.feishu.grillCards) ?? {})
+        .filter(([id, ref]) => id === message || Date.parse(ref.at) >= keep))
+      host.store.set(KV.feishu.grillCards, { ...cards, [message]: { ticketId: ticket.id, grillId: grill.id, at: grill.at, ...url ? { url } : {} } })
+    }
+    return message
+  } catch (error) {
+    host.warn(`Ticket ${ticket.id}: its grill card could not be sent: ${String(error)}`)
     return undefined
   }
 }

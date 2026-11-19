@@ -267,6 +267,9 @@ const PriorityRequest = z.object({ level: z.enum(PRIORITY_LEVELS) }).strict()
 const AnswerRequest = z.object({ attentionId: z.string().trim().min(1).max(64), option: z.string().trim().min(1).max(120).optional(),
   text: z.string().trim().min(1).max(4000).optional() }).strict()
   .refine(value => (value.option === undefined) !== (value.text === undefined), { message: 'Answer with either option or text' })
+/** A person's submit on a structured grill: one option index per question the card asked, all together. */
+const GrillRequest = z.object({ grillId: z.string().trim().min(1).max(64),
+  answers: z.record(z.string(), z.number().int().nonnegative().max(3)) }).strict()
 /** A person moves a ticket's work to another delivery environment, such as when it was accepted under the wrong one. */
 const RedispatchRequest = z.object({ backend: z.enum(['git', 'p4']), target: z.string().trim().min(1).max(300).optional() }).strict()
 /** A person's action on the shared editor from the overview. */
@@ -518,6 +521,13 @@ function routes(runtime: HttpHost): Routes {
       const request = AnswerRequest.parse(await body(16_384))
       if (request.option !== undefined) runtime.engine.answerAttention(id, request.attentionId, request.option)
       else runtime.engine.answerAttentionText(id, request.attentionId, request.text!)
+      return { answered: true as const }
+    },
+    // A person answers every question of the structured grill before the plan card; the answers reach the worker as one Input.
+    'POST tickets/:id/grill': async ({ params, body }) => {
+      const id = ticket(params.id)
+      const request = GrillRequest.parse(await body(8_192))
+      runtime.engine.answerGrill(id, request.grillId, request.answers, 'panel')
       return { answered: true as const }
     },
     'POST tickets/:id/stop': ({ params }) => { const id = ticket(params.id); runtime.engine.stopTicket(id); return { stopped: true } },

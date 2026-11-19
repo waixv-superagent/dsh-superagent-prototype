@@ -13,6 +13,7 @@ import { settingsRoute } from './route.ts'
 import { Earlier, ThreadLine, automatedRuns } from './rows.tsx'
 import { actorName, errorText, localized, readableMarkers, reasonLabel, valueLabel, when, type T } from './text.ts'
 import { verifyLines } from '../core/verification.ts'
+import { grillAnswerLines } from '../core/plan.ts'
 import { ActionLink, ConfirmButton, ExternalLink, Hint, KeyValues, LabelValue, LoadState, MarkdownLite, PageHead, Section, SessionButton,
   StageMark, VerificationChecks, When } from './widgets.tsx'
 
@@ -244,6 +245,10 @@ function PlanGate({ plan, onDecide }: { plan: PlanView; onDecide: (decision: 'ap
       {plan.deadline && <span className="dt-plan-deadline"><Icon name="clock" size={12} />{t('planDeadline', {
         time: when(plan.deadline, t('lang')) })}</span>}
     </div>
+    {plan.grill && <div className="dt-plan-confirmed">
+      <div className="dt-plan-block-head">{t('grillConfirmed')}</div>
+      <ul className="dt-plan-points">{grillAnswerLines(plan.grill).map(line => <li key={line}><MarkdownLite text={line} /></li>)}</ul>
+    </div>}
     {plan.diff && <PlanDiffView diff={plan.diff} />}
     {!plan.diff && files.length > 0 && <div className="dt-plan-files">
       <div className="dt-plan-files-head"><Icon name="code" size={15} /><strong>{t('planFiles', { count: files.length })}</strong></div>
@@ -666,6 +671,52 @@ function RelationLine({ relation }: { relation: TicketPageView['relations'][numb
 }
 
 /**
+ * The structured grill before a plan card, answered in place: one option per question, then one submit. The answers reach
+ * the worker as one message, and the plan card that follows lists them as 已确认.
+ */
+function GrillGate({ ticket, grill, onChanged }: { ticket: TicketPageView; grill: NonNullable<TicketPageView['grill']>; onChanged: () => Promise<void> }) {
+  const { t, call, notify } = usePanel()
+  const [answers, setAnswers] = useState<Record<string, number>>({})
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const complete = grill.questions.every(question => answers[question.id] !== undefined)
+  const submit = async () => {
+    if (!complete) return
+    setBusy(true); setError('')
+    try {
+      await call('POST tickets/:id/grill', { id: ticket.id, body: { grillId: grill.id, answers } })
+      notify(t('grillSent'))
+      await onChanged()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally { setBusy(false) }
+  }
+  return <section className="dt-grill" aria-busy={busy}>
+    <div className="dt-grill-head">
+      <Icon name="decision" size={16} />
+      <strong>{t('grillTitle')}</strong>
+      <span className="dt-hint">{t('grillHint')}</span>
+    </div>
+    {grill.questions.map((question, index) => <div className="dt-grill-question" key={question.id}>
+      <div className="dt-plan-block-head">{t('grillQuestion', { index: index + 1, title: question.title })}</div>
+      <div className="dt-plan-text"><MarkdownLite text={question.question} /></div>
+      <div className="dt-answer-options">
+        {question.options.map((option, optionIndex) => <Button key={option} size="sm"
+          variant={answers[question.id] === optionIndex ? 'primary' : 'outline'} disabled={busy}
+          onClick={() => setAnswers(current => ({ ...current, [question.id]: optionIndex }))}>
+          {option}{optionIndex === question.recommended ? ` · ${t('grillRecommended')}` : ''}
+        </Button>)}
+      </div>
+    </div>)}
+    <div className="dt-answer-actions">
+      <Button variant="primary" size="sm" disabled={busy || !complete} onClick={() => { void submit() }}>{t('grillSubmit')}</Button>
+      <span className="dt-hint">{t('grillFooter')}</span>
+      {error && <span className="dt-error" role="alert">{error}</span>}
+    </div>
+  </section>
+}
+
+/**
  * The worker's open question, answered in place: each choice is one click, and any question also takes a written answer.
  * The answer reaches the worker as its next input, as a click on a Feishu card does, so answering no longer needs Feishu.
  */
@@ -783,6 +834,8 @@ export function TicketPage({ id }: { id: string }) {
     </div>
     {phaseBack && data.phaseBack.length > 0 && <PhaseBack ticket={data} onChanged={reload} onClose={() => setPhaseBack(false)} />}
     {ended && <Hint>{ended}</Hint>}
+    {/* The structured grill: its answers become the plan card's 已确认 block, so the card asks only whether work may start. */}
+    {data.grill?.waiting && <GrillGate ticket={data} grill={data.grill} onChanged={reload} />}
     {/* The P1 gate: the decision is taken here, and the evidence opens in place instead of sending the person to Feishu. */}
     {data.plan?.waiting && <PlanGate plan={data.plan} onDecide={async (decision, note) => {
       await call('POST tickets/:id/plan', { id, body: { decision, ...note ? { note } : {} } })

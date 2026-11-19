@@ -5,10 +5,10 @@
  * replaces the card with the recorded answer.
  */
 import { z } from 'zod'
-import { key, pendingPlan, PRIORITY_LEVELS, type PlanDecision, type PriorityLevel } from '../core/index.ts'
+import { key, pendingPlan, PRIORITY_LEVELS, type GrillQuestion, type PlanDecision, type PriorityLevel, type Ticket } from '../core/index.ts'
 import { KV } from '../kv.ts'
-import { attentionResolvedCard, attentionStaleCard, pipelineResultCard, planCard, planChoices, priorityResolvedCard, priorityStaleCard, resolvedCard, reviseCard, staleCard,
-  updateCard, type CardMessage } from './feishu-card.ts'
+import { attentionResolvedCard, attentionStaleCard, grillIncompleteCard, grillResolvedCard, grillStaleCard, pipelineResultCard, planCard, planChoices, priorityResolvedCard, priorityStaleCard,
+  resolvedCard, reviseCard, staleCard, updateCard, type CardMessage } from './feishu-card.ts'
 import { feishuPostContent } from './feishu-text.ts'
 import type { SourceContext } from './host.ts'
 
@@ -60,6 +60,24 @@ export function priorityValue(value: string | undefined): { level: PriorityLevel
     return level ? { level } : undefined
   } catch { return undefined }
 }
+/**
+ * The values a grill form carries: one option index per question field, or undefined when any question is missing or not one
+ * of its options. A submit that does not answer the whole round records nothing, so a person cannot answer half a grill.
+ */
+export function grillAnswersOf(value: string | undefined, questions: readonly Pick<GrillQuestion, 'id' | 'options'>[]): Record<string, number> | undefined {
+  if (!value) return undefined
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>
+    const answers: Record<string, number> = {}
+    for (const question of questions) {
+      const raw = parsed[question.id]
+      const option = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : typeof raw === 'number' ? raw : NaN
+      if (!Number.isInteger(option) || option < 0 || option >= question.options.length) return undefined
+      answers[question.id] = option
+    }
+    return answers
+  } catch { return undefined }
+}
 /** The text a form submit carries under its `note` field. */
 export function formNote(value: string | undefined): string {
   if (!value) return ''
@@ -77,6 +95,7 @@ export function formNote(value: string | undefined): string {
  */
 export async function handleCardAction(ctx: SourceContext, action: CardAction): Promise<void> {
   if ((ctx.state.get(KV.feishu.pipelineCards) ?? {})[action.message_id]) { await handlePipelineAction(ctx, action); return }
+  if ((ctx.state.get(KV.feishu.grillCards) ?? {})[action.message_id]) { await handleGrillAction(ctx, action); return }
   const asked = attentionValue(action.action_value)
   if (asked) { await handleAttentionAction(ctx, action, asked); return }
   const priority = priorityValue(action.action_value)
@@ -254,4 +273,36 @@ async function handleAttentionAction(ctx: SourceContext, action: CardAction,
   try { ctx.answerAttention(ticket.id, value.attentionId, option) } catch { forget(); await replace(attentionStaleCard(ref.ticketId)); return }
   forget()
   await replace(attentionResolvedCard(current.question, option, ticket.id))
+}
+/**
+ * Applies a person's submit on a structured grill card: every question's option is recorded, the round closes, and the
+ * answers reach the worker as one Input. A card whose grill was answered or replaced answers with the "already handled"
+ * card and changes nothing; a submit missing a question keeps the form and records nothing.
+ */
+async function handleGrillAction(ctx: SourceContext, action: CardAction): Promise<void> {
+  const cards = ctx.state.get(KV.feishu.grillCards) ?? {}
+  const ref = cards[action.message_id]
+  if (!ref) return
+  const ticket = ctx.tickets.get(ref.ticketId)
+  if (!ticket) return
+  if (!ctx.mayActOnCard(ticket.id, action.operator_id)) return
+  const replace = async (message: CardMessage): Promise<void> => {
+    if (!action.token) return
+    try { await updateCard({ commands: ctx.commands }, action.token, message) } catch { /* the card stays as it was */ }
+  }
+  const forget = (): void => {
+    const next = { ...cards }
+    delete next[action.message_id]
+    ctx.state.set(KV.feishu.grillCards, next)
+  }
+  const current = ticket.grill
+  if (!current || current.id !== ref.grillId || current.answeredAt) {
+    forget(); await replace(grillStaleCard(ref.ticketId)); return
+  }
+  const answers = grillAnswersOf(action.form_value, current.questions)
+  if (!answers) { await replace(grillIncompleteCard(ticket)); return }
+  let updated: Ticket
+  try { updated = ctx.answerGrill(ticket.id, ref.grillId, answers, 'feishu') } catch { forget(); await replace(grillStaleCard(ref.ticketId)); return }
+  forget()
+  await replace(grillResolvedCard(updated, updated.grill ?? current))
 }

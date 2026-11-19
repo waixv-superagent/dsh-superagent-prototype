@@ -2375,6 +2375,50 @@ describe('P1 plan gate', () => {
     const decided = h.engine.decidePlan(ticketId, 'approve', '', 'feishu', '先上 A')
     expect(decided.plan).toMatchObject({ approved: { option: '先上 A', via: 'feishu' } })
   })
+  it('runs one structured grill round, refuses a second while it waits, and blocks the plan until the answers', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.tick(1)
+    const questions = [
+      { title: '状态放哪', question: '放 ActionState 还是 ANS 实例？', options: ['ActionState', 'ANS 实例'], recommended: 0 },
+      { title: '序列化时机', question: '只在需要时序列化？', options: ['是', '否'], recommended: 0 },
+    ]
+    const asked = h.engine.askGrill(ticketId, questions)
+    expect(asked.grill!.questions.map(question => question.id)).toEqual(['q1', 'q2'])
+    expect(() => h.engine.askGrill(ticketId, questions)).toThrowError(expect.objectContaining({ code: 'grillPending' }))
+    expect(() => h.engine.submitPlan(ticketId, PLAN)).toThrowError(expect.objectContaining({ code: 'grillUnanswered' }))
+    expect(() => h.engine.answerGrill(ticketId, asked.grill!.id, { q1: 0 })).toThrowError(expect.objectContaining({ code: 'grillAnswers' }))
+    const answered = h.engine.answerGrill(ticketId, asked.grill!.id, { q1: 0, q2: 1 }, 'feishu')
+    expect(answered.grill).toMatchObject({ answeredAt: expect.any(String), answers: [
+      { questionId: 'q1', option: 0, via: 'feishu' }, { questionId: 'q2', option: 1, via: 'feishu' },
+    ] })
+    const input = answered.inputs.at(-1)!
+    expect(input).toMatchObject({ kind: 'text', person: true })
+    expect((input as { text: string }).text).toContain('状态放哪：ActionState')
+    expect((input as { text: string }).text).toContain('序列化时机：否')
+    expect(() => h.engine.askGrill(ticketId, questions)).toThrowError(expect.objectContaining({ code: 'grillUsed' }))
+    const plan = h.engine.submitPlan(ticketId, PLAN)
+    expect(plan.plan!.grill).toMatchObject({ answers: [{ questionId: 'q1', option: 0 }, { questionId: 'q2', option: 1 }] })
+    // A person's new direction is a new plan attempt: the next round may ask once more.
+    h.engine.decidePlan(ticketId, 'revise', '换 ActionState 之外的容器')
+    expect(() => h.engine.askGrill(ticketId, questions)).not.toThrow()
+  })
+  it('refuses a grill that is not one pass, and lets the plan follow a person\'s reply instead of the form', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.tick(1)
+    expect(() => h.engine.askGrill(ticketId, [{ title: 'x', question: 'y', options: ['a'], recommended: 0 }]))
+      .toThrowError(expect.objectContaining({ code: 'grillQuestions' }))
+    h.engine.askGrill(ticketId, [
+      { title: '容器', question: '放在哪？', options: ['ActionState', 'ANS 实例'], recommended: 0 },
+    ])
+    // The card's text fallback invites a plain reply: a person's own message after the grill is the answer the gate reads.
+    h.tick(1)
+    h.engine.receive(trigger('2', { text: '放 ActionState，不要 ANS 实例', at: '2026-09-23T00:00:02Z' }))
+    const plan = h.engine.submitPlan(ticketId, PLAN)
+    expect(plan.plan!.grill).toBeUndefined()
+    expect(plan.plan).toMatchObject({ waiting: true })
+  })
   it('cards the worker\'s own context sections, and refuses sections that are not a card\'s', () => {
     const h = harness()
     const ticketId = accepted(h).ticketId!
