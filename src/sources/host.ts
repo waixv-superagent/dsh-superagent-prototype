@@ -123,6 +123,12 @@ export interface SourceContext {
    */
   mayActOnCard(ticketId: string, actor: string): boolean
   /**
+   * The Feishu open_id a ticket's milestone message should mention: the person whose Feishu message started it, else the
+   * first person the Feishu Policy allows, since this Source opens that ticket's Feishu conversation for them. Undefined
+   * when neither exists, so the message still goes out, without an @.
+   */
+  mentionTarget(ticketId: string): string | undefined
+  /**
    * A person's click on a pipeline card: add the reviewers they chose to the Swarm review, rerun its failing checks, or
    * close a submitted change. Returns what was done (the added accounts, the rerun checks).
    * @throws when the ticket or its review is unknown, or Swarm refused; the message says why.

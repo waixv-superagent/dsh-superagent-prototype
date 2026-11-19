@@ -1,0 +1,94 @@
+{
+  "schema": "2.0",
+  "config": {
+    "update_multi": true,
+    "width_mode": "default",
+    "summary": {
+      "content": "待你答：开工前 1 个问题"
+    }
+  },
+  "header": {
+    "title": {
+      "tag": "plain_text",
+      "content": "待你答 · 开工前 1 个问题"
+    },
+    "subtitle": {
+      "tag": "plain_text",
+      "content": "翻页头像闪烁 · 工单 aaaaaaaa"
+    },
+    "template": "orange"
+  },
+  "body": {
+    "direction": "vertical",
+    "padding": "12px 16px 16px 16px",
+    "vertical_spacing": "12px",
+    "elements": [
+      {
+        "tag": "markdown",
+        "content": "<at id=ou_70cfed1e3a0e4543b97503e4b3cf8363></at> 请回答这几个问题"
+      },
+      {
+        "tag": "markdown",
+        "content": "先定这几件事，方案卡就只问「能不能开工」。每题选一个。"
+      },
+      {
+        "tag": "form",
+        "name": "grill_form",
+        "vertical_spacing": "8px",
+        "elements": [
+          {
+            "tag": "markdown",
+            "content": "**Q1 · 状态放哪**\n放 ActionState 还是 ANS 实例？"
+          },
+          {
+            "tag": "markdown",
+            "content": "推荐：ActionState",
+            "text_size": "notation"
+          },
+          {
+            "tag": "select_static",
+            "name": "q1",
+            "required": true,
+            "width": "fill",
+            "placeholder": {
+              "tag": "plain_text",
+              "content": "选一个"
+            },
+            "options": [
+              {
+                "text": {
+                  "tag": "plain_text",
+                  "content": "ActionState（推荐）"
+                },
+                "value": "0"
+              },
+              {
+                "text": {
+                  "tag": "plain_text",
+                  "content": "ANS 实例"
+                },
+                "value": "1"
+              }
+            ]
+          },
+          {
+            "tag": "button",
+            "name": "submit_grill",
+            "form_action_type": "submit",
+            "type": "primary_filled",
+            "width": "fill",
+            "text": {
+              "tag": "plain_text",
+              "content": "提交回答，出方案卡"
+            }
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "全部选完再提交；提交后 worker 按回答出方案卡。想补充就回这条话题。",
+        "text_size": "notation"
+      }
+    ]
+  }
+}

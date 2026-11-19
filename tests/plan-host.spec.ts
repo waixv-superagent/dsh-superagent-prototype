@@ -1,19 +1,30 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Ticket, Trigger } from '../src/core/index.ts'
+import { KV } from '../src/kv.ts'
 import { notifyChat, notifyGrill, notifyPlan, type PlanHost } from '../src/app/plan.ts'
 
 const ticket = { id: 'a'.repeat(32), title: 'Fix', origin: { triggerId: 't1', triggerIds: ['t1'] }, channels: [] } as unknown as Ticket
+/** The same ticket started by a Feishu person, so a card can mention the person who asked. */
+const feishuTicket = { ...ticket, mandate: { actor: { source: 'feishu', id: 'ou_abc' } } } as unknown as Ticket
 function trigger(overrides: Partial<Trigger> = {}): Trigger {
   return { id: 't1', source: 'feishu', threads: [{ source: 'feishu', id: 'c1' }], actor: { source: 'feishu', id: 'u1' }, human: true,
     at: '2026-09-23T00:00:00Z', text: 'fix it', channel: { source: 'feishu', thread: 'c1', address: { chatId: 'oc_dm' } }, meta: { direct: true }, ...overrides }
 }
 function makeHost({ config = {} as Record<string, unknown>, source = trigger(), enabled = true, learned = '',
+  allowed = [{ id: 'ou_person' }],
   send = vi.fn(async (_args: string[]) => '{"data":{"message_id":"om_9"}}') } = {}) {
   const warn = vi.fn()
   const cards: Record<string, { ticketId: string; planAt: string; url?: string }> = {}
+  // The card mappings share one fake record; the mention budget is a separate KV key, so a send never overwrites the cards.
+  const mentionState = new Map<string, unknown>()
   const host: PlanHost = {
-    store: { settings: () => ({ sources: { feishu: { enabled: true, config } } }), triggers: { get: (id: string) => id === 't1' ? source : undefined },
-      get: () => cards, set: (_key: string, value: typeof cards) => { Object.assign(cards, value) } } as never,
+    store: { settings: () => ({ sources: { feishu: { enabled: true, config } }, policy: { sources: { feishu: { allowed } } } }),
+      triggers: { get: (id: string) => id === 't1' ? source : undefined },
+      get: (key: string) => key === KV.feishu.mentions ? mentionState.get(key) : cards,
+      set: (key: string, value: typeof cards) => {
+        if (key === KV.feishu.mentions) mentionState.set(key, value)
+        else Object.assign(cards, value)
+      } } as never,
     sources: { instance: () => ({ enabled }) as never },
     commands: { lark: send } as never,
     surfaces: { panelBase: (configured: string) => configured.trim() || learned },
@@ -117,6 +128,36 @@ describe('notifying a waiting plan', () => {
     const { host } = makeHost({ send: vi.fn(async (_args: string[]): Promise<string> => { throw new Error('offline') }) })
     expect(await notifyPlan(host, { ...ticket, plan })).toBeUndefined()
     expect(host.warn).toHaveBeenCalledWith(expect.stringContaining('offline'))
+  })
+  it('mentions the Feishu person who started the ticket, on the card and on its text fallback', async () => {
+    const { host, send } = makeHost()
+    expect(await notifyPlan(host, { ...feishuTicket, plan })).toBe('om_9')
+    const first = send.mock.calls[0]![0] as string[]
+    expect(JSON.stringify(JSON.parse(first[first.indexOf('--content') + 1]!))).toContain('<at id=ou_abc></at>')
+
+    const fallback = vi.fn(async (args: string[]) => {
+      if (args[args.indexOf('--msg-type') + 1] === 'interactive') throw new Error('bad card')
+      return '{"data":{"message_id":"om_text"}}'
+    })
+    const retry = makeHost({ send: fallback })
+    expect(await notifyPlan(retry.host, { ...feishuTicket, plan })).toBe('om_text')
+    const post = fallback.mock.calls[1]![0] as string[]
+    expect(JSON.parse(post[post.indexOf('--content') + 1]!).zh_cn.content[0][0]).toEqual({ tag: 'at', user_id: 'ou_abc' })
+  })
+  it('falls back to the first person the Feishu Policy allows for a ticket from another Source', async () => {
+    const { host, send } = makeHost({ config: { topicChat: 'oc_topic' }, source: trigger({ source: 'github' }), allowed: [{ id: 'ou_policy' }] })
+    expect(await notifyPlan(host, { ...ticket, plan })).toBe('om_9')
+    const args = send.mock.calls[0]![0] as string[]
+    expect(JSON.stringify(JSON.parse(args[args.indexOf('--content') + 1]!))).toContain('<at id=ou_policy></at>')
+  })
+  it('holds a second mention inside the per-ticket gap, while still sending the card', async () => {
+    const { host, send } = makeHost()
+    expect(await notifyPlan(host, { ...feishuTicket, plan })).toBe('om_9')
+    expect(await notifyPlan(host, { ...feishuTicket, plan: { ...plan, at: '2026-09-23T00:02:00Z' } })).toBe('om_9')
+    const cards = send.mock.calls.map(call => call[0] as string[]).filter(args => args.includes('interactive'))
+    const cardOf = (args: string[]): unknown => JSON.parse(args[args.indexOf('--content') + 1]!)
+    expect(JSON.stringify(cardOf(cards[0]!))).toContain('<at id=ou_abc></at>')
+    expect(JSON.stringify(cardOf(cards[1]!))).not.toContain('<at')
   })
 })
 describe('notifying a waiting grill', () => {

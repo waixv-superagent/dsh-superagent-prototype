@@ -1,0 +1,33 @@
+{
+  "schema": "2.0",
+  "config": {
+    "update_multi": true,
+    "width_mode": "default"
+  },
+  "header": {
+    "title": {
+      "tag": "plain_text",
+      "content": "检查已通过 · 待人工审核"
+    },
+    "subtitle": {
+      "tag": "plain_text",
+      "content": "翻页头像闪烁 · 工单 aaaaaaaa"
+    },
+    "template": "orange"
+  },
+  "body": {
+    "direction": "vertical",
+    "padding": "12px 12px 16px 12px",
+    "vertical_spacing": "10px",
+    "elements": [
+      {
+        "tag": "markdown",
+        "content": "<at id=ou_70cfed1e3a0e4543b97503e4b3cf8363></at>"
+      },
+      {
+        "tag": "markdown",
+        "content": "自动检查 11/11 通过"
+      }
+    ]
+  }
+}

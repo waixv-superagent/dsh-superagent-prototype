@@ -4,6 +4,7 @@ import { KV } from '../kv.ts'
 import { CliError } from '../infra/commands.ts'
 import { checkedImText } from '../infra/text.ts'
 import { attentionCard, messageIdOf, messageLink, pipelineStageCard } from './feishu-card.ts'
+import { claimMention, mentionIds } from './feishu-mention.ts'
 import { rememberSent, threadIdOf, ticketOpenLink, withTicketFooter } from './feishu-sent.ts'
 import { releaseReceipt } from './feishu-receipt.ts'
 import { jsonForCmd, feishuPostContent } from './feishu-text.ts'
@@ -136,12 +137,18 @@ export async function sendFeishu(host: ChannelHost, message: OutboundMessage, co
       // Fall through to the text reply; the question itself is already validated for the channel.
     }
   }
-  const reply = ['im', '+messages-reply', '--message-id', messageId, '--msg-type', 'post', '--content', feishuPostContent(text), '--reply-in-thread', '--idempotency-key', message.id]
+  // A milestone message may name the person it is for: the core names a Feishu actor, else the ticket's person is resolved
+  // from the Policy. A per-ticket budget keeps a burst of pipeline cards from paging them repeatedly.
+  const ticketId = message.ticketId ?? message.pipeline?.ticketId
+  const wanted = mentionIds(message.mention?.length ? message.mention
+    : message.pipeline && ticketId ? [host.mentionTarget?.(ticketId) ?? ''] : [])
+  const mention = wanted.length && (!ticketId || claimMention(host.state, ticketId)) ? wanted : []
+  const reply = ['im', '+messages-reply', '--message-id', messageId, '--msg-type', 'post', '--content', feishuPostContent(text, mention), '--reply-in-thread', '--idempotency-key', message.id]
   // A pipeline stage is a card with its links and actions; a card Feishu refuses falls back to the one-line text below.
   if (message.pipeline) {
     try {
       const sent = await host.commands.lark<unknown>(['im', '+messages-reply', '--message-id', messageId, '--msg-type', 'interactive',
-        '--content', jsonForCmd(pipelineStageCard(message.pipeline, checked, panelUrl ? ticketOpenLink(panelUrl, message.pipeline.ticketId) : undefined).card), '--reply-in-thread', '--idempotency-key', message.id])
+        '--content', jsonForCmd(pipelineStageCard(message.pipeline, checked, panelUrl ? ticketOpenLink(panelUrl, message.pipeline.ticketId) : undefined, mention).card), '--reply-in-thread', '--idempotency-key', message.id])
       const id = messageIdOf(sent)
       remember(sent)
       if (id && (message.pipeline.reviewers || message.pipeline.targets || message.pipeline.close || message.pipeline.rerun)) {

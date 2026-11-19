@@ -73,8 +73,12 @@ export class Replies extends EnginePart {
   pipelineNotice(ticket: Ticket, notice: PipelineNotice): void {
     const channel = this.sourceChannel(ticket)
     if (!channel) return
+    // The person who started the ticket, when a person did: a bot or CI message names no one to page.
+    const actor = ticket.mandate.actor
+    const trigger = this.repo.triggers.get(ticket.origin.triggerId)
+    const mention = actor.source === 'feishu' && trigger?.human ? [actor.id] : undefined
     this.options.outbox.send({ id: key('pipeline-reply', ticket.id, notice.event), channel, text: notice.text, kind: 'reply', ticketId: ticket.id,
-      pipeline: notice.card })
+      pipeline: notice.card, ...mention ? { mention } : {} })
   }
   private acknowledge(request: Extract<ReplyRequest, { purpose: 'acknowledgement' }>): Reply {
     const ticket = this.require(request.ticketId)

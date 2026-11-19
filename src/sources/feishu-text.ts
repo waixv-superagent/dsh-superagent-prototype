@@ -8,6 +8,8 @@ const ANGLE: Record<string, string> = { '<': '＜', '>': '＞' }
  * with cmd's syntax characters unicode-escaped (see `jsonForCmd`), not as full-width look-alikes.
  */
 export const textSafe = (text: string): string => text.replace(/[<>]/g, char => ANGLE[char] ?? char)
+/** A Feishu user's open_id, the only identity an at tag accepts here; a login or a bot app id is never put in one. */
+export const FEISHU_OPEN_ID = /^ou_[A-Za-z0-9]+$/
 /** The characters the Windows `.cmd` wrapper re-reads, and the JSON unicode escape that keeps each out of its argv. */
 const CMD_SYNTAX = /[<>&|^!%]/g
 const JSON_ESCAPE: Record<string, string> = {
@@ -22,11 +24,17 @@ const JSON_ESCAPE: Record<string, string> = {
  */
 export const jsonForCmd = (value: unknown): string => JSON.stringify(value).replace(CMD_SYNTAX, char => JSON_ESCAPE[char] ?? char)
 /**
- * The `post` content JSON for Markdown text. `JSON.stringify` escapes every newline, so the whole message reaches the CLI
- * as one argument even through the Windows `.cmd` wrapper that `Commands` runs with `cmd.exe /c`; a literal newline there
- * would be cut at the first line by cmd before the CLI ever saw it. A URL keeps its `&` and `%`, so a link stays clickable.
+ * The `post` content JSON for Markdown text, with one `at` element per open_id in `mention` before it. A Message whose
+ * Markdown goes through `textSafe` still mentions the person, because the at elements are structure rather than text: the
+ * tag is never parsed out of the escaped Markdown. `JSON.stringify` escapes every newline, so the whole message reaches the
+ * CLI as one argument even through the Windows `.cmd` wrapper that `Commands` runs with `cmd.exe /c`; a literal newline
+ * there would be cut at the first line by cmd before the CLI ever saw it. A URL keeps its `&` and `%`, so a link stays
+ * clickable.
  */
-export const feishuPostContent = (text: string): string => jsonForCmd({ zh_cn: { content: [[{ tag: 'md', text }]] } })
+export const feishuPostContent = (text: string, mention: readonly string[] = []): string => {
+  const tagged = [...new Set(mention.filter(id => FEISHU_OPEN_ID.test(id)))].map(user_id => ({ tag: 'at', user_id }))
+  return jsonForCmd({ zh_cn: { content: [[...tagged, { tag: 'md', text }]] } })
+}
 /**
  * Feishu's "open in the system browser" switch: a Jenkins or Swarm page needs a login the embedded web view cannot show,
  * and a ticket link needs a real browser both for that login and for the `dsh://` launch the desktop-app handoff offers.

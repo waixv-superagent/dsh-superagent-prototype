@@ -105,7 +105,12 @@ export interface OutboundMessage { id: string; channel: ChannelRef; text: string
    */
   attention?: { ticketId: string; attentionId: string; options: string[]; sections?: QuestionSection[] }
   /** A pipeline stage notice a channel may draw as a card with its links and actions; `text` stays the fallback. */
-  pipeline?: PipelineCard }
+  pipeline?: PipelineCard
+  /**
+   * Feishu open_ids a milestone message may mention, so a person who does not follow the conversation still hears it. A
+   * channel that cannot mention ignores it; the Feishu channel applies its own per-ticket budget before using it.
+   */
+  mention?: string[] }
 /** A queued message waits (`pending`), went out (`sent`), or was dropped because its conversation can never receive it (`dropped`). */
 export type ReplyStatus = 'pending' | 'sent' | 'dropped'
 /** The messages queued for Channels; the Engine queues them inside its commands, and a sender delivers them later. */

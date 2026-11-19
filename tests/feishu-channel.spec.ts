@@ -30,6 +30,22 @@ describe('Feishu outbound replies', () => {
     expect(content).not.toContain('\n')
     expect(JSON.parse(content)).toEqual({ zh_cn: { content: [[{ tag: 'md', text }]] } })
   })
+  it('carries a mention as a structured at element before the text, not as escaped markdown', () => {
+    const content = feishuPostContent('待你确认这张方案', ['ou_a', 'zhangsan', 'ou_a'])
+    expect(JSON.parse(content)).toEqual({ zh_cn: { content: [[{ tag: 'at', user_id: 'ou_a' }, { tag: 'md', text: '待你确认这张方案' }]] } })
+  })
+  it('mentions the ticket person on a milestone reply under the per-ticket budget', async () => {
+    const lark = vi.fn(async (_args: string[]) => ({ ok: true }))
+    const state = memory()
+    const milestone: OutboundMessage = { ...message('待你确认这张方案'), ticketId: 't1', mention: ['ou_a'] }
+    expect(await sendFeishu(host(lark, state), milestone)).toBe('sent')
+    const args = lark.mock.calls[0]![0] as string[]
+    expect(JSON.parse(args[args.indexOf('--content') + 1]!).zh_cn.content[0][0]).toEqual({ tag: 'at', user_id: 'ou_a' })
+    // The same ticket's next message within the gap still goes out, without a second at.
+    expect(await sendFeishu(host(lark, state), { ...milestone, id: 'reply-2' })).toBe('sent')
+    const again = lark.mock.calls[1]![0] as string[]
+    expect(JSON.parse(again[again.indexOf('--content') + 1]!).zh_cn.content[0][0]).toEqual({ tag: 'md', text: '待你确认这张方案' })
+  })
   it('replies with the full multi-line text through --content post, not --markdown', async () => {
     const lark = vi.fn(async (_args: string[]) => ({ ok: true }))
     const host = { commands: { lark }, state: { get: () => undefined, set: () => {} } } as never
