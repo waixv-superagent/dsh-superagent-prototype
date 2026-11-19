@@ -115,19 +115,19 @@ describe('ticket execution', () => {
   })
   it('pins a p4 ticket to the default workspace and leases its paths there', () => {
     const settings = SettingsSchema.parse({ executor: { backend: 'p4', workspaces: [
-      { id: 'sun', directory: 'E:/sun_mainline', p4Client: 'wanghuaiyang_sun_mainline' },
+      { id: 'sun', directory: 'E:/workspace', p4Client: 'agent_workspace' },
       { id: 'other', directory: 'E:/other' }] } })
     const execution = ticketExecution(ticket, accept(['Source/A']), settings, '/state')
     expect(execution.workspace).toBe('sun')
-    expect(execution.directory).toBe('E:/sun_mainline')
+    expect(execution.directory).toBe('E:/workspace')
     expect(execution.lease).toEqual(['Source/A'])
     expect(execution.assignment).toContain('DSH_SUPERAGENT_LEASE')
   })
   it('pins a p4 ticket that named no paths too, so it works in the shared tree alone', () => {
-    const settings = SettingsSchema.parse({ executor: { backend: 'p4', workspaces: [{ id: 'sun', directory: 'E:/sun_mainline' }] } })
+    const settings = SettingsSchema.parse({ executor: { backend: 'p4', workspaces: [{ id: 'sun', directory: 'E:/workspace' }] } })
     const execution = ticketExecution(ticket, accept(), settings, '/state')
     expect(execution.workspace).toBe('sun')
-    expect(execution.directory).toBe('E:/sun_mainline')
+    expect(execution.directory).toBe('E:/workspace')
     expect(execution.lease).toEqual([])
     expect(execution.assignment).toContain('DSH_SUPERAGENT_LEASE')
   })
