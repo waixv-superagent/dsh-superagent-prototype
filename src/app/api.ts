@@ -29,6 +29,10 @@ type Delivery = 'injected' | 'pending'
 
 export interface Api {
   'GET state': { response: StateView }
+  /** The panel reports which client its page runs in, so a ticket link can open where the person is working. */
+  'POST surface': { body: { surface: 'app' | 'web'; focused: boolean; visible: boolean; origin?: string }; response: { ok: true } }
+  /** The desktop app's panel takes the one Ticket a Feishu handoff asked it to show; a browser never gets one. */
+  'GET app-open': { query: { surface: 'app' | 'web' }; response: { ticketId?: string } }
   'GET overview': { response: OverviewView }
   /** Who holds the editor and for what, the queue and the host-run jobs, ue-mcp's view, the working Tickets, and what waits on a person. */
   'GET editor': { response: EditorPageView }
@@ -86,6 +90,8 @@ export interface Api {
   'POST tickets/:id/priority': { body: { level: PriorityLevel }; response: { level: PriorityLevel } }
   /** A person answers the ticket's open question from its page: one of its choices, or a written answer, and the worker continues. */
   'POST tickets/:id/answer': { body: { attentionId: string; option?: string; text?: string }; response: { answered: true } }
+  /** A person submits every answer of the structured grill before the plan card; the worker continues with one message. */
+  'POST tickets/:id/grill': { body: { grillId: string; answers: Record<string, number> }; response: { answered: true } }
   'POST tickets/:id/stop': { response: { stopped: true } }
   /** A person confirms a delivered ticket; running the submit stays theirs. */
   'POST tickets/:id/confirm': { response: { confirmed: true } }

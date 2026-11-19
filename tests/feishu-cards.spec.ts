@@ -1,41 +1,47 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Ticket } from '../src/core/index.ts'
 import type { SourceContext } from '../src/sources/host.ts'
-import { actionValue, attentionValue, formNote, handleCardAction, priorityValue, type CardAction } from '../src/sources/feishu-cards.ts'
+import { actionValue, attentionValue, formNote, grillAnswersOf, handleCardAction, priorityValue, type CardAction } from '../src/sources/feishu-cards.ts'
 
 const PLAN_AT = '2026-09-23T00:00:00Z'
 const ticket = (overrides: Partial<Ticket> = {}) => ({ id: 't1', title: 'Fix', mandate: { actor: { source: 'feishu', id: 'ou_1' } },
   plan: { text: '现象：x', at: PLAN_AT, waiting: true }, ...overrides }) as unknown as Ticket
-type CardRef = { ticketId: string; planAt?: string; attentionId?: string; at?: string; askAt?: string }
+type CardRef = { ticketId: string; planAt?: string; attentionId?: string; at?: string; askAt?: string; grillId?: string }
 const ASKED = { id: 'att-1', question: '先上 A 还是先上 B？', options: ['先上 A', '先上 B'] }
 
 function harness(plan: Ticket = ticket(), allowed: string[] = ['ou_1']) {
   const cards: Record<string, CardRef> = { om_1: { ticketId: 't1', planAt: PLAN_AT } }
   const asked: Record<string, CardRef> = { om_2: { ticketId: 't1', attentionId: 'att-1', at: PLAN_AT } }
   const priority: Record<string, CardRef> = { om_3: { ticketId: 't1', askAt: PLAN_AT } }
+  const grill: Record<string, CardRef> = { om_4: { ticketId: 't1', grillId: 'g1', at: PLAN_AT } }
   const decidePlan = vi.fn()
   const answerAttention = vi.fn(() => plan)
+  const answerGrill = vi.fn((_id: string, _grillId: string, answers: Record<string, number>) => ({ ...plan,
+    grill: plan.grill ? { ...plan.grill, answeredAt: '2026-09-23T00:01:00Z',
+      answers: plan.grill.questions.map(question => ({ questionId: question.id, option: answers[question.id]!, at: '2026-09-23T00:01:00Z', via: 'feishu' as const })) } : undefined }))
   const decidePriority = vi.fn(() => plan)
   const mayDecidePriority = vi.fn((_id: string, actor: string) => actor === 'ou_1')
   // The real rule: a Feishu ticket's own actor, else a person the Policy allows on Feishu (see source-context).
   const mayActOnCard = vi.fn((_id: string, actor: string) =>
     plan.mandate.actor.source === 'feishu' ? actor === plan.mandate.actor.id : allowed.includes(actor))
   const lark = vi.fn(async (_args: string[]) => '{}')
-  const families: Record<string, unknown> = { 'feishu-plan-cards': cards, 'feishu-attention-cards': asked, 'feishu-priority-cards': priority }
+  const families: Record<string, unknown> = { 'feishu-plan-cards': cards, 'feishu-attention-cards': asked, 'feishu-priority-cards': priority,
+    'feishu-grill-cards': grill }
   const ctx = {
     state: {
       get: (key: string) => families[key],
       set: (key: string, value: unknown) => {
-        const target = key === 'feishu-plan-cards' ? cards : key === 'feishu-attention-cards' ? asked : key === 'feishu-priority-cards' ? priority : undefined
+        const target = key === 'feishu-plan-cards' ? cards : key === 'feishu-attention-cards' ? asked : key === 'feishu-priority-cards' ? priority
+          : key === 'feishu-grill-cards' ? grill : undefined
         if (!target) return
         for (const id of Object.keys(target)) delete target[id]
         Object.assign(target, value)
       },
     },
-    tickets: { get: (id: string) => id === 't1' ? plan : undefined }, decidePlan, answerAttention, decidePriority, mayDecidePriority, mayActOnCard,
+    tickets: { get: (id: string) => id === 't1' ? plan : undefined }, decidePlan, answerAttention, answerGrill, decidePriority, mayDecidePriority, mayActOnCard,
     commands: { lark },
   } as unknown as SourceContext
-  return { ctx, cards, asked, priority, decidePlan, answerAttention, decidePriority, mayDecidePriority, mayActOnCard, lark }
+  return { ctx, cards, asked, priority, grill, decidePlan, answerAttention, answerGrill, decidePriority, mayDecidePriority, mayActOnCard, lark }
 }
 const action = (overrides: Partial<CardAction> = {}): CardAction => ({ event_id: 'e1', operator_id: 'ou_1', message_id: 'om_1',
   token: 'tok', action_tag: 'button', action_value: JSON.stringify({ v: 1, decision: 'approve' }), ...overrides })
@@ -192,5 +198,43 @@ describe('handling a question card action', () => {
     expect(mayActOnCard).toHaveBeenCalledWith('t1', 'ou_2')
     expect(answerAttention).toHaveBeenCalledWith('t1', 'att-1', '先上 A')
     expect(asked.om_2).toBeUndefined()
+  })
+})
+
+describe('handling a structured grill submit', () => {
+  const GRILL = { id: 'g1', at: PLAN_AT, answers: [], questions: [
+    { id: 'q1', title: '状态放哪', question: '放 ActionState 还是 ANS 实例？', options: ['ActionState', 'ANS 实例'], recommended: 0 },
+    { id: 'q2', title: '序列化时机', question: '只在需要时序列化？', options: ['是', '否'], recommended: 0 },
+  ] }
+  const submit = (overrides: Partial<CardAction> = {}): CardAction => action({ message_id: 'om_4', action_tag: 'form_submit',
+    action_value: undefined, form_value: JSON.stringify({ q1: '0', q2: '1' }), ...overrides })
+  it('records every answer together and replaces the card with what was chosen', async () => {
+    const { ctx, grill, answerGrill, lark } = harness(ticket({ grill: GRILL }))
+    await handleCardAction(ctx, submit())
+    expect(answerGrill).toHaveBeenCalledWith('t1', 'g1', { q1: 0, q2: 1 }, 'feishu')
+    expect(grill.om_4).toBeUndefined()
+    const data = JSON.parse((lark.mock.calls[0]![0] as string[])[(lark.mock.calls[0]![0] as string[]).indexOf('--data') + 1]!)
+    expect(JSON.stringify(data.card)).toContain('已收齐')
+    expect(JSON.stringify(data.card)).toContain('状态放哪：ActionState')
+  })
+  it('keeps the form and records nothing when a question is missing, and treats an answered grill as handled', async () => {
+    const { ctx, answerGrill, lark } = harness(ticket({ grill: GRILL }))
+    await handleCardAction(ctx, submit({ form_value: JSON.stringify({ q1: '0' }) }))
+    expect(answerGrill).not.toHaveBeenCalled()
+    expect(lark).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(JSON.parse((lark.mock.calls[0]![0] as string[])[(lark.mock.calls[0]![0] as string[]).indexOf('--data') + 1]!).card)).toContain('还差一个选择')
+
+    const answered = harness(ticket({ grill: { ...GRILL, answeredAt: '2026-09-23T00:01:00Z' } }))
+    await handleCardAction(answered.ctx, submit())
+    expect(answered.answerGrill).not.toHaveBeenCalled()
+    expect(answered.grill.om_4).toBeUndefined()
+    expect(JSON.stringify(JSON.parse((answered.lark.mock.calls[0]![0] as string[])[(answered.lark.mock.calls[0]![0] as string[]).indexOf('--data') + 1]!).card)).toContain('已处理')
+  })
+  it('reads only a complete set of real option values', () => {
+    const questions = GRILL.questions
+    expect(grillAnswersOf(JSON.stringify({ q1: '0', q2: '1' }), questions)).toEqual({ q1: 0, q2: 1 })
+    expect(grillAnswersOf(JSON.stringify({ q1: '0', q2: '9' }), questions)).toBeUndefined()
+    expect(grillAnswersOf(JSON.stringify({ q1: '0' }), questions)).toBeUndefined()
+    expect(grillAnswersOf('nope', questions)).toBeUndefined()
   })
 })

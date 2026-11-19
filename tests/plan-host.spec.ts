@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Ticket, Trigger } from '../src/core/index.ts'
-import { notifyChat, notifyPlan, type PlanHost } from '../src/app/plan.ts'
+import { notifyChat, notifyGrill, notifyPlan, type PlanHost } from '../src/app/plan.ts'
 
 const ticket = { id: 'a'.repeat(32), title: 'Fix', origin: { triggerId: 't1', triggerIds: ['t1'] }, channels: [] } as unknown as Ticket
 function trigger(overrides: Partial<Trigger> = {}): Trigger {
   return { id: 't1', source: 'feishu', threads: [{ source: 'feishu', id: 'c1' }], actor: { source: 'feishu', id: 'u1' }, human: true,
     at: '2026-09-23T00:00:00Z', text: 'fix it', channel: { source: 'feishu', thread: 'c1', address: { chatId: 'oc_dm' } }, meta: { direct: true }, ...overrides }
 }
-function makeHost({ config = {} as Record<string, unknown>, source = trigger(), enabled = true, send = vi.fn(async (_args: string[]) => '{"data":{"message_id":"om_9"}}') } = {}) {
+function makeHost({ config = {} as Record<string, unknown>, source = trigger(), enabled = true, learned = '',
+  send = vi.fn(async (_args: string[]) => '{"data":{"message_id":"om_9"}}') } = {}) {
   const warn = vi.fn()
   const cards: Record<string, { ticketId: string; planAt: string; url?: string }> = {}
   const host: PlanHost = {
@@ -15,6 +16,7 @@ function makeHost({ config = {} as Record<string, unknown>, source = trigger(), 
       get: () => cards, set: (_key: string, value: typeof cards) => { Object.assign(cards, value) } } as never,
     sources: { instance: () => ({ enabled }) as never },
     commands: { lark: send } as never,
+    surfaces: { panelBase: (configured: string) => configured.trim() || learned },
     warn,
   }
   return { host, warn, send, cards }
@@ -67,6 +69,14 @@ describe('notifying a waiting plan', () => {
     expect(JSON.stringify(card)).toContain('先上 A 还是先上 B？')
     expect(JSON.stringify(card)).toContain('先上 B')
   })
+  it('links the ticket through the browser origin the panel last reported when no address is configured', async () => {
+    const { host, send } = makeHost({ learned: 'https://10.104.0.40:9443' })
+    expect(await notifyPlan(host, { ...ticket, plan })).toBe('om_9')
+    const args = send.mock.calls[0]![0] as string[]
+    const card = JSON.parse(args[args.indexOf('--content') + 1]!)
+    expect(JSON.stringify(card)).toContain('https://10.104.0.40:9443/orchestrator/ticket/')
+    expect(JSON.stringify(card)).toContain('lk_jump_to_browser=true')
+  })
   it('replies in the ticket topic when its replies moved there', async () => {
     const { host, send } = makeHost()
     const moved = { ...ticket, replyChannel: { source: 'feishu' as const, thread: 'feishu:oc_topic',
@@ -107,5 +117,37 @@ describe('notifying a waiting plan', () => {
     const { host } = makeHost({ send: vi.fn(async (_args: string[]): Promise<string> => { throw new Error('offline') }) })
     expect(await notifyPlan(host, { ...ticket, plan })).toBeUndefined()
     expect(host.warn).toHaveBeenCalledWith(expect.stringContaining('offline'))
+  })
+})
+describe('notifying a waiting grill', () => {
+  const grill = { id: 'g1', at: '2026-09-23T00:00:00Z', answers: [], questions: [
+    { id: 'q1', title: '状态放哪', question: '放 ActionState 还是 ANS 实例？', options: ['ActionState', 'ANS 实例'], recommended: 0 },
+  ] }
+  it('sends one form card into the ticket topic and remembers which grill it asks', async () => {
+    const { host, send, cards } = makeHost()
+    const moved = { ...ticket, grill, replyChannel: { source: 'feishu' as const, thread: 'feishu:oc_topic',
+      address: { chatId: 'oc_topic', messageId: 'om_topic' } } } as Ticket
+    expect(await notifyGrill(host, moved)).toBe('om_9')
+    const args = send.mock.calls[0]![0] as string[]
+    expect(args.slice(0, 6)).toEqual(['im', '+messages-reply', '--message-id', 'om_topic', '--msg-type', 'interactive'])
+    expect(args).toContain('--reply-in-thread')
+    const card = JSON.parse(args[args.indexOf('--content') + 1]!)
+    expect(JSON.stringify(card)).toContain('select_static')
+    expect(JSON.stringify(card)).toContain('submit_grill')
+    expect(cards.om_9).toMatchObject({ ticketId: ticket.id, grillId: 'g1' })
+  })
+  it('does nothing for an answered grill, a ticket with no chat, or a Source that is off, and reports a failed send', async () => {
+    const { host, send } = makeHost()
+    expect(await notifyGrill(host, { ...ticket, grill: { ...grill, answeredAt: '2026-09-23T00:01:00Z' } })).toBeUndefined()
+    expect(send).not.toHaveBeenCalled()
+    const off = makeHost({ enabled: false })
+    expect(await notifyGrill(off.host, { ...ticket, grill })).toBeUndefined()
+    expect(off.warn).toHaveBeenCalledWith(expect.stringContaining('Feishu Source'))
+    const group = makeHost({ source: trigger({ meta: { direct: false } }) })
+    expect(await notifyGrill(group.host, { ...ticket, grill })).toBeUndefined()
+    expect(group.warn).toHaveBeenCalledWith(expect.stringContaining('no Feishu conversation'))
+    const failed = makeHost({ send: vi.fn(async (_args: string[]): Promise<string> => { throw new Error('offline') }) })
+    expect(await notifyGrill(failed.host, { ...ticket, grill })).toBeUndefined()
+    expect(failed.warn).toHaveBeenCalledWith(expect.stringContaining('offline'))
   })
 })

@@ -27,3 +27,15 @@ export const jsonForCmd = (value: unknown): string => JSON.stringify(value).repl
  * would be cut at the first line by cmd before the CLI ever saw it. A URL keeps its `&` and `%`, so a link stays clickable.
  */
 export const feishuPostContent = (text: string): string => jsonForCmd({ zh_cn: { content: [[{ tag: 'md', text }]] } })
+/**
+ * Feishu's "open in the system browser" switch: a Jenkins or Swarm page needs a login the embedded web view cannot show,
+ * and a ticket link needs a real browser both for that login and for the `dsh://` launch the desktop-app handoff offers.
+ * A non-http URL and one already carrying either switch pass through unchanged.
+ */
+export function browserLink(url: string): string {
+  let parsed: URL
+  try { parsed = new URL(url) } catch { return url }
+  if (!/^https?:$/.test(parsed.protocol)) return url
+  for (const name of ['lk_jump_to_browser', 'lk_mobile_jump_to_browser']) if (!parsed.searchParams.has(name)) parsed.searchParams.append(name, 'true')
+  return parsed.href
+}

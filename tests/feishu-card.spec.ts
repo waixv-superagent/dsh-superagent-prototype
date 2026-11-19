@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Ticket } from '../src/core/index.ts'
-import { attentionCard, attentionResolvedCard, attentionStaleCard, messageIdOf, messageUrlOf, planCard, resolvedCard, reviseCard, sendCard,
+import { attentionCard, attentionResolvedCard, attentionStaleCard, grillCard, grillResolvedCard, messageIdOf, messageUrlOf, planCard, resolvedCard, reviseCard, sendCard,
   staleCard } from '../src/sources/feishu-card.ts'
 
 const PLAN = `现象：翻页时头像闪一下
@@ -401,6 +401,44 @@ describe('sending a card', () => {
     expect(messageUrlOf('{"messages":[{"message_app_link":"https://applink.feishu.cn/y"}]}')).toBe('https://applink.feishu.cn/y')
     expect(messageUrlOf({ data: { messages: [] } })).toBeUndefined()
     expect(messageUrlOf('not json')).toBeUndefined()
+  })
+})
+
+describe('structured grill card', () => {
+  const grill = {
+    id: 'g1', at: '2026-09-23T00:00:00Z',
+    questions: [
+      { id: 'q1', title: '状态放哪', question: '放 ActionState 还是 ANS 实例？', options: ['ActionState', 'ANS 实例'], recommended: 0 },
+      { id: 'q2', title: '序列化时机', question: '只在需要时序列化？', options: ['是', '否'], recommended: 0 },
+    ],
+    answers: [],
+  }
+  it('asks every decision in one form, with one submit and the recommendation marked', () => {
+    const { card, text } = grillCard(ticket, grill)
+    const elements = (card.body as { elements: Element[] }).elements
+    const form = elements.find(element => element.tag === 'form')!
+    expect(form.elements!.filter(element => element.tag === 'select_static')).toHaveLength(2)
+    expect(form.elements!.filter(element => element.tag === 'button')).toHaveLength(1)
+    const fields = JSON.stringify(form)
+    expect(fields).toContain('（推荐）')
+    expect(fields).toContain('submit_grill')
+    expect(fields).toContain('提交回答')
+    // The selects sit in the same form as the submit, so one submit carries every answer.
+    expect(fields.indexOf('select_static')).toBeLessThan(fields.indexOf('submit_grill'))
+    expect(text).toContain('q1=A')
+  })
+  it('replaces the form with every answer, and puts the confirmed choices on the plan card', () => {
+    const answers = [{ questionId: 'q1', option: 0, at: '2026-09-23T00:01:00Z', via: 'feishu' as const },
+      { questionId: 'q2', option: 1, at: '2026-09-23T00:01:00Z', via: 'feishu' as const }]
+    const resolved = grillResolvedCard(ticket, { ...grill, answers })
+    expect(JSON.stringify(resolved.card)).toContain('状态放哪：ActionState')
+    expect(JSON.stringify(resolved.card)).toContain('序列化时机：否')
+    const plan = planCard(ticket, { text: PLAN, grill: { ...grill, answers } })
+    expect(JSON.stringify(plan.card)).toContain('已确认')
+    expect(JSON.stringify(plan.card)).toContain('状态放哪：ActionState')
+    expect(plan.text).toContain('已确认')
+    // A plan without a grill is unchanged: no empty confirmed block.
+    expect(JSON.stringify(planCard(ticket, { text: PLAN }).card)).not.toContain('已确认')
   })
 })
 

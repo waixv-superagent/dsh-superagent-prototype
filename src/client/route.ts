@@ -7,7 +7,7 @@ import type { T } from './text.ts'
 
 export const TABS = ['editor', 'source', 'trigger', 'eval', 'execution', 'settings'] as const
 export type Tab = typeof TABS[number]
-export const SETTINGS_GROUPS = ['source', 'eval', 'execution', 'prompts', 'deployment'] as const
+export const SETTINGS_GROUPS = ['source', 'eval', 'execution', 'knowledge', 'prompts', 'deployment'] as const
 export type SettingsGroup = typeof SETTINGS_GROUPS[number]
 /** The views the 概览 tab switches between: the editor page, the duty-desk board, and the ticket relation graph. */
 export const HOME_VIEWS = ['editor', 'board', 'graph'] as const
@@ -81,9 +81,10 @@ export const lastSettingsGroup = ({ route, group }: Location): SettingsGroup => 
   : group ?? 'source'
 /**
  * `?view=board` (or the legacy `?page=overview`) opens the duty-desk board directly, as the Feishu status card links to it;
- * `?ticket=<id>` opens that ticket's page, as each bot message a ticket sends in Feishu links back to it.
+ * `?ticket=<id>` opens that ticket's page, as each bot message a ticket sends in Feishu links back to it. The panel
+ * selects itself for one of these on a fresh page load (see `apply`), because DSH starts on the Conversation.
  */
-function linkedRoute(): Route | undefined {
+export function deepLinkRoute(): Route | undefined {
   if (typeof window === 'undefined') return undefined
   const params = new URLSearchParams(window.location.search)
   const ticket = params.get('ticket')?.trim()
@@ -117,7 +118,7 @@ export function initialLocation(): Location {
     const remembered = storedLocation()
     return remembered && JSON.stringify(remembered.route) !== JSON.stringify(own.location.route) ? remembered : own.location
   }
-  const linked = linkedRoute()
+  const linked = deepLinkRoute()
   if (linked) return { route: linked, stack: [] }
   return storedLocation() ?? { route: HOME, stack: [] }
 }

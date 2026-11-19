@@ -12,7 +12,7 @@ import type { ChannelRef, OutboundMessage, Trigger } from '../src/core/index.ts'
 import { planCard } from '../src/sources/feishu-card.ts'
 import { feishuLink, sendFeishu } from '../src/sources/feishu-channel.ts'
 import { feishuKind } from '../src/sources/feishu.ts'
-import { feishuIds, ticketFooter, ticketPanelLink, withTicketFooter } from '../src/sources/feishu-sent.ts'
+import { feishuIds, ticketFooter, ticketOpenLink, ticketPanelLink, withTicketFooter } from '../src/sources/feishu-sent.ts'
 import { feishuChannel, feishuTriggerId } from '../src/sources/feishu-trigger.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 import { SettingsSchema } from '../src/policy.ts'
@@ -20,11 +20,14 @@ import { IM_WORDS, wordCount } from '../src/infra/text.ts'
 
 const PANEL = 'https://panel.example.com:9443'
 const TICKET = '96c4cb5233453965b1e35a008b0eb3b7'
+/** The smart link as Feishu sees it: the system-browser switch is appended so the panel's login and `dsh://` both work. */
+const OPEN = `${PANEL}/orchestrator/ticket/${TICKET}?lk_jump_to_browser=true&lk_mobile_jump_to_browser=true`
 
 describe('the ticket link a bot message carries', () => {
   it('opens the ticket page of the configured panel, and is absent without one', () => {
     expect(ticketPanelLink(`${PANEL}/`, TICKET)).toBe(`${PANEL}/?ticket=${TICKET}`)
-    expect(ticketFooter(PANEL, TICKET)).toBe(`[工单 96c4cb52 ↗](${PANEL}/?ticket=${TICKET})`)
+    expect(ticketOpenLink(`${PANEL}/`, TICKET)).toBe(OPEN)
+    expect(ticketFooter(PANEL, TICKET)).toBe(`[工单 96c4cb52 ↗](${OPEN})`)
     expect(withTicketFooter('好了', '', TICKET)).toBe('好了')
     expect(withTicketFooter('好了', PANEL, undefined)).toBe('好了')
   })
@@ -55,7 +58,7 @@ describe('sending a ticket\'s message', () => {
     const full = Array.from({ length: IM_WORDS }, () => 'word').join(' ')
     expect(wordCount(full)).toBe(IM_WORDS)
     expect(await sendFeishu(h.host, reply(full, TICKET), { panelUrl: PANEL })).toBe('sent')
-    expect(sentText(h.lark)).toBe(`${full}\n[工单 96c4cb52 ↗](${PANEL}/?ticket=${TICKET})`)
+    expect(sentText(h.lark)).toBe(`${full}\n[工单 96c4cb52 ↗](${OPEN})`)
     await expect(sendFeishu(h.host, reply(`${full} more`, TICKET), { panelUrl: PANEL })).rejects.toThrow(/maximum is 100/)
   })
   it('sends the text unchanged when no panel is configured or the message has no ticket', async () => {
@@ -82,7 +85,7 @@ describe('sending a ticket\'s message', () => {
     const asked = { ...reply('先上 A 还是 B？', TICKET), attention: { ticketId: TICKET, attentionId: 'att', options: ['A', 'B'] } }
     expect(await sendFeishu(h.host, asked, { panelUrl: PANEL })).toBe('sent')
     const args = h.lark.mock.calls[0]![0]
-    expect(args[args.indexOf('--content') + 1]).toContain(`?ticket=${TICKET}`)
+    expect(args[args.indexOf('--content') + 1]).toContain(`orchestrator/ticket/${TICKET}`)
     expect(h.saved[KV.feishu.sent('om_card')]).toMatchObject({ ticketId: TICKET, chatId: 'oc_dm' })
   })
   it('reads the panel address from the Feishu settings when the registry sends', async () => {
@@ -91,14 +94,17 @@ describe('sending a ticket\'s message', () => {
     sources.register(feishuKind)
     const h = host()
     expect(await sources.send(reply('收到', TICKET), h.host)).toBe('sent')
-    expect(sentText(h.lark)).toContain(`${PANEL}/?ticket=${TICKET}`)
+    expect(sentText(h.lark)).toContain(`${PANEL}/orchestrator/ticket/${TICKET}`)
   })
-  it('links the plan card to its ticket only when a link is given', () => {
+  it('links the plan card to its ticket only when a link is given, and makes the whole card open it', () => {
     const plan = { text: '现象：x', template: 'fix' as const }
     expect(JSON.stringify(planCard({ id: TICKET, title: 't' }, plan).card)).not.toContain('?ticket=')
-    const linked = planCard({ id: TICKET, title: 't' }, plan, ticketPanelLink(PANEL, TICKET))
-    expect(JSON.stringify(linked.card)).toContain(`${PANEL}/?ticket=${TICKET}`)
-    expect(linked.text.endsWith(`(${PANEL}/?ticket=${TICKET})`)).toBe(true)
+    const plain = planCard({ id: TICKET, title: 't' }, plan)
+    expect((plain.card as { card_link?: unknown }).card_link).toBeUndefined()
+    const linked = planCard({ id: TICKET, title: 't' }, plan, ticketOpenLink(PANEL, TICKET))
+    expect(JSON.stringify(linked.card)).toContain(OPEN)
+    expect((linked.card as { card_link: { url: string } }).card_link.url).toBe(OPEN)
+    expect(linked.text.endsWith(`(${OPEN})`)).toBe(true)
   })
 })
 

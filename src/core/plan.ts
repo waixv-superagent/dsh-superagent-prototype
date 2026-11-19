@@ -1,5 +1,6 @@
 /** The P1 plan gate (docs/012): a ticket's phases, the worker's fixed plan template, and the person's one-word decision. */
 import type { PlanDiff } from './diff.ts'
+import type { Grill, GrillQuestion } from './model.ts'
 import { ticketKind } from './kind.ts'
 import { liveTicket, type ExecutionMode, type ModelRoute, type QuestionSection, type Ticket } from './model.ts'
 
@@ -39,6 +40,11 @@ export interface Plan {
    * inline or side by side, so a person reviews code before approving instead of reading a description of it.
    */
   diff?: PlanDiff
+  /**
+   * The structured question round answered before this plan was submitted, when the worker held one: the card shows the
+   * confirmed choices in a `已确认` block, so the only decision left is whether work may start.
+   */
+  grill?: Grill
   /**
    * The phases a phased ticket's plan splits its work into, oldest first: approving the plan also authorizes each phase's
    * model route, so the worker dispatches a team instead of asking for a roster card. Absent on the standard flow.
@@ -207,6 +213,52 @@ export const validCardOptions = (options: readonly string[]): boolean =>
   options.length >= CARD_OPTION_LIMITS.min && options.length <= CARD_OPTION_LIMITS.max
   && new Set(options).size === options.length
   && options.every(label => label.trim().length > 0 && Array.from(label).length <= CARD_OPTION_LIMITS.label)
+/**
+ * How a structured grill stays one round a person can answer in one pass: at most four decisions, each a short title and one
+ * paragraph, 2–4 concrete options, and a recommended one. The limits are the card's, so no worker turns the round into the
+ * long document or the one-question-at-a-time drip the old grill instruction allowed.
+ */
+export const GRILL_LIMITS = { minQuestions: 1, maxQuestions: 4, title: 24, question: 200,
+  minOptions: 2, maxOptions: 4, option: 20 } as const
+/** What is wrong with a worker's grill questions, worded for its refusal, or undefined when a person can answer them. */
+export function grillProblem(questions: readonly Pick<GrillQuestion, 'title' | 'question' | 'options' | 'recommended'>[]): string | undefined {
+  if (questions.length < GRILL_LIMITS.minQuestions || questions.length > GRILL_LIMITS.maxQuestions) {
+    return `a grill round asks ${GRILL_LIMITS.minQuestions} to ${GRILL_LIMITS.maxQuestions} questions, not ${questions.length}`
+  }
+  for (const [index, item] of questions.entries()) {
+    const title = item.title?.trim() ?? ''
+    if (!title || Array.from(title).length > GRILL_LIMITS.title) return `question ${index + 1} needs a title of at most ${GRILL_LIMITS.title} characters`
+    const question = item.question?.trim() ?? ''
+    if (!question || Array.from(question).length > GRILL_LIMITS.question) return `question ${index + 1} needs one question of at most ${GRILL_LIMITS.question} characters`
+    const options = item.options ?? []
+    if (options.length < GRILL_LIMITS.minOptions || options.length > GRILL_LIMITS.maxOptions) {
+      return `question ${index + 1} offers ${GRILL_LIMITS.minOptions} to ${GRILL_LIMITS.maxOptions} options, not ${options.length}`
+    }
+    if (new Set(options.map(option => option.trim())).size !== options.length) return `question ${index + 1} lists the same option twice`
+    if (options.some(option => !option.trim() || Array.from(option.trim()).length > GRILL_LIMITS.option)) {
+      return `question ${index + 1} needs every option to be a short, non-empty label of at most ${GRILL_LIMITS.option} characters`
+    }
+    if (!Number.isInteger(item.recommended) || item.recommended < 0 || item.recommended >= options.length) {
+      return `question ${index + 1} must recommend one of its options`
+    }
+  }
+  return undefined
+}
+/** The questions and chosen options of a grill, in the order a card, the plan block and the worker's Input list them. */
+export function grillAnswers(grill: Pick<Grill, 'questions' | 'answers'>): { title: string; option: string }[] {
+  return grill.questions.flatMap(question => {
+    const answer = grill.answers.find(item => item.questionId === question.id)
+    const option = answer ? question.options[answer.option] : undefined
+    return option ? [{ title: question.title, option }] : []
+  })
+}
+/** The confirmed choices as one line each, for a card block, the panel and the answer Input the worker reads. */
+export function grillAnswerLines(grill: Pick<Grill, 'questions' | 'answers'>): string[] {
+  return grillAnswers(grill).map(item => `${item.title}：${item.option}`)
+}
+/** The grill while it waits for its answers; undefined when it was answered, replaced, or the ticket ended. */
+export const grillWaiting = (ticket: Pick<Ticket, 'grill' | 'ended'>): Grill | undefined =>
+  liveTicket(ticket) && ticket.grill && !ticket.grill.answeredAt ? ticket.grill : undefined
 /** Whether plan choices are valid labels and, when asked, each carries the consequence it would have. */
 export const validPlanOptions = (options: readonly PlanOption[], requireDescription = false): boolean =>
   validCardOptions(options.map(option => option.label.trim()))

@@ -384,6 +384,35 @@ export interface Attention { id: string; question: string; /** The worker's choi
   model?: ModelRoute
   /** The agent team this question asks the person to allow: each role, its job and its model route; absent on an ordinary question. */
   team?: TeamRoute[] }
+/**
+ * One decision a worker asks before the plan card (docs/012 §2): a short title, the question, the concrete choices and
+ * which one the worker recommends. The person answers every question in one form; the answers become the plan's
+ * `已确认` block, so the card that follows asks only whether work may start.
+ */
+export interface GrillQuestion {
+  /** The form field and answer key, `q1`–`q4`, assigned by the host so a card never carries two questions under one name. */
+  id: string
+  title: string
+  question: string
+  options: string[]
+  /** Index into `options` of the answer the worker recommends. */
+  recommended: number
+}
+/** A person's answer to one grill question: the chosen option, when, and through which surface. */
+export interface GrillAnswer { questionId: string; option: number; at: string; via: 'feishu' | 'panel' }
+/**
+ * The one structured question round a worker may run before a plan card. `answers` fills as the person answers; once every
+ * question is answered the round is done and its one Input wakes the worker. A ticket holds at most one unanswered grill,
+ * and at most one per plan attempt, so a worker cannot drip questions one at a time as the old grill did.
+ */
+export interface Grill {
+  id: string
+  at: string
+  questions: GrillQuestion[]
+  answers: GrillAnswer[]
+  /** Set once every question has an answer; the host then delivers the answers as one Input. */
+  answeredAt?: string
+}
 /** What a person does with a ticket the idle analysis sorted: put it in the attention pool, merge it into a duplicate, or let it sleep. */
 export type AnalysisVerdict = 'promote' | 'merge' | 'archive'
 /**
@@ -526,6 +555,11 @@ export interface Ticket {
   pipeline?: TicketPipeline
   /** The P1 gate: the worker's plan and the person's decision on it (see `core/plan.ts`). */
   plan?: Plan
+  /**
+   * The structured question round before this plan attempt (docs/012 §2): at most one at a time, at most one per attempt.
+   * Its answers reach the worker as one Input and are copied into the plan card as `已确认`.
+   */
+  grill?: Grill
   /**
    * The plans a back-move to the plan phase replaced, oldest first: each round's text, decision and feedback stay readable
    * after a person reopens the gate for added scope (see `Tickets.resetPhase` and docs/031).

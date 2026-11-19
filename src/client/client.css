@@ -376,6 +376,12 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-plan-text { min-width: 0; max-width: 78ch; margin: 0; line-height: 1.7; overflow-wrap: anywhere; }
 .dt-plan-block { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .dt-plan-block-head { color: var(--dsw-alias-label-tertiary); font-size: 12px; font-weight: 600; letter-spacing: 0.02em; }
+/* The structured grill before a plan card: each decision and its options, then one submit. */
+.dt-grill { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 0.5px solid var(--dsw-alias-border-l3); border-left: 3px solid var(--dsw-alias-warning-primary, var(--dsw-alias-brand-primary)); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); }
+.dt-grill-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.dt-grill-head strong { font-size: 14px; font-weight: 600; }
+.dt-grill-question { display: flex; flex-direction: column; gap: 6px; }
+.dt-plan-confirmed { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--dsw-alias-bg-layer-2); font-size: 13px; }
 .dt-plan-points { display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 18px; line-height: 1.7; }
 .dt-plan-points li { padding-left: 2px; }
 .dt-plan-files { overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); }

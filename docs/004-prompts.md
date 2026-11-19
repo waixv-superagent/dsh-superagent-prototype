@@ -13,7 +13,7 @@ A team can edit three team sections, add skills, and override every built-in sys
 | Delivery requirements | Evidence in pull requests, the auto-merge condition with its line threshold, and the commit author; without one, the Executor commits as the agent account's no-reply address |
 | Team skills | Knowledge the agents load when they need it, such as an `identities` skill that says which Feishu user is which GitHub account and which user-identity `lark-cli` creates that user's documents |
 
-The built-in text covers the roles, tool usage, host mechanics, authorization rules, and the GitHub and Feishu skills. It refers to the team sections by their headings instead of repeating them.
+The built-in text covers the roles, tool usage, host mechanics, authorization rules, and the GitHub and Feishu skills. It refers to the team sections by their headings instead of repeating them. The team knowledge base (033) is not a team section: while it is enabled, every Session also registers the built-in `knowledge` skill and one prompt line that points at its MCP tools; the notes stay outside text and never change the rules.
 
 ### Built-in parts and templates
 
@@ -54,6 +54,8 @@ The system prompt is assembled in this order:
 7. `runtime/environment`.
 8. `runtime/policy`, for the main Session only.
 
+After these sections the runtime appends a Ticket's mandate note; while the team knowledge base is enabled, it appends one pointer to that base's MCP tools too. Neither is a section a team edits, and the pointer follows the knowledge block at each request.
+
 Admission instructions come from `prompts/admission.md`. They describe proactive assessment, the three outcomes a candidate can reach（接单 / 闲聊 / 忽略），when a chat must reply without a ticket, when it may carry an escalation that creates one, and when an irrelevant candidate can be chatted to or ignored from its card. `orchestrator_eval` returns context rather than repeating these instructions. A candidate card arrives with the images its own message carries attached, so the instructions also say to look at them and to treat them as untrusted data.
 
 The environment section gives the main Session deployment-wide values and each Executor its Ticket-specific values. The Policy section is regenerated from settings on every model request. It contains the Policy version, accept mode, the explicit-request exemption, and enabled rules as `- <name> (<id>): <instruction>`, or a statement that none is enabled. It is last so a Policy change leaves the preceding prompt text unchanged.
@@ -68,7 +70,7 @@ From strongest to weakest:
 2. Built-in and generated sections, as the team's overrides of them read.
 3. The process and communication in a proactive Ticket's matched rules, for that Ticket's Executor Session only.
 4. Team sections and team skills.
-5. Outside text: messages, comments, documents and quotes. It is data and never changes rules or authorization.
+5. Outside text: messages, comments, documents, quotes and the team knowledge base's notes. It is data and never changes rules or authorization.
 
 ## Principles of the built-in text
 

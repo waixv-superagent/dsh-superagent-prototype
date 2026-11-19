@@ -77,6 +77,8 @@ export const KV = {
     receipts: record<Record<string, ReceiptReaction>>('feishu-receipts'),
     /** Plan card `message_id` to the ticket, plan and message link it asks about, so a button click decides without a Trigger. */
     cards: record<Record<string, { ticketId: string; planAt: string; url?: string }>>('feishu-plan-cards'),
+    /** Grill form `message_id` to the ticket, its waiting grill and its own message link, so a submit answers that round. */
+    grillCards: record<Record<string, { ticketId: string; grillId: string; at: string; url?: string }>>('feishu-grill-cards'),
     /** Question message (card or plain text) `message_id` to the ticket, attention, and its own message link, so a click
      * answers it and the panel's answer button opens the question rather than the chat. */
     attentionCards: record<Record<string, { ticketId: string; attentionId: string; at: string; url?: string }>>('feishu-attention-cards'),

@@ -23,8 +23,8 @@ import type { EditorScheduler } from '../editor-scheduler.ts'
 import type { EditorGatekeeper } from '../editor-gatekeeper.ts'
 
 export interface ExecutorToolsHost {
-  readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'submitPlan' | 'settlePlan' | 'advancePhase'
-    | 'resetPhase' | 'redispatchTicket' | 'widenLease' | 'recordPipeline' | 'rerunPipeline' | 'authorizeModelFromPerson'>
+  readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'submitPlan' | 'settlePlan' | 'askGrill'
+    | 'advancePhase' | 'resetPhase' | 'redispatchTicket' | 'widenLease' | 'recordPipeline' | 'rerunPipeline' | 'authorizeModelFromPerson'>
   readonly store: Pick<Store, 'tickets' | 'settings' | 'replyStatus' | 'atomic'>
   readonly sessions: Pick<Sessions, 'relay' | 'notify' | 'prompt'>
   readonly resources: ResourceHost
@@ -36,6 +36,8 @@ export interface ExecutorToolsHost {
   models(): Promise<ModelCatalog>
   /** Sends a submitted P1 plan to the person who decides it, and returns the card's message id when it went out. */
   notifyPlan(ticket: Ticket): Promise<string | undefined>
+  /** Sends the structured grill before the plan card, and returns the card's message id when it went out. */
+  notifyGrill(ticket: Ticket): Promise<string | undefined>
   /**
    * Hands back a request a person typed into this worker's Session, which has no Trigger: the host makes it a Web Source
    * request, records this ticket's hand-back, and queues it for Eval. `queued` is false when the Policy filtered it, and
@@ -266,9 +268,31 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
       },
     }),
     tool({
-      name: 'orchestrator_phase',
-      description: 'Move this ticket one phase forward: verify once implementation is done, deliver once verification passed; a skipped step is refused. On a person\'s explicit request, `plan` (to plan added scope) or `implement` moves it back, with their message as `basis` and their `reason`. changelist, swarm_review and ready belong to deliver.',
+      name: 'orchestrator_grill',
+      description: 'Ask the person one structured round of at most four decisions before the plan card, so the card does not '
+        + 're-ask what they already chose: each question names one decision, offers 2–4 concrete options, and marks the one you '
+        + 'recommend. One form asks them all; their answers arrive as one message, and the plan card lists them as 已确认. Ask '
+        + 'only what changes the plan and that you cannot find yourself, at most once per plan attempt, after enough context and '
+        + 'before orchestrator_plan. End the turn and wait: a plan submitted while the grill waits is refused.',
       schema: z.object({
+        questions: z.array(z.object({
+          title: z.string().trim().min(1).max(24).describe('The decision in a few words, shown as Q1 · title on the card.'),
+          question: z.string().trim().min(1).max(200).describe('One decision-sized question for the person, not a document; find facts yourself instead of asking them.'),
+          options: z.array(z.string().trim().min(1).max(20)).min(2).max(4).describe('2–4 concrete labels the person chooses between.'),
+          recommended: z.number().int().min(0).max(3).describe('The index into options of your recommended answer; the card marks it as 推荐.'),
+        }).strict()).min(1).max(4).describe('At most four decisions, each answerable in one pass.'),
+      }).strict(),
+      execute: async args => {
+        const updated = host.engine.askGrill(ticketId, args.questions)
+        const message = await host.notifyGrill(updated)
+        return { asked: true, questions: updated.grill?.questions.length ?? 0, notified: message !== undefined,
+          note: message ? 'One round asked; end the turn and wait for the person\'s answers, which arrive as one message.'
+            : 'The grill was recorded but its card could not be sent; the person can answer it in the ticket panel, or report blocked if they cannot see it.' }
+      },
+    }),
+    tool({
+      name: 'orchestrator_phase',
+      description: 'Move this ticket one phase forward: verify once implementation is done, deliver once verification passed; a skipped step is refused. On a person\'s explicit request, `plan` (to plan added scope) or `implement` moves it back, with their message as `basis` and their `reason`. changelist, swarm_review and ready belong to deliver.',      schema: z.object({
         phase: z.enum(['plan', 'implement', 'verify', 'deliver']).describe('verify or deliver: one step forward; plan or implement: back, on a person\'s request.'),
         reason: z.string().trim().max(500).optional().describe('Back-moves: the person\'s reason in one sentence.'),
         basis: z.string().trim().max(300).optional()

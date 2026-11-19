@@ -39,6 +39,11 @@ export interface SourceContext {
   readonly problem?: SetupProblem | undefined
   /** Returns a Source's configuration while enabled, or undefined while disabled or uninstalled. */
   config<C extends Record<string, unknown>>(kind: string): C | undefined
+  /**
+   * The panel address a message may link: the configured one, else the browser origin the panel last reported. Empty
+   * when neither is known, so a message never carries an address nobody has opened the panel at.
+   */
+  panelBase(configured: string): string
   /** Ingests a trigger into the Engine and schedules the next evaluation pass; callers should await completion before advancing read cursors. */
   receive(trigger: Trigger): ReceiveResult | Promise<ReceiveResult>
   /**
@@ -94,6 +99,12 @@ export interface SourceContext {
    * @throws UserError when the ticket is unknown or ended, the question is gone, or the option is not offered.
    */
   answerAttention(ticketId: string, attentionId: string, option: string): Ticket
+  /**
+   * A person's submit on a structured grill card: every question's option is recorded, and the answers reach the worker as
+   * one message.
+   * @throws UserError when the ticket is unknown or ended, the grill is gone or replaced, or an answer is missing or invalid.
+   */
+  answerGrill(ticketId: string, grillId: string, answers: Readonly<Record<string, number>>, via?: 'feishu' | 'panel'): Ticket
   /**
    * A person's click on a TAPD ticket's priority card: the level is recorded as theirs, which no assessment or default
    * overwrites, without a Trigger, Decision or Eval. `by` is the Source identity of the person who clicked.

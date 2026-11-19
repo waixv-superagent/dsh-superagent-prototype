@@ -21,6 +21,7 @@ function fixture(listed: string[]) {
     effect: (effect: () => unknown) => { effect() },
     sessions: { list: { getSnapshot: () => ({ phase: 'ready', byId: Object.fromEntries(listed.map(id => [id, {}])) }) }, refresh: vi.fn(async () => {}) },
     uiWorkspace: { openSession: vi.fn() },
+    layout: { selectPanel: vi.fn() },
     // Omit config form service so Deployment renders read-only.
     get: () => undefined,
   }
@@ -65,6 +66,22 @@ it('registers a localized main panel, sidebar entry, worker-Session ticket link 
   expect(main.options).toMatchObject({ key: 'dsh-superagent', locale: 'dshSuperagent' })
   expect(nav.options).toMatchObject({ id: 'dsh-superagent', order: 10, locale: 'dshSuperagent' })
   expect(nav.options.label?.()).toBe('Superagent')
+})
+
+it('opens the panel a fresh Feishu deep link names, even though DSH starts on the Conversation', () => {
+  const ticket = 'a'.repeat(32)
+  history.replaceState(null, '', `/?ticket=${ticket}`)
+  const ticketFace = fixture([])
+  expect(ticketFace.ctx.layout.selectPanel).toHaveBeenCalledWith('dsh-superagent')
+  expect(JSON.parse(sessionStorage.getItem('dsh-superagent/route')!)).toMatchObject({ route: { page: 'execution', id: ticket } })
+  // The status card's board link goes through the same startup path.
+  history.replaceState(null, '', '/?view=board')
+  sessionStorage.clear()
+  const boardFace = fixture([])
+  expect(boardFace.ctx.layout.selectPanel).toHaveBeenCalledWith('dsh-superagent')
+  expect(JSON.parse(sessionStorage.getItem('dsh-superagent/route')!)).toMatchObject({ route: { page: 'editor', query: { view: 'board' } } })
+  history.replaceState(null, '', '/')
+  sessionStorage.clear()
 })
 
 it('copies a worker Session id from the Session header beside the Ticket link', async () => {
