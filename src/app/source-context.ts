@@ -25,6 +25,8 @@ export interface SourceContextDeps {
   readonly setupProblem?: SetupProblem | undefined
   /** Why setup found no Feishu bot even though the Feishu Source names a CLI. */
   readonly feishuProblem?: SetupProblem | undefined
+  /** The panel address a message may link: configured, else the browser origin the panel last reported. */
+  panelBase(configured: string): string
   /** Hands a Trigger to the Engine and schedules the pass that assesses it. */
   receive(trigger: Trigger): ReceiveResult | Promise<ReceiveResult>
   /** Whether the Trigger's person may control processing from the conversation (see `SourceContext.mayControl`). */
@@ -52,6 +54,7 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
       const instance = deps.sources.instance<C>(id)
       return instance?.enabled ? instance.config : undefined
     },
+    panelBase: configured => deps.panelBase(configured),
     receive: trigger => deps.receive(trigger),
     admissible: trigger => deps.engine.admissible(trigger),
     mayControl: trigger => deps.mayControl(trigger),

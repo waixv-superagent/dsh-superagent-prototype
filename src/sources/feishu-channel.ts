@@ -4,7 +4,7 @@ import { KV } from '../kv.ts'
 import { CliError } from '../infra/commands.ts'
 import { checkedImText } from '../infra/text.ts'
 import { attentionCard, messageIdOf, messageLink, pipelineStageCard } from './feishu-card.ts'
-import { rememberSent, threadIdOf, ticketPanelLink, withTicketFooter } from './feishu-sent.ts'
+import { rememberSent, threadIdOf, ticketOpenLink, withTicketFooter } from './feishu-sent.ts'
 import { releaseReceipt } from './feishu-receipt.ts'
 import { jsonForCmd, feishuPostContent } from './feishu-text.ts'
 import { feishuTriggerId } from './feishu-trigger.ts'
@@ -97,7 +97,10 @@ export async function sendFeishu(host: ChannelHost, message: OutboundMessage, co
   const messageId = message.channel.address.messageId
   if (!messageId) throw new Error('Missing Feishu reply target')
   const checked = checkedImText(message.text)
-  const panelUrl = config.panelUrl?.trim() ?? ''
+  const configured = config.panelUrl?.trim() ?? ''
+  // The panel address the operator configured, else the browser origin the panel last reported; no client reported one yet
+  // means no link, so a message never carries an address nobody has opened the panel at.
+  const panelUrl = (host.panelBase?.(configured) ?? configured).trim()
   // A ticket's acceptance receipt is its first message; the topic opened for the same ticket folds into it, so one message
   // says what was accepted and where the conversation continues. The link line goes on after the limit check, like the
   // footer, and a receipt that waited too long goes out without it while the opener posts its notice instead.
@@ -122,7 +125,7 @@ export async function sendFeishu(host: ChannelHost, message: OutboundMessage, co
     try {
       const sent = await host.commands.lark<unknown>(['im', '+messages-reply', '--message-id', messageId, '--msg-type', 'interactive',
         '--content', jsonForCmd(attentionCard(message.text, message.attention.attentionId, message.attention.options, message.attention.ticketId, message.attention.sections,
-          panelUrl ? ticketPanelLink(panelUrl, message.attention.ticketId) : undefined).card),
+          panelUrl ? ticketOpenLink(panelUrl, message.attention.ticketId) : undefined).card),
         '--reply-in-thread', '--idempotency-key', message.id])
       remember(sent)
       await rememberQuestion(host, message.attention, sent)
@@ -138,7 +141,7 @@ export async function sendFeishu(host: ChannelHost, message: OutboundMessage, co
   if (message.pipeline) {
     try {
       const sent = await host.commands.lark<unknown>(['im', '+messages-reply', '--message-id', messageId, '--msg-type', 'interactive',
-        '--content', jsonForCmd(pipelineStageCard(message.pipeline, checked, panelUrl ? ticketPanelLink(panelUrl, message.pipeline.ticketId) : undefined).card), '--reply-in-thread', '--idempotency-key', message.id])
+        '--content', jsonForCmd(pipelineStageCard(message.pipeline, checked, panelUrl ? ticketOpenLink(panelUrl, message.pipeline.ticketId) : undefined).card), '--reply-in-thread', '--idempotency-key', message.id])
       const id = messageIdOf(sent)
       remember(sent)
       if (id && (message.pipeline.reviewers || message.pipeline.targets || message.pipeline.close || message.pipeline.rerun)) {

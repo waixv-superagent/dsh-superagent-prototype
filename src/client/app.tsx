@@ -10,6 +10,7 @@ import { GraphPage } from './graph.tsx'
 import { ExecutionStatus } from './execution.tsx'
 import { ticketMark } from './marks.ts'
 import { GLOSSARY, GLOSSARY_VALUES, en, zh, type DshSuperagentKey } from './locales.ts'
+import { setPanelNavigator } from './navigate.ts'
 import { OverviewPage } from './overview.tsx'
 import { PanelProvider, usePanel, usePanelData } from './provider.tsx'
 import { RequestButton } from './request.tsx'
@@ -333,6 +334,9 @@ export function App({ t, openSession, deploymentForm }: AppProps) {
   /** Navigates to `route`; `replace` swaps the current entry (filters, paging) instead of pushing a back step. */
   const navigate = useCallback((route: Route, replace = false) => move(replace ? 'replace' : 'push', location => ({ route,
     stack: replace ? location.stack : [...location.stack, location.route].slice(-20) }), replace ? 'none' : 'forward'), [move])
+  // A control outside the panel, such as the desktop app taking a Ticket from a Feishu handoff, moves this page through the
+  // registered callback; without it only a fresh page load can read a stored route.
+  useEffect(() => { setPanelNavigator(route => navigate(route)); return () => setPanelNavigator(undefined) }, [navigate])
   const back = useCallback(() => {
     // A pushed page's previous entry shows the last route of its stack, which the Back button names; stepping the browser back
     // there keeps the button, the browser and the mouse on the same entries. A page with no stack (a tab, a deep link) steps

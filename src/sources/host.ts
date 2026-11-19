@@ -39,6 +39,11 @@ export interface SourceContext {
   readonly problem?: SetupProblem | undefined
   /** Returns a Source's configuration while enabled, or undefined while disabled or uninstalled. */
   config<C extends Record<string, unknown>>(kind: string): C | undefined
+  /**
+   * The panel address a message may link: the configured one, else the browser origin the panel last reported. Empty
+   * when neither is known, so a message never carries an address nobody has opened the panel at.
+   */
+  panelBase(configured: string): string
   /** Ingests a trigger into the Engine and schedules the next evaluation pass; callers should await completion before advancing read cursors. */
   receive(trigger: Trigger): ReceiveResult | Promise<ReceiveResult>
   /**

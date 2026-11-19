@@ -457,6 +457,8 @@ const SourceSave = z.object({ enabled: z.boolean(), config: z.unknown() })
 
 const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET state': { answer: stateView },
+  'POST surface': { body: true, answer: () => ({ ok: true as const }) },
+  'GET app-open': { query: ['surface'], answer: () => ({}) },
   'GET overview': { answer: overviewView },
   'GET editor': { answer: editorPageView },
   'GET repro': { answer: () => server.repro },

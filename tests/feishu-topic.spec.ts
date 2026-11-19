@@ -40,6 +40,7 @@ const context = (lark: ReturnType<typeof vi.fn>, retarget: ReturnType<typeof vi.
   describe: ReturnType<typeof vi.fn> = vi.fn(), patch: ReturnType<typeof vi.fn> = vi.fn(),
   notify: ReturnType<typeof vi.fn> = vi.fn(), state: Memory = memory()): SourceContext => ({
     config: () => ({ topicChat: 'oc_topic' }),
+    panelBase: (configured: string) => configured.trim(),
     triggers: { get: () => trigger },
     commands: { lark },
     tickets: { retarget },
@@ -218,7 +219,7 @@ describe('Feishu ticket topics', () => {
     const ctx = { ...context(lark, retarget, describe), config: () => ({ topicChat: 'oc_topic', panelUrl: 'https://panel.example' }),
       triggers: { get: () => web } } as unknown as SourceContext
     await openFeishuTopic(ctx, ticket())
-    const link = `https://panel.example/?ticket=${ticket().id}`
+    const link = `https://panel.example/orchestrator/ticket/${ticket().id}?lk_jump_to_browser=true&lk_mobile_jump_to_browser=true`
     const args = lark.mock.calls[0]![0] as string[]
     expect(JSON.parse(args[args.indexOf('--content') + 1]!).zh_cn.content[0][0].text).toContain(link)
     expect(describe).toHaveBeenCalledWith('feishu:oc_topic:om_topic', expect.objectContaining({ url: link }))

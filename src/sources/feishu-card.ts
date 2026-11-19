@@ -6,7 +6,10 @@
 import { PLAN_CARD_QUESTION, PLAN_REPLY_HINT, PLAN_TEMPLATES, PRIORITY_LABELS, PRIORITY_LEVELS, planLines, planTemplate, type Plan, type PlanDecision,
   type PlanDiff, type PlanOption, type PlanTemplate, type PipelineCard, type PriorityAsk, type PriorityLevel, type QuestionSection, type Ticket } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
-import { feishuPostContent, jsonForCmd, textSafe } from './feishu-text.ts'
+import { browserLink, feishuPostContent, jsonForCmd, textSafe } from './feishu-text.ts'
+
+/** Re-exported for the status card's script, which builds the same system-browser switch. */
+export { browserLink }
 
 /** What sending a card needs: the deployment's bot CLI. */
 export interface CardHost { readonly commands: Pick<Commands, 'lark'> }
@@ -268,23 +271,28 @@ export function planCard(ticket: Pick<Ticket, 'id' | 'title'>, plan: Pick<Plan, 
   const custom = plan.sections?.length ? plan.sections : undefined
   const body = custom?.filter(section => !section.fold) ?? []
   const folded = custom?.filter(section => section.fold) ?? []
-  const card = shell({
-    title: `待确认 · ${PLAN_KIND[template]}`, subtitle: ticketSubtitle(ticket, !!ticketLink), template: 'blue', summary: `待确认：${question}`,
-    elements: [
-      markdown(`**${question}**`, { text_size: 'heading' }),
-      ...body.length ? body.map(section => block(section.label, section.text))
-        : custom ? [] : layout.front.map(label => block(label, get(label), ['影响面', '预算'].includes(label) ? { text_size: 'notation' } : {})),
-      ...plan.diff ? [diffBlock(plan.diff), ...ticketLink ? [markdown(`[在面板看完整 diff（内联 / 并排）](${ticketLink})`, { text_size: 'notation' })] : []] : [],
-      ...folded.length ? [foldPanel(folded, '补充')] : custom ? [] : [evidencePanel(layout.fold.map(label => ({ label, text: get(label) || '—' })))],
-      { tag: 'hr', margin: '0px 0px 0px 0px' },
-      ...choiceRows(choices.map((choice, index) => ({
-        button: decisionButton(choice.label, buttonType(choice.decision), choice.decision, index),
-        ...choice.description ? { description: choice.description } : {},
-      })), choices.map(choice => choice.label)),
-      footer(['通过后开始实现，交付前再请你确认，不会直接 submit', ...plan.deadline ? [`⏳ ${deadlineText(plan.deadline)} 前不答会自动停`] : []],
-        ticket.id, ticketLink)!,
-    ],
-  })
+  const card = {
+    ...shell({
+      title: `待确认 · ${PLAN_KIND[template]}`, subtitle: ticketSubtitle(ticket, !!ticketLink), template: 'blue', summary: `待确认：${question}`,
+      elements: [
+        markdown(`**${question}**`, { text_size: 'heading' }),
+        ...body.length ? body.map(section => block(section.label, section.text))
+          : custom ? [] : layout.front.map(label => block(label, get(label), ['影响面', '预算'].includes(label) ? { text_size: 'notation' } : {})),
+        ...plan.diff ? [diffBlock(plan.diff), ...ticketLink ? [markdown(`[在面板看完整 diff（内联 / 并排）](${ticketLink})`, { text_size: 'notation' })] : []] : [],
+        ...folded.length ? [foldPanel(folded, '补充')] : custom ? [] : [evidencePanel(layout.fold.map(label => ({ label, text: get(label) || '—' })))],
+        { tag: 'hr', margin: '0px 0px 0px 0px' },
+        ...choiceRows(choices.map((choice, index) => ({
+          button: decisionButton(choice.label, buttonType(choice.decision), choice.decision, index),
+          ...choice.description ? { description: choice.description } : {},
+        })), choices.map(choice => choice.label)),
+        footer(['通过后开始实现，交付前再请你确认，不会直接 submit', ...plan.deadline ? [`⏳ ${deadlineText(plan.deadline)} 前不答会自动停`] : []],
+          ticket.id, ticketLink)!,
+      ],
+    }),
+    // Tapping the card itself opens its ticket page, where the plan's full diff and the decisive record live; the buttons
+    // keep deciding the plan, and the footer keeps the same link for a person who reads cards by pressing links.
+    ...ticketLink ? { card_link: { url: ticketLink } } : {},
+  }
   const context = custom ?? layout.front.map(label => ({ label, text: get(label) || '—' }))
   const diffText = plan.diff ? `代码改动：${plan.diff.files.length} 个文件 +${plan.diff.added} −${plan.diff.removed}`
     + `${plan.diff.base ? `（对比 ${plan.diff.base}）` : ''}；逐行 diff 在工单面板里，可切内联 / 并排。` : ''
@@ -464,14 +472,7 @@ export function staleCard(ticket: Pick<Ticket, 'id' | 'title'>): CardMessage {
   return { card: handledCard('已处理 · 这版方案不再等人', ticketSubtitle(ticket, false), '已经有人答过，或已换成新一版，最新状态在工单面板里。'),
     text: textSafe(`已处理：${ticket.title}（这版方案不再等人）`) }
 }
-/** Feishu's "open in the system browser" switch: Jenkins and Swarm ask for a login the embedded web view cannot show. */
-export function browserLink (url: string): string {
-  let parsed: URL
-  try { parsed = new URL(url) } catch { return url }
-  if (!/^https?:$/.test(parsed.protocol)) return url
-  for (const name of ['lk_jump_to_browser', 'lk_mobile_jump_to_browser']) if (!parsed.searchParams.has(name)) parsed.searchParams.append(name, 'true')
-  return parsed.href
-}
+/** The tones a delivery stage card uses, by the stage result. */
 const PIPELINE_TEMPLATES: Record<PipelineCard['tone'], string> = { info: 'blue', success: 'green', waiting: 'orange', danger: 'red' }
 /** A button that opens a link in the system browser. */
 const linkButton = (label: string, url: string, primary = false): Record<string, unknown> => ({

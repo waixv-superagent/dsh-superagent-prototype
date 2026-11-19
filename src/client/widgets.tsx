@@ -12,7 +12,7 @@ const external = { target: '_blank', rel: 'noopener noreferrer' } as const
  * Whether this page runs in the DSH desktop shell (Electron). That shell opens an http(s) link in the system browser
  * but drops any other scheme, so a client link would do nothing there; the page is told apart by its user agent.
  */
-const electronShell = (): boolean => typeof navigator !== 'undefined' && /(?:^|\s)Electron\/\d/.test(navigator.userAgent)
+export const electronShell = (): boolean => typeof navigator !== 'undefined' && /(?:^|\s)Electron\/\d/.test(navigator.userAgent)
 /**
  * A client scheme (`feishu://`, `lark://`) hands the URL to the Feishu desktop client, so it must not open a browser tab
  * first: `target="_blank"` on such a link leaves an empty tab behind after the client opens.

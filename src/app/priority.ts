@@ -12,6 +12,7 @@ import { KV } from '../kv.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import { messageLink, priorityCard, sendCard, type PriorityFacts } from '../sources/feishu-card.ts'
 import { notifyChat, panelLinkOf } from './plan.ts'
+import type { SurfaceState } from './surface.ts'
 import type { Store } from './store.ts'
 
 /** How long a priority card's message id is remembered for its button callback; the card's delayed-update token lasts 30 minutes. */
@@ -20,6 +21,8 @@ export interface PriorityHost {
   readonly store: Pick<Store, 'tickets' | 'settings' | 'triggers' | 'get' | 'set'>
   readonly sources: Pick<SourceRegistry, 'instance'>
   readonly commands: Pick<Commands, 'lark'>
+  /** Reports the browser origin a card may link, when no panel address is configured. */
+  readonly surfaces: Pick<SurfaceState, 'panelBase'>
   /** Reports a card that could not be sent, so the failure appears in the log rather than nowhere. */
   warn(message: string): void
 }
