@@ -6,6 +6,10 @@
  * any test runs (`[vitest-pool]: Failed to start forks worker for test files …`), which fails the run although no test
  * failed. The one-click update runs this suite inside the live host, so those files are run once more instead of failing
  * the update. A run whose tests actually failed is never retried.
+ *
+ * The one-click update's build worktree (`<stateDir>/upgrade/build`, see src/app/upgrade.ts) runs this same script from
+ * inside the host, where the deployment's own editor endpoint is ambient; the specs that speak to an editor MCP endpoint
+ * are left out there and covered by the worker's own run instead (docs/006).
  */
 import { spawn } from 'node:child_process'
 import { join, relative } from 'node:path'
@@ -13,6 +17,15 @@ import { pathToFileURL } from 'node:url'
 
 /** How many rounds a run whose workers did not start may take: the full suite, then the files it lost, then those again. */
 export const ROUNDS = 4
+/**
+ * Specs that speak to an editor MCP endpoint. The update build runs inside the host, whose own editor endpoint and bridge
+ * files are ambient, so its build must not depend on them; the worker's own suite still runs these (docs/006).
+ */
+export const EDITOR_MCP_SPECS = ['tests/editor-capture.spec.ts']
+/** Whether `cwd` is the host's update build worktree: `<stateDir>/upgrade/build`. */
+export function updateBuild(cwd) {
+  return /[/\\]upgrade[/\\]build[/\\]?$/i.test(cwd)
+}
 /** Enough output to tell a test failure from a start failure, without keeping a massive failure log in memory. */
 const OUTPUT_LIMIT = 4 << 20
 const ANSI = /\x1b\[[0-9;]*m/g
@@ -43,11 +56,15 @@ export function filesWithoutWorkers(output) {
   return files
 }
 
-/** Run vitest over the whole suite, or over `files`, streaming its output through, and resolve its exit code and output. */
-function runOnce(cwd, env, files) {
-  const entry = join(cwd, 'node_modules', 'vitest', 'vitest.mjs')
+/** The vitest invocation for one round: its entry, `run`, the excluded globs, then the files to run. */
+export function vitestArgs(cwd, files, exclude = []) {
   // The pool names absolute files; vitest's positional filters match the files it knows, so pass them repo-relative.
-  const args = [entry, 'run', ...(files ?? []).map(file => relative(cwd, file))]
+  return [join(cwd, 'node_modules', 'vitest', 'vitest.mjs'), 'run', ...exclude.map(glob => `--exclude=${glob}`),
+    ...(files ?? []).map(file => relative(cwd, file))]
+}
+/** Run vitest over the whole suite, or over `files`, streaming its output through, and resolve its exit code and output. */
+function runOnce(cwd, env, files, exclude) {
+  const args = vitestArgs(cwd, files, exclude)
   const child = spawn(process.execPath, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
   let collected = ''
   const collect = target => chunk => {
@@ -65,9 +82,10 @@ function runOnce(cwd, env, files) {
 const invoked = process.argv[1] ? pathToFileURL(process.argv[1]).href.toLowerCase() === import.meta.url.toLowerCase() : false
 if (invoked) {
   const cwd = process.cwd()
+  const exclude = updateBuild(cwd) ? EDITOR_MCP_SPECS : []
   let files
   for (let round = 1; round <= ROUNDS; round++) {
-    const { code, output } = await runOnce(cwd, process.env, files)
+    const { code, output } = await runOnce(cwd, process.env, files, exclude)
     if (code === 0) { process.exitCode = 0; break }
     // A test failure is the code's answer: no retry, whatever else the run reported.
     files = testRunOutcome(output) === 'pool' ? filesWithoutWorkers(output) : []

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { ROUNDS, filesWithoutWorkers, testRunOutcome } from '../scripts/test-suite.mjs'
+import { EDITOR_MCP_SPECS, ROUNDS, filesWithoutWorkers, testRunOutcome, updateBuild, vitestArgs } from '../scripts/test-suite.mjs'
 
 const poolFailure = ['⎯⎯ Unhandled Error ⎯⎯',
   'Error: [vitest-pool]: Failed to start forks worker for test files C:/x/tests/panel-trigger.spec.tsx.',
@@ -41,6 +41,32 @@ describe('test script', () => {
       'Error: [vitest-pool]: Failed to start forks worker for test files C:/x/tests/a.spec.ts, C:/x/tests/b.spec.tsx.'].join('\n')
     expect(filesWithoutWorkers(output)).toEqual(['C:/x/tests/panel-trigger.spec.tsx', 'C:/x/tests/a.spec.ts', 'C:/x/tests/b.spec.tsx'])
     expect(filesWithoutWorkers('No start failure here')).toEqual([])
+  })
+  it('leaves the editor-MCP specs out of the host update build, and runs everything else', () => {
+    // The update build's worktree is `<stateDir>/upgrade/build`, and the spec that speaks to an editor MCP endpoint is
+    // skipped there because the host's own editor endpoint is ambient (docs/006).
+    expect(updateBuild('C:/Users/x/.dsh/state/superagent/upgrade/build')).toBe(true)
+    expect(updateBuild('C:\\Users\\x\\.dsh\\state\\superagent\\upgrade\\build\\')).toBe(true)
+    expect(updateBuild('C:/work/dsh-superagent')).toBe(false)
+    expect(updateBuild('C:/work/upgrade/build2')).toBe(false)
+    expect(EDITOR_MCP_SPECS).toEqual(['tests/editor-capture.spec.ts'])
+    // The exclusion reaches vitest as its `--exclude` glob, which adds to the configured excludes rather than replacing them.
+    expect(vitestArgs('C:/w', undefined, EDITOR_MCP_SPECS).slice(1, 3)).toEqual(['run', '--exclude=tests/editor-capture.spec.ts'])
+    // Files are the pool's absolute paths, passed repo-relative; a round without them runs the whole suite.
+    expect(vitestArgs('C:/w', ['C:/w/tests/a.spec.ts']).map(part => part.replaceAll('\\', '/')).slice(-1)).toEqual(['tests/a.spec.ts'])
+    expect(vitestArgs('C:/w').slice(1)).toEqual(['run'])
+  })
+  it('passes the editor-MCP exclusion when it runs in the update build worktree', () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'test-suite-update-')), 'upgrade', 'build')
+    try {
+      mkdirSync(join(dir, 'node_modules', 'vitest'), { recursive: true })
+      writeFileSync(join(dir, 'node_modules', 'vitest', 'vitest.mjs'), `import { writeFileSync } from 'node:fs'
+writeFileSync('args.txt', process.argv.slice(2).join('\\n'))
+`)
+      const result = spawnSync(process.execPath, [join(process.cwd(), 'scripts', 'test-suite.mjs')], { cwd: dir, encoding: 'utf8' })
+      expect(result.status).toBe(0)
+      expect(readFileSync(join(dir, 'args.txt'), 'utf8').split(/\r?\n/)).toEqual(['run', '--exclude=tests/editor-capture.spec.ts'])
+    } finally { rmSync(join(dir, '..', '..'), { recursive: true, force: true }) }
   })
   it('runs again only the files whose workers did not start', () => {
     const dir = mkdtempSync(join(tmpdir(), 'test-suite-'))
