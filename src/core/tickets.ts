@@ -1,8 +1,8 @@
 /** Tickets: their lifecycle from an accept to their end, their Subscriptions and their Inputs. */
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
-import { latestAssignment, latestReport, liveTicket, MODEL_APPROVAL_OPTIONS, modelRoute, personNamesRoute, readUntil, routesNamedIn, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
-import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, Grill, GrillQuestion, LinkedRelationKind, Mandate, ModelGrant, ModelRelay, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, TeamRoute, ThreadRef, Ticket, TicketDeploy, TicketEndBy,
+import { latestAssignment, latestReport, liveTicket, MODEL_APPROVAL_OPTIONS, modelRoute, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
+import type { Assignment, Attention, Backend, ChannelRef, Evaluation, Follow, Grill, GrillQuestion, LinkedRelationKind, Mandate, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, TeamRoute, ThreadRef, Ticket, TicketDeploy, TicketEndBy,
   TicketInput, TicketOutcome, TicketPhaseReset, TicketPipeline, TicketRepair, Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
@@ -746,17 +746,15 @@ export class Tickets extends EnginePart {
       delete plan.waiting
       ticket.phase = 'implement'
       ticket.updatedAt = at
-      // Approving a phased plan is the person's authorization of exactly the routes the card showed: the plan text names
-      // every phase and its model, so the worker may start those teammates without a second roster card (docs/003).
+      // Approving a phased plan is the person's decision on the work and the plan the card showed; the model a phase runs
+      // on needs no authorization of its own (docs/003).
       const phased = ticketMode(ticket) === 'phased'
-      const granted = phased ? this.grantPlanModels(ticket, at, plan) : []
       // The same approval settles the plan's write paths: they join the ticket's lease, so a p4 worker that planned an
       // implementation does not come back asking a person to expand a workspace or a writable path (docs/011).
       const widened = this.widenPlanLease(ticket, plan)
       this.repo.tickets.save(ticket)
-      const routes = granted.length ? `方案里的阶段模型已授权：${granted.map(grant => `${grant.role}=${modelRoute(grant)}`).join('、')}；` : ''
       const paths = widened.length ? `方案声明的写入路径已并入本单租约：${widened.join('、')}，直接按该租约继续，不要再向人确认租约或工作区；` : ''
-      const dispatch = phased ? `${routes}本单是 phased 模式：按方案的阶段派发 sub agent，复核由独立的复核 sub agent 做；`
+      const dispatch = phased ? `本单是 phased 模式：按方案的阶段派发 sub agent，复核由独立的复核 sub agent 做；`
         + '若你选的是「主会话只调度」，你只调度、不自己实现或验证，各阶段结果与 diff 都要自己读过再报 ready。' : ''
       this.addInput(ticket, { id: key('input', ticketId, 'plan-approved', at), kind: 'text', at,
         text: `人已通过 P1 方案（${where}${choice ? ` · ${choice}` : ''}）。进入实现阶段：可以改文件。${paths}${dispatch}`
@@ -768,8 +766,8 @@ export class Tickets extends EnginePart {
       delete ticket.grill
       ticket.updatedAt = at
       this.repo.tickets.save(ticket)
-      // The person's own direction is their message to the worker: marked as theirs, so a model route it names is an
-      // authorization under docs/003 and the worker need not ask for it on a card.
+      // The person's own direction is their message to the worker: marked as theirs, so the worker reads it as the decision
+      // it is rather than as an ordinary note.
       this.addInput(ticket, { id: key('input', ticketId, 'plan-revise', at), kind: 'text', at, person: true,
         text: `人要求换方向（${where}${choice ? ` · ${choice}` : ''}）：${note || '（没有附说明）'}\n仍处于方案阶段：继续只读定位，再用 orchestrator_plan 交新方案。` })
     } else {
@@ -816,15 +814,11 @@ export class Tickets extends EnginePart {
     const at = this.now()
     this.replies.withdrawAttention(attention.id)
     delete ticket.attention
-    // A model or team request records its authorization on the ticket before the answer reaches the worker: the tool guard
-    // reads it, and the input says whether the worker may now select those routes.
-    const approved = option === MODEL_APPROVAL_OPTIONS[0]
-    const granted = approved ? this.grantModel(ticket, attention, at, attention.model) : undefined
-    const team = approved ? this.grantTeam(ticket, attention, at) : []
-    const text = team.length ? `人允许了 agent 团队：${teamText(team)}（本工单的 teammate 可用，授权已记录）。你是 leader：用 subagent 的 provider/model 启动他们，并自己跑验证。`
+    // A team request's click is the person's answer to it: the input tells the worker whether the roster was allowed.
+    // Which model runs a teammate is not asked here, because every route the deployment serves may already run one.
+    const allowed = option === MODEL_APPROVAL_OPTIONS[0]
+    const text = allowed && attention.team?.length ? `人允许了 agent 团队：${teamText(attention.team)}。你是 leader：用 subagent 的 provider/model 启动他们，并自己跑验证。`
       : attention.team ? `人不允许本工单的 agent 团队（${teamText(attention.team)}）；本工单不要用这些模型。`
-      : granted ? `人允许了模型 ${modelRoute(granted)}（本工单的子 agent 可用，授权已记录）。可以用 subagent 的 provider/model 指定它。`
-      : attention.model ? `人不允许模型 ${modelRoute(attention.model)}；本工单不要用它。`
       : `人对「${attention.question}」选了：${option}`
     this.addInput(ticket, { id: key('input', ticketId, 'answer', attentionId, at), kind: 'text', at, text })
     return this.require(ticketId)
@@ -845,85 +839,15 @@ export class Tickets extends EnginePart {
     const at = this.now()
     this.replies.withdrawAttention(attention.id)
     delete ticket.attention
-    // A written answer authorizes a model or team only when it is exactly one of the card's labels; anything else is a
-    // message, and the input tells the worker that no route was authorized, so it does not try one the guard will refuse.
-    const approved = answer === MODEL_APPROVAL_OPTIONS[0]
-    const granted = approved ? this.grantModel(ticket, attention, at, attention.model) : undefined
-    const team = approved ? this.grantTeam(ticket, attention, at) : []
-    const message = team.length ? `人答复了「${attention.question}」：${answer}（agent 团队 ${teamText(team)} 已授权，本工单的 teammate 可用）。`
-      : attention.team && answer === MODEL_APPROVAL_OPTIONS[1] ? `人答复了「${attention.question}」：${answer}（agent 团队未授权）。`
-      : attention.team ? `人对「${attention.question}」的答复：${answer.slice(0, 4000)}（agent 团队未授权：授权要点卡片上的 允许）`
-      : granted ? `人答复了「${attention.question}」：${answer}（模型 ${modelRoute(granted)} 已授权，本工单的子 agent 可用）。`
-      : attention.model && answer === MODEL_APPROVAL_OPTIONS[1] ? `人答复了「${attention.question}」：${answer}（模型 ${modelRoute(attention.model)} 未授权）。`
-      : attention.model ? `人对「${attention.question}」的答复：${answer.slice(0, 4000)}（模型 ${modelRoute(attention.model)} 未授权：授权要点卡片上的 允许）`
+    // A written answer allows a team only when it is exactly one of the card's labels; anything else is a message, and the
+    // input tells the worker that no roster was allowed.
+    const allowed = answer === MODEL_APPROVAL_OPTIONS[0]
+    const message = allowed && attention.team?.length ? `人答复了「${attention.question}」：${answer}（agent 团队 ${teamText(attention.team)} 已允许）。`
+      : attention.team && answer === MODEL_APPROVAL_OPTIONS[1] ? `人答复了「${attention.question}」：${answer}（agent 团队未允许）。`
+      : attention.team ? `人对「${attention.question}」的答复：${answer.slice(0, 4000)}（agent 团队未允许：允许要点卡片上的 允许）`
       : `人对「${attention.question}」的答复：${answer.slice(0, 4000)}`
     this.addInput(ticket, { id: key('input', ticketId, 'answer', attentionId, at), kind: 'text', at, text: message })
     return this.require(ticketId)
-  }
-  /**
-   * Record a person's approval of one subagent model route on the ticket, idempotently; `model.role` names the team role a
-   * roster approval gave it. The grant is what the worker's tool guard reads, so the route can be selected after the next
-   * delivery without any further host state.
-   */
-  private grantModel(ticket: Ticket, attention: Attention, at: string, model?: ModelRoute & { role?: string }): ModelGrant | undefined {
-    if (!model) return undefined
-    const execution = ticket.execution ?? { name: '', directory: '', assignment: '' }
-    const existing = execution.modelGrants?.find(item => item.provider === model.provider && item.model === model.model && item.role === model.role)
-    if (existing) return existing
-    const grant: ModelGrant = { provider: model.provider, model: model.model, at, attentionId: attention.id,
-      ...(model.role ? { role: model.role } : {}) }
-    ticket.execution = { ...execution, modelGrants: [...execution.modelGrants ?? [], grant] }
-    // Persist the grant before the answer Input: an Input id is idempotent, so a repeat answered in the same millisecond must
-    // not be the only thing that would have recorded the authorization.
-    this.repo.tickets.save(ticket)
-    return grant
-  }
-  /** Record the person's approval of every route in an agent-team request, each with the role it was approved for. */
-  private grantTeam(ticket: Ticket, attention: Attention, at: string): ModelGrant[] {
-    if (!attention.team?.length) return []
-    return attention.team.flatMap((item: TeamRoute) => {
-      const grant = this.grantModel(ticket, attention, at, { provider: item.provider, model: item.model, role: item.role })
-      return grant ? [grant] : []
-    })
-  }
-  /**
-   * Record the routes a phased plan names, each with the phase it runs, when a person approves the plan. The card shows
-   * every phase and its model in the plan text, so this is the same authorization a roster card gives, decided once.
-   * @returns the grants recorded now; routes already allowed on the ticket are left alone.
-   */
-  private grantPlanModels(ticket: Ticket, at: string, plan: Plan): ModelGrant[] {
-    if (ticketMode(ticket) !== 'phased' || !plan.phases?.length) return []
-    const execution = ticket.execution ?? { name: '', directory: '', assignment: '' }
-    const grants = [...execution.modelGrants ?? []]
-    const added: ModelGrant[] = []
-    for (const phase of plan.phases) {
-      const role = phase.name.trim()
-      if (grants.some(item => item.provider === phase.route.provider && item.model === phase.route.model && item.role === role)) continue
-      const grant: ModelGrant = { provider: phase.route.provider, model: phase.route.model, at, planAt: plan.at, role }
-      grants.push(grant); added.push(grant)
-    }
-    if (added.length) ticket.execution = { ...execution, modelGrants: grants }
-    return added
-  }
-  /**
-   * A person's own message named `route` on the ticket: that is an authorization too, beside a click on the card's 允许
-   * (docs/003), and recording it here lets the worker select the route without asking again. Only a person's own message
-   * counts: a bot's, a note, or a Thread the ticket follows only for context never authorizes a model. The grant names the
-   * Input it came from, so the authorization stays next to the message that gave it.
-   * @returns the route's grant, existing or recorded now; undefined when no person message on the ticket names it.
-   */
-  authorizeModelFromPerson(ticketId: string, route: ModelRoute, catalog: readonly RoutedModel[]): ModelGrant | undefined {
-    const ticket = this.require(ticketId)
-    if (!liveTicket(ticket)) return undefined
-    const execution = ticket.execution ?? { name: '', directory: '', assignment: '' }
-    const existing = execution.modelGrants?.find(item => item.provider === route.provider && item.model === route.model)
-    if (existing) return existing
-    const message = this.personMessages(ticket).findLast(item => personNamesRoute(item.text, route, catalog))
-    if (!message) return undefined
-    const grant: ModelGrant = { provider: route.provider, model: route.model, at: message.at, inputId: message.id }
-    ticket.execution = { ...execution, modelGrants: [...execution.modelGrants ?? [], grant] }
-    this.repo.tickets.save(ticket)
-    return grant
   }
   /** The messages a person wrote to the ticket, oldest first: a Trigger they sent or the words they wrote in its Session. */
   private personMessages(ticket: Ticket): { id: string; at: string; text: string }[] {
@@ -1504,39 +1428,16 @@ export class Tickets extends EnginePart {
     return ticket
   }
   /**
-   * Give an open ticket's Executor a fact as a note Input, such as what another ticket found; a note grants nothing by itself
-   * (see `TicketInput`). With `relay`, the note also carries a person's authorization the main Session saw in its own
-   * conversation: the host reads that message and records the model routes it names as the ticket's grants, so the worker's
-   * tool guard lets it select them without a card. Only a person's own message relays; a bot's, CI's or another note names
-   * nothing to record.
-   * @throws UserError when the ticket is unknown or has ended, the relay names no person's message, or that message names no
-   * route (or names one ambiguously, which still needs a card).
+   * Give an open ticket's Executor a fact as a note Input, such as what another ticket found; a note grants nothing by
+   * itself (see `TicketInput`).
+   * @throws UserError when the ticket is unknown or has ended.
    */
-  note(ticketId: string, text: string, relay?: ModelRelay): Ticket {
+  note(ticketId: string, text: string): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     const at = this.now()
-    if (relay) this.relayModelGrant(ticket, relay)
     this.addInput(ticket, { id: key('input', ticketId, 'note', at, text), kind: 'note', text, at })
     return this.require(ticketId)
-  }
-  /**
-   * Record the model routes a person's own message names as this ticket's grants, idempotently. `triggerId` must name a
-   * Trigger the host holds, which only a person may have written; the routes come from that message's text, not from the
-   * caller, so the main Session can relay an authorization but cannot invent one.
-   */
-  private relayModelGrant(ticket: Ticket, relay: ModelRelay): void {
-    const trigger = this.repo.triggers.get(relay.triggerId)
-    if (!trigger?.human) throw new UserError('modelRelayPerson')
-    const routes = routesNamedIn(trigger.text, relay.catalog)
-    if (!routes.length) throw new UserError('modelRelayUnnamed')
-    const execution = ticket.execution ?? { name: '', directory: '', assignment: '' }
-    const missing = routes.filter(route => !execution.modelGrants?.some(item => item.provider === route.provider && item.model === route.model))
-    if (!missing.length) return
-    const grants: ModelGrant[] = missing.map(route => ({ provider: route.provider, model: route.model, at: trigger.at, triggerId: trigger.id }))
-    ticket.execution = { ...execution, modelGrants: [...execution.modelGrants ?? [], ...grants] }
-    // Persist before the note is queued: the worker reads the grant from the ticket, so the note must never arrive ahead of it.
-    this.repo.tickets.save(ticket)
   }
   /**
    * Record that a ticket's worker found it is to another ticket as `kind` says (see `TicketRelation`). Recording the same

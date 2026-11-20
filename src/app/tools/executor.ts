@@ -1,8 +1,8 @@
-/** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, checking a delivered change's pipeline, searching the team's Sentry, approving a subagent model or agent team, and reporting status. */
+/** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, submitting the P1 plan, advancing phases, checking a delivered change's pipeline, searching the team's Sentry, proposing an agent team, and reporting status. */
 import { z } from 'zod'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { LINKED_RELATION_KINDS, analysisRunning, liveTicket, missingVerifyLabels, modelRoute, PLAN_DIFF_LIMITS, TEAM_ROLE_CHARS, TEAM_ROLES_MAX,
-  TEAM_TASK_CHARS, ticketMode, ticketPhase, UPDATE_TRACKS, VERIFY_LABELS, type EngineForExecutor, type ModelGrant, type ModelRoute, type PlanPhase, type ReceiveResult,
+  TEAM_TASK_CHARS, ticketMode, ticketPhase, UPDATE_TRACKS, VERIFY_LABELS, type EngineForExecutor, type ModelRoute, type PlanPhase, type ReceiveResult,
   type TeamRoute, type Ticket } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
 import { matchDeliveryTarget, deliveryTargets } from '../delivery-targets.ts'
@@ -24,7 +24,7 @@ import type { EditorGatekeeper } from '../editor-gatekeeper.ts'
 
 export interface ExecutorToolsHost {
   readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'submitPlan' | 'settlePlan' | 'askGrill'
-    | 'advancePhase' | 'resetPhase' | 'redispatchTicket' | 'widenLease' | 'recordPipeline' | 'rerunPipeline' | 'authorizeModelFromPerson'>
+    | 'advancePhase' | 'resetPhase' | 'redispatchTicket' | 'widenLease' | 'recordPipeline' | 'rerunPipeline'>
   readonly store: Pick<Store, 'tickets' | 'settings' | 'replyStatus' | 'atomic'>
   readonly sessions: Pick<Sessions, 'relay' | 'notify' | 'prompt'>
   readonly resources: ResourceHost
@@ -32,7 +32,7 @@ export interface ExecutorToolsHost {
   readonly pipeline: Pick<PipelineChecks, 'review' | 'status' | 'changeState' | 'jenkins' | 'rerun'>
   /** GitHub Source context whose pull-request rules govern claiming a reported PR. */
   readonly github: SourceContext
-  /** The deployment's routable models, which a subagent model request is checked against. */
+  /** The deployment's routable models, which an agent-team roster and a phased plan are checked against. */
   models(): Promise<ModelCatalog>
   /** Sends a submitted P1 plan to the person who decides it, and returns the card's message id when it went out. */
   notifyPlan(ticket: Ticket): Promise<string | undefined>
@@ -79,17 +79,9 @@ function editorStatusFor(scheduler: EditorScheduler, ticketId: string) {
   }
 }
 
-/** The model catalog's display name for an exact route, or undefined when the deployment does not route it. */
-function routedModel(catalog: ModelCatalog, provider: string, model: string): string | undefined {
-  return catalog.groups.find(group => group.id === provider)?.models.find(item => item.id === model)?.name || undefined
-}
-/** A model-approval question that names the route and its display name, followed by the worker's own question. */
-function modelQuestion(model: ModelRoute, name: string, question: string): string {
-  return [`模型授权：允许在本工单用 ${name}（${model.provider}/${model.model}）跑子 agent 吗？`, question].join('\n').slice(0, 1000)
-}
-/** A team-approval question that lists every role, its job and its model route, followed by the worker's own question. */
+/** A team question that lists every role, its job and its model route, followed by the worker's own question. */
 function teamQuestion(team: readonly TeamRoute[], names: readonly string[], question: string): string {
-  return [`模型授权：允许在本工单用以下 agent 团队吗？`,
+  return [`允许在本工单用以下 agent 团队吗？`,
     ...team.map((item, index) => `- ${item.role}：${names[index]}（${modelRoute(item)}）— ${item.task}`),
     question].join('\n')
 }
@@ -223,7 +215,7 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           after: z.array(z.string().trim().min(1).max(20)).max(3).optional()
             .describe('Names of earlier phases this one waits for; omit for a phase that may start beside the others.'),
           route: z.object({ provider: z.string().trim().min(1).max(100), model: z.string().trim().min(1).max(200) }).strict()
-            .describe('The model route that runs this phase, from list_subagent_models; approving the plan authorizes it.'),
+            .describe('The model route that runs this phase, from list_subagent_models; any route it lists may run a subagent, so this only says which one plans the phase.'),
         }).strict()).min(2).max(4).optional()
           .describe('Phased tickets only: split the work into 2–4 phases, each with its job, files and model route, and write every phase name and model in the plan '
             + 'text so the card a person approves shows what will run. The standard flow omits this: it keeps today\'s single-worker plan.'),
@@ -233,14 +225,14 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
       execute: async args => {
         const current = host.store.tickets.get(ticketId)
         if (!current || !liveTicket(current)) throw new Error('Ticket ended; do not resume it')
-        // A phased plan names the model routes a person will authorize by approving it: resolve them against this
-        // deployment's catalog, and require the plan text to name each phase and route, so the card never hides a route.
+        // A phased plan names the model route every phase runs on: resolve them against this deployment's catalog, and
+        // require the plan text to name each phase and route, so the card a person approves shows what will run.
         let phases: PlanPhase[] | undefined
         if (args.phases?.length) {
           if (ticketMode(current) !== 'phased') {
             throw new Error('Phases belong to a ticket accepted in the phased flow; this ticket runs the standard flow, so describe the change in the plan template instead')
           }
-          if (args.decided) throw new Error('A phased plan always takes the card: approving it is what authorizes its phases\' model routes')
+          if (args.decided) throw new Error('A phased plan always takes the card: the person approves the plan its phases then run under')
           const known = routableModels(await host.models())
           const resolved = args.phases.map(phase => {
             const route = { provider: phase.route.provider.trim(), model: phase.route.model.trim() }
@@ -315,19 +307,14 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           .describe('Workspace-relative write paths this ticket needs beyond its lease; the host adds them itself, so never ask a person. No absolute path or "..".'),
         options: z.array(z.string().trim().min(1).max(24)).min(2).max(4).optional()
           .describe('With human_action: 2–4 choices at a key node where a click is fastest, such as confirming a plan; everyday questions stay plain text.'),
-        subagent_model: z.object({
-          provider: z.string().trim().min(1).max(100),
-          model: z.string().trim().min(1).max(200),
-        }).strict().optional().describe('With human_action: ask the person to allow this subagent model route; the host asks 允许/不允许. '
-          + 'Without human_action, only when a person\'s own message on the ticket (or one the main Session relayed to it) already named the route: '
-          + 'the host records that message as the grant and sends no card. Call list_subagent_models for the ids.'),
         subagent_team: z.array(z.object({
           role: z.string().trim().min(1).max(TEAM_ROLE_CHARS).describe('What this teammate does in the team, such as 实现 or 复核; unique in one team request.'),
           task: z.string().trim().min(1).max(TEAM_TASK_CHARS).describe('The one-line job this teammate is given, as the person will read it before allowing its route.'),
           provider: z.string().trim().min(1).max(100),
           model: z.string().trim().min(1).max(200),
         }).strict()).min(1).max(TEAM_ROLES_MAX).optional()
-          .describe('With human_action: ask the person to allow this agent team, one role and job per model route; the host asks 允许/不允许 for the whole team. Call list_subagent_models for the ids.'),
+          .describe('With human_action: ask the person to allow this agent team, one role and job per model route; the host asks 允许/不允许 for the whole team. '
+            + 'Any route list_subagent_models shows may run a teammate without asking; the card is about forming the team. Call list_subagent_models for the ids.'),
         question_for_trigger_id: z.string().optional().describe('With human_action: the human message that raised the question, which is asked where that person wrote.'),
         sections: z.array(z.object({ label: z.string().trim().min(1).max(20), text: z.string().trim().min(1).max(800),
           fold: z.boolean().optional() }).strict()).min(1).max(6).optional()
@@ -342,38 +329,12 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
       execute: async (args, signal) => {
         const current = host.store.tickets.get(ticketId)
         if (!current || !liveTicket(current)) throw new Error('Ticket ended (PR was closed or work finished); do not resume it')
-        // A subagent model or team request is a permission card, except for a route a person already named in a message:
-        // the host words the question with the routes and fixes the choices, so a person's click or that message authorizes
-        // them, and the worker cannot offer "允许" itself.
+        // A team roster is the one question about subagents: the host words it from every role, its job and its route and
+        // fixes the choices to 允许/不允许, so the person's click decides the team and the worker cannot offer 允许 itself.
+        // Which model runs a teammate never becomes that question: the Session's seeded policy already allows every route
+        // the deployment serves (docs/003).
         let humanAction = args.human_action
-        let subagentModel: ModelRoute | undefined
         let subagentTeam: TeamRoute[] | undefined
-        let authorized: ModelGrant | undefined
-        if (args.subagent_model && args.subagent_team) {
-          throw new Error('Ask for one subagent_model or one subagent_team, not both: a team request already approves its routes by role')
-        }
-        if (args.subagent_model) {
-          if (analysisRunning(current)) throw new Error('This assignment is the ticket\'s read-only idle analysis; it cannot request a subagent model approval')
-          if (args.options?.length) throw new Error('A subagent model request has fixed choices (允许/不允许); omit options')
-          const { provider, model: id } = args.subagent_model
-          const catalog = await host.models()
-          const name = routedModel(catalog, provider, id)
-          if (!name) throw new Error(`Unknown model route "${provider}/${id}". list_subagent_models lists the routes this deployment provides; use its provider and model ids`)
-          if (current.execution?.modelGrants?.some(grant => grant.provider === provider && grant.model === id)) {
-            throw new Error(`The person already approved ${provider}/${id} for this ticket; pass it to subagent instead of asking again`)
-          }
-          // A person who already named this route in a message on the ticket has authorized it: record that message as the
-          // grant and send no card. The card is for a route nobody named yet, which the worker asks the person to allow.
-          authorized = host.engine.authorizeModelFromPerson(ticketId, { provider, model: id }, routableModels(catalog))
-          if (authorized) humanAction = undefined
-          else {
-            if (humanAction == null || !humanAction.trim()) {
-              throw new Error('A subagent model request needs human_action: the question for the person, unless a person\'s own message already named the route')
-            }
-            subagentModel = { provider, model: id }
-            humanAction = modelQuestion(subagentModel, name, humanAction.trim())
-          }
-        }
         if (args.subagent_team) {
           if (analysisRunning(current)) throw new Error('This assignment is the ticket\'s read-only idle analysis; it cannot request an agent team')
           if (humanAction == null || !humanAction.trim()) throw new Error('An agent team request needs human_action: the question for the person')
@@ -389,9 +350,6 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
             const folded = role.toLowerCase()
             if (roles.has(folded)) throw new Error(`The team names the role "${role}" twice; give each teammate a unique role`)
             roles.add(folded)
-            if (current.execution?.modelGrants?.some(grant => grant.role === role && grant.provider === provider && grant.model === model)) {
-              throw new Error(`The person already approved ${provider}/${model} for the role "${role}"; call that teammate with subagent instead of asking again`)
-            }
             return { route: { role, task, provider, model }, name }
           })
           subagentTeam = roster.map(item => item.route)
@@ -442,9 +400,9 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           const delivery = { ...(args.changelist != null ? { changelist: args.changelist } : {}),
             ...(args.swarm_review ? { review: args.swarm_review } : {}), ...(args.verification ? { verification: args.verification } : {}) }
           const report = { state: args.state, summary: args.summary, ...(humanAction !== undefined ? { question: humanAction } : {}),
-            ...(args.options ? { options: args.options } : {}), ...(args.sections && !authorized ? { sections: args.sections } : {}),
-            ...(subagentModel ? { model: subagentModel } : {}), ...(subagentTeam ? { team: subagentTeam } : {}),
-            ...(args.question_for_trigger_id && !authorized ? { askedBy: args.question_for_trigger_id } : {}),
+            ...(args.options ? { options: args.options } : {}), ...(args.sections ? { sections: args.sections } : {}),
+            ...(subagentTeam ? { team: subagentTeam } : {}),
+            ...(args.question_for_trigger_id ? { askedBy: args.question_for_trigger_id } : {}),
             ...(args.reply_to_trigger_id ? { answers: args.reply_to_trigger_id } : {}),
             ...(args.update_track ? { update: args.update_track } : {}),
             ...(Object.keys(delivery).length ? { delivery } : {}) }
@@ -453,9 +411,7 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
           if (relay) host.sessions.relay(relay.id, relay.text)
           const notification = relay ? 'orchestrator' : 'internal_only'
           return { reported: true, notification, ...(updated.attention ? { attention: updated.attention } : {}),
-            ...(lease ? { lease } : {}),
-            ...(authorized ? { authorized: { provider: authorized.provider, model: authorized.model, inputId: authorized.inputId, at: authorized.at,
-              note: `人已经在本工单的消息里点名 ${authorized.provider}/${authorized.model}，授权已记录；不用再问，直接用 subagent 的 provider/model 指定它。` } } : {}) }
+            ...(lease ? { lease } : {}) }
         })
         // The question is raised where the work is, not only on the board: a person reading this Session answers it here or in
         // the ticket's channel, and both reach the ticket as that person's message. It is injected without waking the worker,

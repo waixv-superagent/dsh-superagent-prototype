@@ -7,7 +7,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { mkdirSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
-import { key, analysisRunning, analysisSection, liveTicket, modelRoute, ticketPhase, type ModelRoute, type Ticket } from '../core/index.ts'
+import { key, analysisRunning, analysisSection, liveTicket, ticketPhase, type ModelRoute, type Ticket } from '../core/index.ts'
 import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { AgentDelivery, messageId } from './delivery.ts'
@@ -108,41 +108,8 @@ const ANALYSIS_CLOSED = 'This assignment is the ticket\'s read-only idle analysi
   + 'finish with orchestrator_report ready, putting the verdict in its sections, and leave implementation to a person'
 /** Shell commands that change a workspace; a read-only investigation during the plan phase does not run them. */
 const WRITE_COMMAND = /(?:^|[;&|]\s*|\b)(?:p4\s+(?:edit|add|delete|revert|shelve|submit)|git\s+(?:add|commit|push|checkout|switch|reset|rm|mv|restore|clean)|set-content|out-file|new-item|remove-item|move-item|copy-item|sed\s+-i|tee|mkdir|rm|mv|cp|touch)\b/i
-/** The subagent tool name the worker preset registers; a call to it may select a child model explicitly. */
-const SUBAGENT_TOOL = 'subagent'
 /** The durable event DeepSeek Harness folds into a Session's allowed child model routes. */
 const MODEL_POLICY_EVENT = 'subagent/model-selection-policy'
-/** What a worker is told when it selects a model route no person allowed on its ticket. */
-const MODEL_NOT_APPROVED = (route: ModelRoute): string => `The subagent model route "${modelRoute(route)}" is not approved for this ticket. `
-  + 'If a person\'s own message on this ticket already named that route, record it with orchestrator_report: state progress and '
-  + 'subagent_model {provider, model}, without human_action, and the host records their message as the grant. Otherwise ask the '
-  + 'person with orchestrator_report: state progress, human_action (the question) and subagent_model {provider, model} for one '
-  + 'route, or subagent_team for an agent team, one role and job per route. The host puts 允许 and 不允许 on the card, and only '
-  + '允许 records the routes; list_subagent_models lists the routes this deployment provides.'
-/** The model route a subagent call selects explicitly, when it passes both ids together; an inherited call selects none. */
-function selectedModel(execution?: { name: string; arguments: unknown }): ModelRoute | undefined {
-  if (execution?.name !== SUBAGENT_TOOL) return undefined
-  const args = (execution.arguments ?? {}) as { provider?: unknown; model?: unknown }
-  return typeof args.provider === 'string' && args.provider && typeof args.model === 'string' && args.model
-    ? { provider: args.provider, model: args.model } : undefined
-}
-/** The route a Session itself runs on, from its last model selection; an explicit selection of it needs no approval. */
-function sessionModel(agent: Agent): ModelRoute | undefined {
-  const events = agent.session.snapshotEvents() as readonly { type: string; data: unknown }[]
-  for (let index = events.length - 1; index >= 0; index--) {
-    const event = events[index]!
-    if (event.type !== 'model/selection') continue
-    const data = event.data as { provider?: unknown; model?: unknown }
-    return typeof data.provider === 'string' && typeof data.model === 'string' ? { provider: data.provider, model: data.model } : undefined
-  }
-  return undefined
-}
-/** Whether the ticket's person allowed `route`, or it is the Session's own model (which needs no new approval). */
-function modelAllowed(agent: Agent, ticket: Ticket, route: ModelRoute): boolean {
-  if (ticket.execution?.modelGrants?.some(grant => grant.provider === route.provider && grant.model === route.model)) return true
-  const own = sessionModel(agent)
-  return own?.provider === route.provider && own.model === route.model
-}
 /** What the main Session is told when it would wait: what it waits for comes to it, and a waiting step holds back the next. */
 const NO_WAIT = 'Reports, follow_up notices, new candidates and a background job\'s end with its output arrive by themselves as messages; '
   + 'end the turn instead of waiting for them.'
@@ -258,9 +225,9 @@ export class Sessions {
   }
   /**
    * Seed the Session's durable subagent model-selection policy with the deployment's routable models, once. DeepSeek Harness
-   * refuses every explicit child model selection without this policy, so the seed is what makes a person's approval
-   * actionable; which route a worker may actually pass to `subagent` stays gated by the ticket's granted routes (see
-   * `workOnly`). An operator's own `subagent-model-selection-settings` policy wins, and the seed does not override it.
+   * refuses every explicit child model selection without this policy, so this seed is the whole allow-list: every model the
+   * deployment serves may run a subagent, and nobody is asked to allow one (docs/003). An operator's own
+   * `subagent-model-selection-settings` policy wins, and the seed does not override it.
    */
   async ensureModelSelectionPolicy(agent: Agent): Promise<void> {
     const events = agent.session.snapshotEvents() as readonly { type: string; data: unknown }[]
@@ -284,8 +251,7 @@ export class Sessions {
       ;(agent.session as unknown as { append(type: string, data: { allowedModels: ModelRoute[] }): unknown })
         .append(MODEL_POLICY_EVENT, { allowedModels })
     } catch (error) {
-      // The Session may have been disposed while the catalog was read; the approval still records the grant, and a later
-      // launch seeds the policy again.
+      // The Session may have been disposed while the catalog was read; a later launch seeds the policy again.
       this.ctx.logger.warn('dsh-superagent could not seed a Session\'s subagent model-selection policy: %s', String(error))
     }
   }
@@ -409,8 +375,8 @@ export class Sessions {
     const binding: SessionBinding = { disposers: [] }
     this.bindings.set(agent, binding)
     // DeepSeek Harness refuses every explicit child model selection without a durable policy, so a worker Session is seeded
-    // with the deployment's routable models before its first model request; which of them a call may use stays the ticket's
-    // person's decision (see `workOnly`).
+    // with the deployment's routable models before its first model request. That seed is the whole allow-list: the worker
+    // selects any configured route for a subagent, and no person's decision gates it (docs/003).
     if (ticket) await this.ensureModelSelectionPolicy(agent)
     this.retryHealth.restore(agent.id, agent.session.snapshotEvents())
     this.host.restoreBilling?.(agent.id, agent.session.snapshotEvents())
@@ -509,11 +475,6 @@ export class Sessions {
     return [agent.ctx.tools.restrict({ allow }), agent.ctx.tools.guard(execution => {
       const current = store.tickets.get(ticketId)
       if (!current || !liveTicket(current)) return 'Ticket ended; new work needs a new authorized ticket'
-      // A subagent may select a child model only after a person allowed that route on this ticket; the route a Session itself
-      // runs on needs no new approval. This is the gate behind the request flow: the seeded policy releases the routes for the
-      // harness, and this check decides which of them this ticket may use.
-      const route = selectedModel(execution)
-      if (route && !modelAllowed(agent, current, route)) return MODEL_NOT_APPROVED(route)
       // An idle analysis is read-only (docs/025): no file tool, no plan, no delivery, and no shell command that would change
       // the workspace. This is the teeth behind the analysis brief, which also tells the model why.
       if (analysisRunning(current)) {

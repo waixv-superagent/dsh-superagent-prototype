@@ -1997,7 +1997,7 @@ it('keeps the Policy the main Session judges by in its prompt, after admission a
   expect(policy()).toContain('The accept mode and the rules decide proactive candidates only')
 })
 
-it('releases the deployment\'s subagent models on a worker Session and lets a person authorize one route for the ticket', async () => {
+it('lets a worker run a subagent on any model the deployment serves, with no approval card', async () => {
   const catalog = {
     default: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' },
     groups: [{ id: 'ai-gateway', name: 'kurogames', models: [
@@ -2009,86 +2009,31 @@ it('releases the deployment\'s subagent models on a worker Session and lets a pe
   Object.assign(controller, { modelCatalog: vi.fn(async () => catalog) })
   const seeded = runtime.store.settings()
   runtime.store.saveSettings({ ...seeded, executor: { ...seeded.executor, model: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' } } })
-  const { ticket, sessionId } = await acceptedTicket()
-  // The Session's durable policy releases every route the deployment routes, before the first model request.
+  const { sessionId } = await acceptedTicket()
+  // The Session's durable policy holds every route the deployment serves, before the first model request: that list is the
+  // whole allow-list, so DeepSeek Harness accepts any of them for a child.
   const agent = agents.get(sessionId)! as unknown as { session: { snapshotEvents(): { type: string; data: unknown }[] } }
   expect(agent.session.snapshotEvents().find(event => event.type === 'subagent/model-selection-policy')?.data).toEqual({
     allowedModels: [{ provider: 'ai-gateway', model: 'deepseek-v4.1-flash' }, { provider: 'ai-gateway', model: 'claude-opus-5.5' },
       { provider: 'ai-gateway', model: 'claude-sonnet-5' }] })
   const guard = guards.get(sessionId)!
   const select = (provider: string, model: string) => guard({ name: 'subagent', arguments: { provider, model, prompt: 'look' } })
-  // The release alone does not authorize a route: a person has to allow it on this ticket.
-  expect(select('ai-gateway', 'claude-opus-5.5')).toMatch('The subagent model route "ai-gateway/claude-opus-5.5" is not approved')
-  // A request without a question, or with choices of its own, is refused before a card is sent.
-  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'no question',
-    subagent_model: { provider: 'ai-gateway', model: 'claude-sonnet-5' } })).rejects.toThrow('needs human_action')
-  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'own choices', human_action: '可以吗？',
-    options: ['可以', '不行'], subagent_model: { provider: 'ai-gateway', model: 'claude-sonnet-5' } })).rejects.toThrow('fixed choices')
-  // The worker asks with the report; the host words the question with the route and fixes the choices.
-  const asked = await runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'This needs Opus',
-    human_action: '想用 Opus 5.5 做一个子 agent 对比方案',
-    subagent_model: { provider: 'ai-gateway', model: 'claude-opus-5.5' } }) as
-    { attention: { id: string; question: string; options: string[] } }
-  expect(asked.attention.options).toEqual(['允许', '不允许'])
-  expect(asked.attention.question).toContain('模型授权：允许在本工单用 Opus 5.5（ai-gateway/claude-opus-5.5）跑子 agent 吗？')
-  // Only the person's click records the route: the guard then allows it, and keeps refusing another.
-  const approved = runtime.engine.answerAttention(ticket.id, asked.attention.id, '允许')
-  expect(approved.execution?.modelGrants).toEqual([expect.objectContaining({ provider: 'ai-gateway', model: 'claude-opus-5.5' })])
+  // Choosing a model is not an authorization: every configured route passes the ticket's guard, with no card behind it.
   expect(select('ai-gateway', 'claude-opus-5.5')).toBeUndefined()
-  expect(select('ai-gateway', 'claude-sonnet-5')).toMatch('not approved')
-  // The Session's own model is inherited without a new approval.
+  expect(select('ai-gateway', 'claude-sonnet-5')).toBeUndefined()
   expect(select('ai-gateway', 'deepseek-v4.1-flash')).toBeUndefined()
-  // Asking again for an approved route, or for one the deployment does not route, never reaches a person.
-  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'again', human_action: '再来一次？',
-    subagent_model: { provider: 'ai-gateway', model: 'claude-opus-5.5' } })).rejects.toThrow('already approved')
-  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'unknown', human_action: '可以用吗？',
-    subagent_model: { provider: 'ai-gateway', model: 'claude-opus-9' } })).rejects.toThrow('Unknown model route')
-  // A denial records nothing, and the input says the worker may not select it.
-  const denied = await runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'Sonnet?', human_action: '改用 Sonnet 5？',
-    subagent_model: { provider: 'ai-gateway', model: 'claude-sonnet-5' } }) as { attention: { id: string } }
-  const refused = runtime.engine.answerAttention(ticket.id, denied.attention.id, '不允许')
-  expect(refused.execution?.modelGrants).toHaveLength(1)
-  expect(select('ai-gateway', 'claude-sonnet-5')).toMatch('not approved')
+  // A call that names no route inherits the worker's own model, as before.
+  expect(guard({ name: 'subagent', arguments: { prompt: 'look' } })).toBeUndefined()
+  // A route the deployment does not serve is refused by DeepSeek Harness against the same seeded policy, not by this
+  // guard; nothing asks a person about a model either way.
+  expect(select('ai-gateway', 'claude-opus-9')).toBeUndefined()
+  // The report tool has no single-model approval left: passing the old field is a schema error, never a card.
+  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'This needs Opus',
+    human_action: '想用 Opus 5.5 做一个子 agent 对比方案',
+    subagent_model: { provider: 'ai-gateway', model: 'claude-opus-5.5' } })).rejects.toThrow(/subagent_model/)
 })
 
-it('takes a person\'s own message naming the route as the model grant, so the card is not sent again', async () => {
-  const catalog = {
-    default: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' },
-    groups: [{ id: 'ai-gateway', name: 'kurogames', models: [
-      { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
-      { id: 'claude-opus-5.5', name: 'Opus 5.5' },
-      { id: 'claude-sonnet-5', name: 'Sonnet 5' }] }],
-    failures: [],
-  }
-  Object.assign(controller, { modelCatalog: vi.fn(async () => catalog) })
-  const seeded = runtime.store.settings()
-  runtime.store.saveSettings({ ...seeded, executor: { ...seeded.executor, model: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' } } })
-  const { ticket, sessionId } = await acceptedTicket()
-  const guard = guards.get(sessionId)!
-  const select = (provider: string, model: string) => guard({ name: 'subagent', arguments: { provider, model, prompt: 'look' } })
-  // The person already said it in the worker Session; that message is an authorization, not something to ask about again.
-  const ctx = (runtime as unknown as { ctx: Context }).ctx
-  ctx.emit('session/event', { id: sessionId } as never, { type: 'user/message',
-    data: { source: { kind: 'user' }, content: [{ type: 'text', text: '模板方案让opus出方案' }] } } as never)
-  const reported = await runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'Opus 5.5 出模板方案',
-    subagent_model: { provider: 'ai-gateway', model: 'claude-opus-5.5' } }) as
-    { attention?: unknown; authorized?: { provider: string; model: string; inputId?: string } }
-  // No card: the report records the person's Input as the grant and tells the worker it may select the route.
-  expect(reported.attention).toBeUndefined()
-  expect(reported.authorized).toMatchObject({ provider: 'ai-gateway', model: 'claude-opus-5.5' })
-  expect(runtime.store.tickets.get(ticket.id)!.execution?.modelGrants).toEqual([
-    expect.objectContaining({ provider: 'ai-gateway', model: 'claude-opus-5.5', inputId: expect.any(String) })])
-  expect(select('ai-gateway', 'claude-opus-5.5')).toBeUndefined()
-  // A refusal is not an authorization: the host asks on the fixed card and the route stays refused until 允许.
-  ctx.emit('session/event', { id: sessionId } as never, { type: 'user/message',
-    data: { source: { kind: 'user' }, content: [{ type: 'text', text: '先不要用 sonnet' }] } } as never)
-  const asked = await runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'Sonnet?', human_action: '想用 Sonnet 5 对比',
-    subagent_model: { provider: 'ai-gateway', model: 'claude-sonnet-5' } }) as { attention?: { options: string[] } }
-  expect(asked.attention?.options).toEqual(['允许', '不允许'])
-  expect(select('ai-gateway', 'claude-sonnet-5')).toMatch('not approved')
-})
-
-it('offers one card for an agent team and lets a person authorize every role\'s route', async () => {
+it('offers one card for an agent team, without making its routes a permission', async () => {
   const catalog = {
     default: { provider: 'ai-gateway', model: 'deepseek-v4.1-flash' },
     groups: [{ id: 'ai-gateway', name: 'kurogames', models: [
@@ -2107,19 +2052,17 @@ it('offers one card for an agent team and lets a person authorize every role\'s 
     { role: '实现', task: '按方案改代码', provider: 'ai-gateway', model: 'claude-opus-5.5' },
     { role: '复核', task: '独立复现并读 diff', provider: 'ai-gateway', model: 'claude-sonnet-5' },
   ]
-  // A team request needs a question and fixed choices, and never shares a card with a single model request.
+  // The roster card asks whether the team may be formed, so it needs a question and its own fixed choices.
   await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'no question', subagent_team: team }))
     .rejects.toThrow('needs human_action')
   await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'own choices', human_action: '可以吗？',
     options: ['可以', '不行'], subagent_team: team })).rejects.toThrow('fixed choices')
-  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'both', human_action: '可以吗？',
-    subagent_model: { provider: team[0]!.provider, model: team[0]!.model }, subagent_team: [team[1]!] })).rejects.toThrow('not both')
   // The person decides on the whole roster, so a card that would cut a role off is refused before it is sent.
   await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'long', human_action: 'x'.repeat(900),
     subagent_team: [{ role: '实现', task: 't'.repeat(200), provider: 'ai-gateway', model: 'claude-opus-5.5' }] }))
     .rejects.toThrow('1000 characters')
-  // The routes stay refused until the person allows the roster.
-  expect(select('ai-gateway', 'claude-opus-5.5')).toMatch('not approved')
+  // The routes already pass the guard before anybody answers: the card is about forming the team, not about the models.
+  expect(select('ai-gateway', 'claude-opus-5.5')).toBeUndefined()
   const asked = await runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'This needs a team',
     human_action: '复杂改动想拆成实现与复核两个 teammate', subagent_team: team }) as
     { attention: { id: string; question: string; options: string[] } }
@@ -2128,26 +2071,18 @@ it('offers one card for an agent team and lets a person authorize every role\'s 
   expect(asked.attention.question).toContain('允许在本工单用以下 agent 团队吗？')
   expect(asked.attention.question).toContain('- 实现：Opus 5.5（ai-gateway/claude-opus-5.5）— 按方案改代码')
   expect(asked.attention.question).toContain('- 复核：Sonnet 5（ai-gateway/claude-sonnet-5）— 独立复现并读 diff')
-  // Only 允许 records the routes; both roles' routes pass the guard afterwards, an unapproved one does not.
-  const approved = runtime.engine.answerAttention(ticket.id, asked.attention.id, '允许')
-  expect(approved.execution?.modelGrants).toEqual([
-    expect.objectContaining({ role: '实现', provider: 'ai-gateway', model: 'claude-opus-5.5' }),
-    expect.objectContaining({ role: '复核', provider: 'ai-gateway', model: 'claude-sonnet-5' }),
-  ])
-  expect(select('ai-gateway', 'claude-opus-5.5')).toBeUndefined()
-  expect(select('ai-gateway', 'claude-sonnet-5')).toBeUndefined()
-  expect(select('ai-gateway', 'deepseek-v4.1-flash')).toBeUndefined()
-  // Asking again for an approved role and route, naming a role twice, or a route the deployment does not serve never reaches a person.
-  await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'again', human_action: '再来一次？',
-    subagent_team: [team[0]] })).rejects.toThrow('already approved')
+  // The answer reaches the worker as its person's decision on the roster; no route is recorded as a grant.
+  const allowed = runtime.engine.answerAttention(ticket.id, asked.attention.id, '允许')
+  expect(JSON.stringify(allowed.inputs.at(-1))).toContain('人允许了 agent 团队')
+  // A malformed roster never reaches a person: a role named twice, or a route the deployment does not serve.
   await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'dupe', human_action: '重复？',
     subagent_team: [{ role: '分析', task: '查根因', provider: 'ai-gateway', model: 'claude-sonnet-5' },
       { role: '分析', task: '再查一次', provider: 'ai-gateway', model: 'claude-opus-5.5' }] })).rejects.toThrow('unique role')
   await expect(runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'unknown', human_action: '可以用吗？',
     subagent_team: [{ ...team[0], model: 'claude-opus-9' }] })).rejects.toThrow('Unknown model route')
-  // A denial records no route for the team it refused, and the earlier grants stand.
+  // A denial is the person's answer too, and tells the worker not to form that team.
   const denied = await runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'third?', human_action: '加一个分析？',
     subagent_team: [{ role: '分析', task: '查根因', provider: 'ai-gateway', model: 'claude-sonnet-5' }] }) as { attention: { id: string } }
   const refused = runtime.engine.answerAttention(ticket.id, denied.attention.id, '不允许')
-  expect(refused.execution?.modelGrants).toHaveLength(2)
+  expect(JSON.stringify(refused.inputs.at(-1))).toContain('人不允许本工单的 agent 团队')
 })

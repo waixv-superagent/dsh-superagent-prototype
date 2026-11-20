@@ -877,29 +877,6 @@ describe('context threads and notes', () => {
     h.engine.stopTicket(ticketId, 'done')
     expect(() => h.engine.note(ticketId, 'Too late')).toThrow(new UserError('ticketEnded'))
   })
-  it('relays a person\'s own message as a model authorization, and refuses a bot\'s or one that names no route', () => {
-    const h = harness()
-    const ticketId = accepted(h).ticketId!
-    h.tick(1)
-    const catalog = [{ provider: 'p', model: 'm', name: 'Opus 5.5' }]
-    // The person's message is in the main conversation, on a Thread the ticket does not subscribe to: only the relay reaches
-    // the ticket, and the host still checks that the Trigger is a person's and reads the route from its own text.
-    h.engine.receive(trigger('7', { threads: [{ source: 'chat', id: 't2' }], text: '复杂的可以让 opus 来' }))
-    const noted = h.engine.note(ticketId, 'The person authorized Opus 5.5 for this review.', { triggerId: '7', catalog })
-    expect(noted.execution?.modelGrants).toEqual([expect.objectContaining({ provider: 'p', model: 'm', triggerId: '7' })])
-    expect(noted.inputs.at(-1)).toMatchObject({ kind: 'note', text: 'The person authorized Opus 5.5 for this review.' })
-    // Idempotent: relaying the same message again adds no second grant.
-    expect(h.engine.note(ticketId, 'Again.', { triggerId: '7', catalog }).execution?.modelGrants).toHaveLength(1)
-    // A bot's message, a message that only mentions or refuses the route, and an unknown Trigger record nothing.
-    h.engine.receive(trigger('8', { human: false, threads: [{ source: 'chat', id: 't3' }], text: '让 opus 来' }))
-    expect(() => h.engine.note(ticketId, 'bot', { triggerId: '8', catalog })).toThrow(new UserError('modelRelayPerson'))
-    h.engine.receive(trigger('9', { threads: [{ source: 'chat', id: 't4' }], text: 'opus 太慢' }))
-    expect(() => h.engine.note(ticketId, 'mention', { triggerId: '9', catalog })).toThrow(new UserError('modelRelayUnnamed'))
-    expect(() => h.engine.note(ticketId, 'unknown', { triggerId: '99', catalog })).toThrow(new UserError('modelRelayPerson'))
-    // A plain note still grants nothing, even when the conversation has a matching message in the store.
-    h.engine.receive(trigger('10', { threads: [{ source: 'chat', id: 't5' }], text: '让 opus 来' }))
-    expect(h.engine.note(ticketId, 'Context only.').execution?.modelGrants).toHaveLength(1)
-  })
 })
 describe('follow-up owners', () => {
   const accept = { kind: 'accept' as const, title: 'Y', scope: 'small', reason: 'requested' }
@@ -1246,121 +1223,17 @@ describe('worker reports', () => {
     h.settle()
     expect(h.delivered.map(([, id]) => id)).toContain(answered.inputs.at(-1)!.id)
   })
-  it('asks a person to allow a subagent model route, fixes its choices, and records only an approval', () => {
-    const h = harness()
-    const ticketId = accepted(h).ticketId!
-    h.tick(1)
-    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', model: { provider: 'p', model: 'm' } }))
-      .toThrowError(expect.objectContaining({ code: 'modelRequest' }))
-    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', question: 'Q?', options: ['A', 'B'], model: { provider: 'p', model: 'm' } }))
-      .toThrowError(expect.objectContaining({ code: 'modelRequest' }))
-    const asked = h.engine.report(ticketId, { state: 'progress', summary: 'need a stronger model',
-      question: '模型授权：允许用 p/m 跑子 agent 吗？', model: { provider: 'p', model: 'm' } })
-    expect(asked.attention).toMatchObject({ question: '模型授权：允许用 p/m 跑子 agent 吗？', options: ['允许', '不允许'],
-      model: { provider: 'p', model: 'm' } })
-    // A written answer that is not the card's label authorizes nothing, and says so to the worker; it is not a person's
-    // message either, so it can never become a source of a model grant.
-    const written = h.engine.answerAttentionText(ticketId, asked.attention!.id, '先不用')
-    expect(written.execution?.modelGrants).toBeUndefined()
-    expect(written.inputs.at(-1)).not.toHaveProperty('person')
-    expect(written.inputs.at(-1)).toMatchObject({ kind: 'text', text: expect.stringContaining('未授权') })
-    // Ask again and approve: the grant lives on the ticket, and the answer tells the worker it may select the route.
-    h.tick(1)
-    const again = h.engine.report(ticketId, { state: 'progress', summary: 'ask again',
-      question: '模型授权：允许用 p/m 跑子 agent 吗？', model: { provider: 'p', model: 'm' } })
-    const approved = h.engine.answerAttention(ticketId, again.attention!.id, '允许')
-    expect(approved.execution?.modelGrants).toEqual([expect.objectContaining({ provider: 'p', model: 'm', attentionId: again.attention!.id })])
-    expect(approved.inputs.at(-1)).toMatchObject({ text: '人允许了模型 p/m（本工单的子 agent 可用，授权已记录）。可以用 subagent 的 provider/model 指定它。' })
-    // A denial records no grant for that route, and the existing grant is untouched.
-    h.tick(1)
-    const third = h.engine.report(ticketId, { state: 'progress', summary: 'ask third',
-      question: '模型授权：允许用 p/n 跑子 agent 吗？', model: { provider: 'p', model: 'n' } })
-    const denied = h.engine.answerAttention(ticketId, third.attention!.id, '不允许')
-    expect(denied.execution?.modelGrants).toHaveLength(1)
-    expect(denied.inputs.at(-1)).toMatchObject({ text: '人不允许模型 p/n；本工单不要用它。' })
-  })
-  it('records a person\'s own message that named a subagent model route as its authorization', () => {
-    const h = harness()
-    const ticketId = accepted(h).ticketId!
-    h.tick(1)
-    const catalog = [{ provider: 'p', model: 'm', name: 'Opus 5.5' }]
-    // No message named the route yet: the host has nothing to record, so the worker still asks on a card.
-    expect(h.engine.authorizeModelFromPerson(ticketId, { provider: 'p', model: 'm' }, catalog)).toBeUndefined()
-    expect(h.repo.tickets.get(ticketId)!.execution?.modelGrants).toBeUndefined()
-    // A person's own message on the ticket names the route and asks to use it: that Input becomes the grant, so no card is
-    // needed. The record keeps both the route and the message it came from.
-    h.engine.receive(trigger('2', { text: '模板方案让 opus 出方案' }))
-    const granted = h.engine.authorizeModelFromPerson(ticketId, { provider: 'p', model: 'm' }, catalog)
-    expect(granted).toMatchObject({ provider: 'p', model: 'm' })
-    expect(granted!.attentionId).toBeUndefined()
-    const recorded = h.repo.tickets.get(ticketId)!
-    expect(recorded.inputs.find(input => input.id === granted!.inputId)).toMatchObject({ kind: 'trigger', triggerId: '2' })
-    expect(recorded.execution?.modelGrants).toEqual([granted])
-    // Idempotent: a second request for the same route returns the record instead of adding another.
-    expect(h.engine.authorizeModelFromPerson(ticketId, { provider: 'p', model: 'm' }, catalog)).toEqual(granted)
-    expect(h.repo.tickets.get(ticketId)!.execution?.modelGrants).toHaveLength(1)
-    // A person who wrote it in the worker Session authorizes it the same way; that input carries the words itself.
-    const session = harness()
-    const sessionTicket = accepted(session).ticketId!
-    expect(session.engine.wroteInSession(sessionTicket, '模板方案让 opus 出方案')).toBe(true)
-    const fromSession = session.engine.authorizeModelFromPerson(sessionTicket, { provider: 'p', model: 'm' }, catalog)
-    expect(fromSession).toMatchObject({ provider: 'p', model: 'm' })
-    expect(session.repo.tickets.get(sessionTicket)!.inputs.find(input => input.id === fromSession!.inputId))
-      .toMatchObject({ kind: 'session-resume', text: '模板方案让 opus 出方案' })
-    // A refusal is not an authorization, and neither is a bot's message that names the route.
-    const refused = harness()
-    const refusedTicket = accepted(refused).ticketId!
-    refused.engine.receive(trigger('2', { text: '不要用 opus，先走 deepseek' }))
-    expect(refused.engine.authorizeModelFromPerson(refusedTicket, { provider: 'p', model: 'm' }, catalog)).toBeUndefined()
-    refused.engine.receive(trigger('3', { human: false, text: '让 opus 跑一下' }))
-    expect(refused.engine.authorizeModelFromPerson(refusedTicket, { provider: 'p', model: 'm' }, catalog)).toBeUndefined()
-    refused.engine.receive(trigger('4', { text: 'opus 不要用' }))
-    expect(refused.engine.authorizeModelFromPerson(refusedTicket, { provider: 'p', model: 'm' }, catalog)).toBeUndefined()
-    // A word two routes both answer to names neither on its own; the version-specific name still names one.
-    const two = [{ provider: 'p', model: 'm', name: 'Opus 5.5' }, { provider: 'p', model: 'n', name: 'Opus 4.5' }]
-    const ambiguous = harness()
-    const ambiguousTicket = accepted(ambiguous).ticketId!
-    ambiguous.engine.receive(trigger('2', { text: '用 opus 出方案' }))
-    expect(ambiguous.engine.authorizeModelFromPerson(ambiguousTicket, { provider: 'p', model: 'm' }, two)).toBeUndefined()
-    expect(ambiguous.engine.authorizeModelFromPerson(ambiguousTicket, { provider: 'p', model: 'n' }, two)).toBeUndefined()
-    ambiguous.engine.receive(trigger('3', { text: '让 opus 5.5 出方案' }))
-    expect(ambiguous.engine.authorizeModelFromPerson(ambiguousTicket, { provider: 'p', model: 'm' }, two))
-      .toMatchObject({ provider: 'p', model: 'm' })
-  })
-  it('takes the person\'s own words in a panel direction as their message, so a route they name needs no card', () => {
-    const h = harness()
-    const ticketId = accepted(h).ticketId!
-    h.tick(1)
-    h.engine.submitPlan(ticketId, PLAN)
-    // The panel writes the direction as an Input of the ticket; it is the person's message, so the host reads it like one.
-    const revised = h.engine.decidePlan(ticketId, 'revise', '不依赖实际资产的思路是对的，让 opus 复核修正一波', 'panel')
-    const feedback = revised.inputs.at(-1)!
-    expect(feedback).toMatchObject({ kind: 'text', person: true, text: expect.stringContaining('让 opus 复核') })
-    const catalog = [{ provider: 'ai-gateway', model: 'claude-opus-5.5', name: 'Opus 5.5' }]
-    const grant = h.engine.authorizeModelFromPerson(ticketId, { provider: 'ai-gateway', model: 'claude-opus-5.5' }, catalog)
-    expect(grant).toMatchObject({ provider: 'ai-gateway', model: 'claude-opus-5.5', inputId: feedback.id })
-    // A direction that refuses the route authorizes nothing, exactly as a message on the thread would not.
-    const refused = harness()
-    const refusedTicket = accepted(refused).ticketId!
-    refused.tick(1)
-    refused.engine.submitPlan(refusedTicket, PLAN)
-    refused.engine.decidePlan(refusedTicket, 'revise', 'opus 不要用，先走 deepseek', 'panel')
-    expect(refused.engine.authorizeModelFromPerson(refusedTicket, { provider: 'ai-gateway', model: 'claude-opus-5.5' }, catalog))
-      .toBeUndefined()
-  })
-  it('asks a person to allow a whole agent team on one card and records each role\'s route only on 允许', () => {
+  it('asks a person to allow a whole agent team on one card, and its routes are not a permission', () => {
     const h = harness()
     const ticketId = accepted(h).ticketId!
     h.tick(1)
     const roster = [{ role: '实现', task: '按方案改代码', provider: 'p', model: 'm' },
       { role: '复核', task: '独立复现并读 diff', provider: 'p', model: 'n' }]
-    // A team request is a permission question too: a missing question, choices of its own, a single model request beside it,
-    // or a malformed roster never reaches a person.
+    // A team request is a permission question: a missing question, choices of its own, or a malformed roster never reaches
+    // a person.
     expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', team: roster }))
       .toThrowError(expect.objectContaining({ code: 'teamRequest' }))
     expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', question: 'Q?', options: ['A', 'B'], team: roster }))
-      .toThrowError(expect.objectContaining({ code: 'teamRequest' }))
-    expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', question: 'Q?', model: { provider: 'p', model: 'm' }, team: roster }))
       .toThrowError(expect.objectContaining({ code: 'teamRequest' }))
     expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', question: 'Q?', team: [roster[0]!, roster[0]!] }))
       .toThrowError(expect.objectContaining({ code: 'teamRequest' }))
@@ -1369,27 +1242,23 @@ describe('worker reports', () => {
     expect(() => h.engine.report(ticketId, { state: 'progress', summary: 'x', question: 'Q?',
       team: Array.from({ length: 5 }, (_, index) => ({ role: `r${index}`, task: 't', provider: 'p', model: 'm' })) }))
       .toThrowError(expect.objectContaining({ code: 'teamRequest' }))
-    const asked = h.engine.report(ticketId, { state: 'progress', summary: 'need a team', question: '模型授权：允许用这个团队吗？', team: roster })
-    expect(asked.attention).toEqual(expect.objectContaining({ question: '模型授权：允许用这个团队吗？', options: ['允许', '不允许'], team: roster }))
-    // A written answer that is not the card's label authorizes nothing.
+    const asked = h.engine.report(ticketId, { state: 'progress', summary: 'need a team', question: '允许用这个团队吗？', team: roster })
+    expect(asked.attention).toEqual(expect.objectContaining({ question: '允许用这个团队吗？', options: ['允许', '不允许'], team: roster }))
+    // A written answer that is not the card's label allows nothing.
     const written = h.engine.answerAttentionText(ticketId, asked.attention!.id, '先不用')
-    expect(written.execution?.modelGrants).toBeUndefined()
-    expect(written.inputs.at(-1)).toMatchObject({ kind: 'text', text: expect.stringContaining('agent 团队未授权') })
-    // One click approves the whole roster: every route is recorded with its role, and the answer tells the leader to verify.
+    expect(written.inputs.at(-1)).toMatchObject({ kind: 'text', text: expect.stringContaining('agent 团队未允许') })
+    // One click allows the whole roster, and the answer tells the leader to verify itself; the routes it names were never a
+    // permission, so nothing is recorded about them.
     h.tick(1)
-    const again = h.engine.report(ticketId, { state: 'progress', summary: 'ask again', question: '模型授权：允许用这个团队吗？', team: roster })
+    const again = h.engine.report(ticketId, { state: 'progress', summary: 'ask again', question: '允许用这个团队吗？', team: roster })
     const approved = h.engine.answerAttention(ticketId, again.attention!.id, '允许')
-    expect(approved.execution?.modelGrants).toEqual([
-      expect.objectContaining({ role: '实现', provider: 'p', model: 'm', attentionId: again.attention!.id }),
-      expect.objectContaining({ role: '复核', provider: 'p', model: 'n', attentionId: again.attention!.id }),
-    ])
+    expect(Object.keys(approved.execution ?? {})).not.toContain('modelGrants')
     expect(approved.inputs.at(-1)).toMatchObject({ text: expect.stringContaining('自己跑验证') })
-    // A denial records no route for the team it refused, and the earlier grants stand.
+    // A denial is the person's answer too, and names the roster it refused.
     h.tick(1)
-    const third = h.engine.report(ticketId, { state: 'progress', summary: 'ask third', question: '模型授权：允许用分析角色吗？',
+    const third = h.engine.report(ticketId, { state: 'progress', summary: 'ask third', question: '允许用分析角色吗？',
       team: [{ role: '分析', task: '查根因', provider: 'p', model: 'o' }] })
     const denied = h.engine.answerAttention(ticketId, third.attention!.id, '不允许')
-    expect(denied.execution?.modelGrants).toHaveLength(2)
     expect(denied.inputs.at(-1)).toMatchObject({ text: '人不允许本工单的 agent 团队（分析 p/o）；本工单不要用这些模型。' })
   })
   it('turns a written answer into the worker\'s input and clears the question, as a choice does', () => {
@@ -2769,16 +2638,12 @@ describe('phased tickets', () => {
     h.tick(1)
     const decided = h.engine.decidePlan(ticketId, 'approve')
     expect(decided.phase).toBe('implement')
-    // Approving the plan is the person's authorization of exactly the routes the card showed: each phase records its
-    // route with the phase it runs and the plan it came from, so the worker dispatches without a second roster card.
-    expect(decided.execution?.modelGrants).toEqual([
-      { provider: 'ai-gateway', model: 'claude-opus-5.5', at: '2026-09-23T00:00:02.000Z', planAt: submitted.plan!.at, role: '实现' },
-      { provider: 'ai-gateway', model: 'deepseek-v4.1-flash', at: '2026-09-23T00:00:02.000Z', planAt: submitted.plan!.at, role: '复核' },
-    ])
-    // The approval Input tells the worker the flow and the routes it may now start.
+    // Approving the plan is the person's decision on the work: its phases dispatch from it, and which model runs one is the
+    // worker's own choice, so no route is recorded on the ticket (docs/003).
+    expect(decided.execution).not.toHaveProperty('modelGrants')
+    // The approval Input tells the worker the flow it may now dispatch.
     const approval = decided.inputs.flatMap(input => input.kind === 'text' ? [input.text] : []).join('\n')
     expect(approval).toContain('phased')
-    expect(approval).toContain('claude-opus-5.5')
   })
   it('refuses phases on the standard flow, and a phased plan without them', () => {
     const standard = harness()

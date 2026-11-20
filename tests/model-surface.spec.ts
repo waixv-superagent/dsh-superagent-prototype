@@ -94,7 +94,10 @@ interface Skill { name: string; description: string; content: string }
 // measures 69,760, so its budget grows to 69,800.
 // The plan card's deeplink line and the grill's one-round rule both land on the main Session; the merged surface measures
 // 71,119, so the orchestrator budget grows to 71,200.
-const BUDGET: Record<Role, number> = { orchestrator: 71_200, worker: 69_800 }
+// Subagent model selection is not an authorization any more (docs/003): the subagent_model schema, the route-approval
+// wording on the report tool and the note tool's uthorized_by left the surface. The main Session measures 70,361 and
+// the worker 69,266, so the budgets drop to 70,500 and 69,400.
+const BUDGET: Record<Role, number> = { orchestrator: 70_500, worker: 69_400 }
 const PROMPTS = 'prompts/, skills/', TOOLS = 'src/app/tools/', SESSIONS = 'src/app/sessions.ts'
 const NOTICES = 'src/app/notices.ts', LINKS = 'src/app/links.ts', ASSESSMENT = 'src/app/assessment.ts'
 const EXECUTOR = 'src/executor/dsh.ts', ERRORS = 'src/core/errors.ts'

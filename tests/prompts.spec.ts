@@ -81,15 +81,15 @@ it('tells a worker leading an agent team to ask for the roster and verify its te
   expect(worker).toContain('Teammates never push')
 })
 
-it('tells a worker a route a person already named needs no card', () => {
-  // docs/003: a person's own message that names a route authorizes it; the worker records it instead of asking again.
+it('tells a worker that a subagent\'s model is its own choice, not a permission', () => {
+  // docs/003: every model the deployment serves may run a teammate, so nothing asks a person about a route.
   const worker = composePrompt(defaultPrompts(), 'worker')
-  expect(worker).toContain('A route a person\'s own message already named needs no card')
-  expect(worker).toContain('`subagent_model` and no `human_action`')
+  expect(worker).toContain('A subagent\'s model is your choice, not a permission')
+  expect(worker).toContain('list_subagent_models')
 })
 
 it('tells a worker on a phased ticket to plan its phases, dispatch them, and accept through a verifier', () => {
-  // docs/003: approving a phased plan authorizes its routes, so the card is the plan text and the worker starts the team itself.
+  // docs/003: the approved plan is what the phases run under, so the worker starts the team itself.
   const worker = composePrompt(defaultPrompts(), 'worker')
   expect(worker).toContain('DSH_SUPERAGENT_MODE')
   expect(worker).toContain('pass `phases` to `orchestrator_plan`')
