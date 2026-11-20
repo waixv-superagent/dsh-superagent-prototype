@@ -351,6 +351,7 @@ export class Runtime extends Service implements SourceHost {
         // A `P2`/`P3` Ticket the idle gate has not admitted waits by design, however long the mainline runs; the queued alert
         // is for a slot that never came free, so the gate's own verdict decides which it is.
         idleHeld: ticket => !this.idlePool.admission(ticket, this.executor.load()).admitted,
+        wait: id => this.executor.waitOf(id),
         channel: ticket => ticket.replyChannel ?? store.triggers.get(ticket.origin.triggerId)?.channel ?? ticket.channels[0],
         request: ticket => store.triggers.get(ticket.origin.triggerId)?.text ?? '', outbox,
         health: board.claim('stall', { state: 'ready', detail: 'No open ticket is stalled' }),

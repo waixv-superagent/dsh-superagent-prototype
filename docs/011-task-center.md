@@ -35,6 +35,12 @@ the shared tree.
 3. A second workspace is the escape hatch for work that genuinely cannot share: a second physical project with the same
    shared engine, not a second copy of everything. A pinned Ticket never moves to it.
 
+A lease belongs to the worker that occupies it, not to its Ticket for as long as the Ticket is open: a worker that hands
+off — a `blocked` or `ready` report, a question asked with a progress report, or a turn that ended — releases the workspace
+with its slot, so a peer waiting for the whole tree starts instead of waiting for the person that worker asked. The
+Assignment stays on the Ticket meanwhile, because that person's answer resumes it. A handed-off worker that a person's
+message wakes takes its place again first: the wake waits while another Ticket's worker holds a path its lease covers.
+
 Lease overlap is a prefix test in both directions: `Source/A/` overlaps `Source/A/B.cpp`, and `Source/` overlaps everything under it. An empty lease means the whole workspace and would exclude every other ticket, which is why a `git` Ticket that named no paths stays out of the pool instead of serializing it.
 
 ## 3. Where a lease comes from

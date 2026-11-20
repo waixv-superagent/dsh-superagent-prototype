@@ -91,6 +91,10 @@ Each environment gives one extra slot to a person's message or a status request.
 
 Other Inputs, such as CI results, wait for a normal slot in their environment. A launch waits in `working / queued` until a slot is free. Launches run concurrently, so a slow prepare command delays only its own Ticket.
 
+A Ticket's place in a pooled workspace follows the same rule as its slot: it holds the workspace from the placement that starts a launch or wake, and for as long as its turn or the background work of that turn holds the slot. A worker that hands off — a `blocked` or `ready` report, a question asked with a progress report, or a turn that ended — releases the workspace with its slot, so a peer that needs the whole tree starts instead of waiting for the person that worker asked. A handed-off worker that a person's message wakes therefore takes its place again before it writes: a wake waits while another Ticket's worker holds a path its lease covers.
+
+A queued Ticket records what it waits for: a free worker slot, a workspace slot, or the tenants of a workspace its pinned, lease-free placement needs to itself. The panel's Ticket page, `GET /orchestrator/api/state` (`waiting`, and the blockers each wait names) and the stall alert read that record, so a launch that waits names its blocker instead of reading as an unexplained "queued".
+
 ### Execution variables
 
 The prepare command and Executor instructions receive the same execution variables. The command reads environment variables; the Executor reads their values and descriptions in its prompt. None contains credentials.

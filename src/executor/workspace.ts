@@ -21,6 +21,9 @@ export interface Active { workspace: string; lease: Lease }
 /** A peer a worker is told about: another ticket running in the same workspace and the paths it writes. */
 export interface Peer { ticket_id: string; title: string; lease: Lease }
 
+/** A Ticket that occupies a workspace right now, as the placement and the peers it reports see it. */
+export interface Holder extends Active { ticketId: string }
+
 /** Drops leading and trailing separators and uses forward slashes, so a lease compares the same however it was written. */
 export const normalizePath = (path: string): string => path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
 
@@ -68,8 +71,28 @@ export function placeTicket(workspaces: readonly Workspace[], active: readonly A
   return place(workspace ? [workspace] : workspaces, active, lease)
 }
 
+/**
+ * The tickets that occupy a workspace now: each has a placement and its worker still holds it, such as a running turn or
+ * the background work a turn left behind. A worker that handed off — a `blocked` or `ready` report, or a turn that ended —
+ * holds nothing, so its workspace is free for a peer while the person it waits for is away.
+ * @param open - The tickets a placement may see.
+ * @param placement - The workspace a ticket was placed in, or `undefined` while it holds none.
+ * @param holds - Whether a ticket's worker still occupies its placement.
+ * @returns One holder per occupying ticket, in `open` order.
+ */
+export function holders<T extends { id: string; execution?: { lease?: Lease } }>(open: readonly T[],
+  placement: (ticketId: string) => string | undefined, holds: (ticket: T) => boolean): Holder[] {
+  const result: Holder[] = []
+  for (const ticket of open) {
+    const workspace = placement(ticket.id)
+    if (workspace === undefined || !holds(ticket)) continue
+    result.push({ ticketId: ticket.id, workspace, lease: ticket.execution?.lease ?? [] })
+  }
+  return result
+}
+
 /** The smallest set of leases that `lease` conflicts with, for the message a queued Ticket shows. */
-export function conflicts(active: readonly Active[], lease: Lease): Active[] {
+export function conflicts<T extends Active>(active: readonly T[], lease: Lease): T[] {
   return active.filter(item => overlap(item.lease, lease))
 }
 
