@@ -176,34 +176,6 @@ it('lets a worker follow a related thread for context, which the main Session he
     .toEqual([expect.stringContaining('Note from the orchestrator, for context only: Ticket B renamed the setting.')])
 })
 
-it('relays a person\'s own message as the ticket\'s model authorization, and refuses a bot\'s or one that names no route', async () => {
-  h = await startRuntime()
-  const { ticket, sessionId } = await h.acceptedTicket(feishu('1', '@bot 修一下回归'))
-  h.deliveries.mockClear()
-  // The person's message is on another Feishu thread: the ticket never sees it, the main Session does.
-  const authorization = feishu('9', '复杂的可以让 opus 来')
-  h.runtime.store.triggers.save(authorization)
-  const master = (name: string, args: Record<string, unknown>) => h!.runTool(h!.runtime.masterId, name, args)
-  const noted = await master('orchestrator_ticket_note', { ticket_id: ticket.id, text: 'The person allowed Opus 5.5 for this review.',
-    authorized_by: authorization.id })
-  expect(noted).toMatchObject({ authorized: ['ai-gateway/claude-opus-5.5'] })
-  expect(h.runtime.store.tickets.get(ticket.id)!.execution?.modelGrants).toEqual([
-    expect.objectContaining({ provider: 'ai-gateway', model: 'claude-opus-5.5', triggerId: authorization.id })])
-  // The note still reaches the worker for context.
-  await h.runtime.idle()
-  expect(h.deliveries.mock.calls.map(([call]) => call).filter(call => call.sessionId === sessionId).map(call => call.text))
-    .toEqual([expect.stringContaining('Note from the orchestrator, for context only: The person allowed Opus 5.5 for this review.')])
-  // A bot's message, and a person's message that only mentions the route, are refused: the worker still asks on its card.
-  const bot = feishu('10', '让 opus 来', { sender_type: 'bot', sender_id: 'ou_other_bot' })
-  h.runtime.store.triggers.save(bot)
-  await expect(master('orchestrator_ticket_note', { ticket_id: ticket.id, text: 'bot', authorized_by: bot.id }))
-    .rejects.toThrow(/needs a person's own message/)
-  const mention = feishu('11', 'opus 太慢')
-  h.runtime.store.triggers.save(mention)
-  await expect(master('orchestrator_ticket_note', { ticket_id: ticket.id, text: 'mention', authorized_by: mention.id }))
-    .rejects.toThrow(/names no model route/)
-})
-
 it('takes the message a follow-up answers from its Source kind, whichever kind it is', async () => {
   h = await startRuntime()
   const parent = feishu('1', 'the earlier message')

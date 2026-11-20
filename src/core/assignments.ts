@@ -33,8 +33,6 @@ export interface WorkerReport {
   options?: string[]
   /** The context the question card adds, in the worker's own order; 1–6 sections. */
   sections?: QuestionSection[]
-  /** With `question`: ask the person to allow this subagent model route for the ticket; the host offers 允许 and 不允许. */
-  model?: ModelRoute
   /** With `question`: ask the person to allow this agent team on the ticket, a role and job for each route; the host offers 允许 and 不允许. */
   team?: TeamRoute[]
   /** The person's message whose request raised the question; routes the question to the channel where it was written. */
@@ -214,13 +212,11 @@ export class Assignments extends EnginePart {
     if (report.askedBy && !report.question) throw new UserError('askerWithoutQuestion')
     const options = report.options?.map(label => label.trim())
     if (options && (!report.question || !validCardOptions(options))) throw new UserError(report.question ? 'attentionOptions' : 'optionsWithoutQuestion')
-    // A subagent model request is a permission question with fixed choices: the host puts 允许 and 不允许 on the card and
-    // never reads an approval out of free text, so the worker cannot offer choices of its own. A team request is the same
-    // permission for a roster of roles and routes, and it never shares a card with a single model request.
-    if (report.model && (!report.question || options?.length)) throw new UserError('modelRequest')
-    if (report.model && analyzing) throw new UserError('analysisReadOnly')
+    // A team request is a permission question with fixed choices: the host puts 允许 and 不允许 on the card and never reads an
+    // approval out of free text, so the worker cannot offer choices of its own. Which model runs a teammate is not a
+    // permission question: the Session's seeded policy already allows every route the deployment serves (docs/003).
     if (report.team) {
-      if (report.model || !validTeam(report.team)) throw new UserError('teamRequest')
+      if (!validTeam(report.team)) throw new UserError('teamRequest')
       if (!report.question || options?.length) throw new UserError('teamRequest')
       if (analyzing) throw new UserError('analysisReadOnly')
     }
@@ -239,14 +235,13 @@ export class Assignments extends EnginePart {
     if (report.answers && !person(report.answers, false)) throw new UserError('notAnswerable')
     const at = this.now()
     const previous = ticket.attention
-    // A model or team request always offers the same two choices, whatever the worker wrote; an ordinary question keeps its own.
-    const choices = report.model || report.team ? [...MODEL_APPROVAL_OPTIONS] : options
+    // A team request always offers the same two choices, whatever the worker wrote; an ordinary question keeps its own.
+    const choices = report.team ? [...MODEL_APPROVAL_OPTIONS] : options
     const ask = (question: string) => ({ id: key('attention', ticketId, question, at), question,
       ...(choices?.length ? { options: choices } : {}), ...(report.sections?.length ? { sections: report.sections } : {}),
-      ...(report.model ? { model: report.model } : {}), ...(report.team ? { team: report.team } : {}),
+      ...(report.team ? { team: report.team } : {}),
       ...(report.askedBy ? { triggerId: report.askedBy } : {}) })
     const same = report.question === previous?.question && JSON.stringify(choices ?? []) === JSON.stringify(previous?.options ?? [])
-      && JSON.stringify(report.model ?? null) === JSON.stringify(previous?.model ?? null)
       && JSON.stringify(report.team ?? null) === JSON.stringify(previous?.team ?? null)
     const asked = report.question && !same ? ask(report.question) : previous
     const attention = report.question === null || report.state === 'ready' ? undefined : asked

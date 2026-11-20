@@ -1,7 +1,7 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
 import { isoTime, liveTicket } from './model.ts'
-import type { Backend, ChannelRef, Decision, GrillQuestion, LinkedRelationKind, ModelGrant, ModelRelay, ModelRoute, PipelineObservation, PolicyEffect, QuestionSection, RoutedModel, ThreadRef, Ticket, TicketDeploy, TicketPipeline, TicketRepair, Trigger } from './model.ts'
+import type { Backend, ChannelRef, Decision, GrillQuestion, LinkedRelationKind, PipelineObservation, PolicyEffect, QuestionSection, ThreadRef, Ticket, TicketDeploy, TicketPipeline, TicketRepair, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
 import type { PlanDecision, PlanOption, PlanPhase, PlanTemplate, PlanVia } from './plan.ts'
@@ -425,11 +425,10 @@ export class Engine {
     return this.repo.atomic(() => this.tickets.link(ticketId, kind, otherId, reason))
   }
   /**
-   * A fact the main Session gives an open ticket's Executor: see `Tickets.note`. With `relay`, the note also records the model
-   * routes the person's own message names, so a conversation-level authorization reaches the ticket without a card.
-   * @throws UserError when the ticket is unknown or has ended, or the relay names no person's message or no route.
+   * A fact the main Session gives an open ticket's Executor: see `Tickets.note`.
+   * @throws UserError when the ticket is unknown or has ended.
    */
-  note(ticketId: string, text: string, relay?: ModelRelay): Ticket { return this.repo.atomic(() => this.tickets.note(ticketId, text, relay)) }
+  note(ticketId: string, text: string): Ticket { return this.repo.atomic(() => this.tickets.note(ticketId, text)) }
   /**
    * An Executor's hand-back of a message that reached its ticket but asks for more than it: see `Evals.handback`.
    * @returns whether it was queued for Eval: false while another ticket still decides it, and for one this ticket did not decide (see `Evals.handback`).
@@ -448,14 +447,7 @@ export class Engine {
    * answer, or a question or answer that names a message that is not a person's or did not reach the ticket.
    */
   report(ticketId: string, report: WorkerReport): Ticket { return this.repo.atomic(() => this.assignments.report(ticketId, report)) }
-  /**
-   * A person's own message on the ticket named a subagent model route: record that as its authorization, so the worker's
-   * tool guard lets it select the route without a card (docs/003; see `Tickets.authorizeModelFromPerson`). A route with a
-   * grant already recorded is returned unchanged, and a route no person message names returns undefined.
-   */
-  authorizeModelFromPerson(ticketId: string, route: ModelRoute, catalog: readonly RoutedModel[]): ModelGrant | undefined {
-    return this.repo.atomic(() => this.tickets.authorizeModelFromPerson(ticketId, route, catalog))
-  }
+
   /**
    * A person wrote in a ticket's worker Session: an ended ticket resumes, one whose worker's turn is over starts its next
    * Assignment, and one still working takes the message. DSH delivers the message into the Session itself, so no Source saw
@@ -511,7 +503,7 @@ export type EngineForSettings = Pick<Engine, 'policyChanged'>
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
   | 'assignmentInterrupted' | 'repaired' | 'repairAssignment' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'link' | 'reply'
   | 'submitPlan' | 'settlePlan' | 'askGrill' | 'advancePhase' | 'resetPhase' | 'redispatchTicket' | 'widenLease' | 'recordPipeline' | 'rerunPipeline' | 'idleLaunch' | 'startIdleAnalysis'
-  | 'authorizeModelFromPerson' | 'dropUnstartedIdle'>
+  | 'dropUnstartedIdle'>
 /** What the host's pipeline watcher tells the Engine. */
 export type EngineForPipeline = Pick<Engine, 'observePipeline'>
 /** What the host's watchdog tells the Engine: it recovers a ticket its worker stopped on a passing failure. */
