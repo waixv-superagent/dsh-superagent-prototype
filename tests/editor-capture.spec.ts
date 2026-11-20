@@ -1,10 +1,16 @@
 /** The engine-side editor capture (docs/030): the MCP session, window selection, the PNG and its sidecar, and the failures. */
+// The host's update build runs this suite inside the host, where DSH_SUPERAGENT_EDITOR_CAPTURE_URL can name the deployment's
+// live editor; the suite leaves this spec out there and the worker's own run covers it (docs/006). Pinning the default below
+// keeps a capture that falls back to it on a dead local port, so it can never reach a real editor from here.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+// Hoisted before the imports below load editor-capture.ts, whose default endpoint is read at module load.
+vi.hoisted(() => { process.env.DSH_SUPERAGENT_EDITOR_CAPTURE_URL = 'http://127.0.0.1:1/mcp' })
 import { captureEditor, EditorCaptureError } from '../src/app/editor-capture.ts'
 import { executorTools, type ExecutorToolsHost } from '../src/app/tools/executor.ts'
 import type { Ticket } from '../src/core/index.ts'
