@@ -8,6 +8,7 @@ import { key, latestAssignment, ticketStage, type ChannelRef, type OutboundMessa
 import type { HealthEntry } from '../infra/health.ts'
 import type { Settings } from '../policy.ts'
 import type { ActivityView } from './activity.ts'
+import type { WaitState } from '../executor/dsh.ts'
 
 /** The heartbeat that looks for stalls; the thresholds are minutes, so a coarse look is enough. */
 const HEARTBEAT_MS = 60_000
@@ -38,6 +39,8 @@ export interface StallWatchHost {
   idleHeld?(ticket: Ticket): boolean
   /** The conversation a Ticket's own messages go to, or undefined when it has none. */
   channel(ticket: Ticket): ChannelRef | undefined
+  /** Why a queued Ticket's launch is held, when the executor knows: the slot or the workspace, and who holds it. */
+  wait?(ticketId: string): WaitState | undefined
   /** The text of the request that started the Ticket, which decides the notice's language. */
   request(ticket: Ticket): string
   readonly outbox: { send(message: OutboundMessage): void }
@@ -61,6 +64,8 @@ export interface Stall {
   readonly lastTool?: string
   /** Whether that tool call still runs: it has run past `TOOL_GRACE_MS`. */
   readonly toolRunning?: boolean
+  /** What a queued Ticket waits for, when the executor knows, so the notice names the workspace or the peer that holds it. */
+  readonly wait?: WaitState
 }
 
 /** What the watch found on its last look, which the state API reports and the Feishu status card shows. */
@@ -91,6 +96,35 @@ const short = (text: string): string => {
 const plainTitle = (text: string): string => short(text).replace(/[[\]`*_]/g, '')
 
 /**
+ * What a queued Ticket's held launch waits for, in one short phrase, or undefined when the executor did not say.
+ * The phrase names the workspace or the tickets that hold it, so a person reads the blocker rather than "no free slot".
+ * @param wait - The executor's recorded wait for the ticket.
+ * @param zh - Whether the notice speaks Chinese.
+ * @returns The phrase, or undefined for a wait the executor did not record.
+ */
+export function waitText(wait: WaitState | undefined, zh: boolean): string | undefined {
+  if (!wait) return undefined
+  const ids = wait.blockers.map(blocker => blocker.ticketId.slice(0, 8)).join(', ')
+  const space = wait.workspace ?? ''
+  if (zh) {
+    switch (wait.reason) {
+      case 'workspace-exclusive': return `等工作区 ${space} 整棵树空出来${ids ? `，占着它的是 ${ids}` : ''}`
+      case 'lease-conflict': return `等 ${ids || '其他工单'} 让出同一批路径`
+      case 'workspace-slot': return `等工作区 ${space} 的空闲槽位`
+      case 'worker-slot': return '等执行槽位'
+      case 'paused': return '处理已暂停'
+    }
+  }
+  switch (wait.reason) {
+    case 'workspace-exclusive': return `waiting for workspace ${space} to be free${ids ? `, held by ${ids}` : ''}`
+    case 'lease-conflict': return `waiting for ${ids || 'another ticket'} to release the same paths`
+    case 'workspace-slot': return `waiting for a free slot in workspace ${space}`
+    case 'worker-slot': return 'waiting for a free worker slot'
+    case 'paused': return 'waiting for processing to resume'
+  }
+}
+
+/**
  * The notice for one stall, at most three short lines: what is stalled and for how long, where it stands, and what a person
  * can do. It names facts the host has, never a guess about the cause.
  */
@@ -103,7 +137,7 @@ export function stallText(stall: Stall, ticket: Pick<Ticket, 'id'>, zh: boolean)
     const head = stall.kind === 'queued'
       ? `⚠️ 工单「${title}」已排队 ${stall.minutes} 分钟，还没开始执行。`
       : `⚠️ 工单「${title}」已 ${stall.minutes} 分钟没有进展。`
-    const where = stall.kind === 'queued' ? '等执行槽位空出来。'
+    const where = stall.kind === 'queued' ? `${waitText(stall.wait, true) ?? '等执行槽位空出来'}。`
       : stall.toolRunning ? `工具 ${tool} 一直在运行，没有返回。`
       : stall.lastTool ? `最后一步：${tool}，之后没有新动作。` : '执行器没有新的动作或报告。'
     return [head, where, `可在面板重试或停止（工单 ${id}）。`].join('\n')
@@ -111,7 +145,7 @@ export function stallText(stall: Stall, ticket: Pick<Ticket, 'id'>, zh: boolean)
   const head = stall.kind === 'queued'
     ? `⚠️ Ticket "${title}" has been queued for ${stall.minutes} min without starting.`
     : `⚠️ Ticket "${title}" has made no progress for ${stall.minutes} min.`
-  const where = stall.kind === 'queued' ? 'It waits for a free worker slot.'
+  const where = stall.kind === 'queued' ? `${waitText(stall.wait, false) ?? 'It waits for a free worker slot'}.`
     : stall.toolRunning ? `Tool ${tool} is still running and has not returned.`
     : stall.lastTool ? `Last step: ${tool}, nothing since.` : 'Its worker has no new action or report.'
   return [head, where, `Retry or stop it on the panel (ticket ${id}).`].join('\n')
@@ -184,7 +218,8 @@ export class StallWatch {
       const since = latest([assignment?.createdAt ?? ticket.createdAt])
       const minutes = Math.floor((now - since) / 60_000)
       if (!Number.isFinite(minutes) || minutes < settings.queuedMinutes) return undefined
-      return { stall: { ticketId: ticket.id, title: ticket.title, kind: 'queued', minutes }, since }
+      const wait = this.host.wait?.(ticket.id)
+      return { stall: { ticketId: ticket.id, title: ticket.title, kind: 'queued', minutes, ...wait ? { wait } : {} }, since }
     }
     const activity = this.host.activity.read(ticket.id)
     // A tool that runs, or the background work of a turn that ended, is work in progress; the Executor's own limit ends the
@@ -214,7 +249,7 @@ export class StallWatch {
       return
     }
     const names = this.found.slice(0, MAX_LISTED).map(item => `${item.ticketId.slice(0, 8)} ${item.kind === 'queued' ? 'queued' : 'without progress'} `
-      + `for ${item.minutes} min`)
+      + `for ${item.minutes} min${item.kind === 'queued' && item.wait ? ` (${waitText(item.wait, false)})` : ''}`)
     const more = this.found.length > MAX_LISTED ? `; ${this.found.length - MAX_LISTED} more` : ''
     this.host.health.set({ state: 'error', detail: `${this.found.length} ticket(s) stalled: ${names.join('; ')}${more}`, at })
   }

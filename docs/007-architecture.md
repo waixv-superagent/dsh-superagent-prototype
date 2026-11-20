@@ -564,7 +564,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/evidence.spec.ts` | The repository guard for editor captures (docs/030): a timestamped capture PNG or a JSON sidecar naming the Slate inspector fails the suite, so an internal project frame stays host-local |
 | `tests/p4.spec.ts` | The p4 delivery backend: its settings defaults, the workspace it prepares, and the execution variables it adds |
 | `tests/delivery-targets.spec.ts` | Delivery targets: the configured repository and depot, their spellings, the Source's default, and the target a Ticket records |
-| `tests/workspace.spec.ts` | Task-center placement: lease overlap in both directions, slots, empty leases excluding peers, and the conflicts a queued Ticket names |
+| `tests/workspace.spec.ts` | Task-center placement: lease overlap in both directions, slots, empty leases excluding peers, the holders a workspace keeps, and the conflicts a queued Ticket names |
+| `tests/workspace-occupancy.spec.ts` | A workspace follows the worker that occupies it: a handed-off worker frees the tree for a queued peer instead of holding it until a person answers |
 | `tests/timeline.spec.ts` | A Thread's pages and a Trigger's neighbours by time and then id, with every received Trigger's time in one form |
 | `tests/migration.spec.ts` | The schema 11 migration: every stored record in its current shape, and the refusal of older schemas |
 | `tests/store.spec.ts` | Repositories and their working sets, in SQLite as in memory, the kv area, with every key of `KV` spelled only in `src/kv.ts` and the migration, settings history and queries |

@@ -14,7 +14,7 @@ import type { Store } from '../app/store.ts'
 import { Later, type Effects } from '../app/effects.ts'
 import { deliveryKey, resolveDelivery } from '../app/delivery-targets.ts'
 import { quotaExhausted, routeText, type FailoverSwitch } from '../app/provider-failover.ts'
-import { claimsWorkspace, conflicts, normalizePath, placeTicket, workspaceClient, type Active, type Peer, type Workspace } from './workspace.ts'
+import { claimsWorkspace, conflicts, holders, normalizePath, placeTicket, workspaceClient, type Holder, type Peer, type Workspace } from './workspace.ts'
 import { executionRoot, p4Prepare, type Variable } from '../app/execution-environment.ts'
 import type { Sessions } from '../app/sessions.ts'
 import { MissingWorkerTools } from '../app/worker-tools.ts'
@@ -330,6 +330,29 @@ export class WorkerSlots {
   }
   /** Releases `ticketId`'s starting slot once its worker session is running or the launch/wake attempt has ended. */
   free(ticketId: string): void { this.starting.delete(ticketId) }
+  /**
+   * Whether a launch or wake of `ticketId` holds its starting slot, so its worker is on its way into a workspace even
+   * before the Session reports that its turn runs.
+   * @param ticketId - The ticket whose start is in flight.
+   * @returns True while the start holds the slot.
+   */
+  held(ticketId: string): boolean { return this.starting.has(ticketId) }
+}
+
+/** Why a queued Ticket's launch is held: what it waits for, and the tickets holding it back. */
+export interface WaitState {
+  /** What the launch waits for: resumed processing, a free worker slot, or a workspace its placement can use. */
+  reason: 'paused' | 'worker-slot' | 'workspace-slot' | 'workspace-exclusive' | 'lease-conflict'
+  /** One line naming the wait, in the words the placement or the slot limit explains it with. */
+  message: string
+  /** The workspace the wait concerns, when it concerns one. */
+  workspace?: string
+  /** The tickets holding what this ticket waits for, with whether each is still starting or already running. */
+  blockers: readonly { ticketId: string; title: string; state: 'starting' | 'running' }[]
+  /** When the ticket first waited for this reason, kept across retries of the same wait. */
+  since: string
+  /** How many times the launch was retried for this wait. */
+  retries: number
 }
 
 /**
@@ -343,6 +366,8 @@ export class DshExecutor implements Executor {
   private readonly slots: WorkerSlots
   /** The workspace each launched ticket runs in, by ticket, so a placement can see its peers. Recomputed on every launch. */
   private readonly placements = new Map<string, string>()
+  /** Why each queued ticket waits, by ticket, so a person and the stall watch read the blocker instead of a bare "queued". */
+  private readonly waits = new Map<string, WaitState>()
   /** Transient failure counts tried so far: keyed by `assignment.id` for worker turns and `launch:<assignment.id>` for launches. */
   private readonly transient = new Map<string, number>()
   /** Assignment IDs currently waiting on a transient-failure backoff timer before resuming their worker turn. */
@@ -451,7 +476,12 @@ export class DshExecutor implements Executor {
     // held, not failed, and retries until the five signals break its way or a person moves it to P0/P1.
     const admission = this.host.idleAdmission?.(ticket, this.load())
     if (admission && !admission.admitted) throw new Later(`Waiting for an idle window: ${admission.reason}`)
-    this.slots.reserve(ticketId, 'launch')
+    try { this.slots.reserve(ticketId, 'launch') }
+    catch (error) {
+      // The whole environment's slots are taken, which a person can tell apart from a workspace that waits on a peer.
+      if (error instanceof Later) this.recordWait(ticketId, 'worker-slot', error.message, undefined, [])
+      throw error
+    }
     const level = admission?.level, analysing = admission?.analysis && level ? level : undefined
     try {
       // The pool's first launch is a read-only analysis (docs/025): record it before the worker starts, so the tool guard and
@@ -463,6 +493,7 @@ export class DshExecutor implements Executor {
       // ticket — would wait behind a worker that never ran.
       if (level) this.host.engine.idleLaunch(ticketId, level)
       this.transient.delete(`launch:${assignmentId}`)
+      this.waits.delete(ticketId)
     }
     catch (error) {
       // A held or failed launch started nothing, so what this attempt recorded for the pool is taken back before it retries.
@@ -505,6 +536,9 @@ export class DshExecutor implements Executor {
           const person = ticket.undelivered.some(id => fromPerson(ticket.inputs.find(item => item.id === id)))
           this.slots.reserve(ticketId, person ? 'person' : 'wake')
           woken = true
+          // A worker that handed off released its workspace with its slot, so a peer may hold the tree now: the wake waits
+          // for the paths this ticket writes rather than putting two workers into one tree.
+          this.assertWorkspaceFree(ticket)
         }
         const input = ticket.inputs.find(item => item.id === inputId)
         try {
@@ -526,6 +560,7 @@ export class DshExecutor implements Executor {
         }
         this.host.engine.inputsDelivered(ticketId, assignment.id, [inputId])
       }
+      this.waits.delete(ticketId)
     } finally { if (woken) this.slots.free(ticketId) }
   }
   private async deliverInput(ticket: Ticket, assignment: Assignment, input: TicketInput): Promise<void> {
@@ -558,6 +593,7 @@ export class DshExecutor implements Executor {
    */
   stop(ticket: Ticket, assignment: Assignment, reason: string): void {
     this.transient.delete(assignment.id); this.transient.delete(`launch:${assignment.id}`)
+    this.waits.delete(ticket.id)
     const report = assignment.report
     const busy = !!assignment.deliveredAt && !!report && assignment.deliveredAt >= report.at
     const ownTurn = (report?.state === 'ready' || report?.state === 'dropped') && !busy
@@ -606,7 +642,7 @@ export class DshExecutor implements Executor {
   activeCount(): number { return this.host.store.tickets.open().filter(ticket => this.running(ticket)).length }
   /** Whether a ticket's worker turn ended while its shell jobs or subagents still run, which the Executor's own limit bounds. */
   inBackground(ticketId: string): boolean { return this.settling.has(ticketId) }
-  /** The directory a Ticket's worker runs in: its pooled workspace while it holds a slot, otherwise its own directory. */
+  /** The directory a Ticket's worker runs in: the workspace it was placed in, otherwise its own directory. */
   workspaceOf(ticket: Ticket): string {
     const placed = this.placements.get(ticket.id)
     return this.host.store.settings().executor.workspaces.find(workspace => workspace.id === placed)?.directory ?? ticket.execution?.directory ?? ''
@@ -615,6 +651,41 @@ export class DshExecutor implements Executor {
   private running(ticket: Ticket): boolean {
     if (!runningAssignment(ticket)) return false
     return this.host.context.agents.get(workerSessionId(ticket.id) as SessionId)?.status === 'running' || this.settling.has(ticket.id)
+  }
+  /**
+   * Whether a ticket's worker occupies its workspace now: the slot its turn or the background work holds, or the launch
+   * or wake that is starting it. A worker that handed off — a `blocked` or `ready` report, or a turn that ended — frees
+   * both with its report, so a peer may take the tree while the person it waits for is away.
+   * @param ticket - The ticket to test.
+   * @returns True while the ticket's worker holds its workspace.
+   */
+  private holdsWorkspace(ticket: Ticket): boolean {
+    return this.slots.held(ticket.id) || this.running(ticket)
+  }
+  /** The tickets that occupy a workspace now, with the paths each may write, as placement and a worker's peers read it. */
+  private workspaceHolders(): Holder[] {
+    return holders(this.host.store.tickets.open(), ticketId => this.placements.get(ticketId), ticket => this.holdsWorkspace(ticket))
+  }
+  /**
+   * Records why a ticket's launch is held, keeping the time it first waited for that reason across the retries of one wait.
+   * @param ticketId - The ticket that waits.
+   * @param reason - What it waits for.
+   * @param message - One line naming the wait.
+   * @param workspace - The workspace the wait concerns, when it concerns one.
+   * @param blockers - The tickets holding what this one waits for.
+   */
+  private recordWait(ticketId: string, reason: WaitState['reason'], message: string, workspace: string | undefined,
+    blockers: WaitState['blockers']): void {
+    const previous = this.waits.get(ticketId)
+    const same = previous !== undefined && previous.reason === reason && previous.workspace === workspace
+    this.waits.set(ticketId, { reason, message, ...(workspace ? { workspace } : {}), blockers,
+      since: same ? previous.since : new Date().toISOString(), retries: same ? previous.retries + 1 : 1 })
+  }
+  /** Why a queued ticket's launch is held; `undefined` once it started, ended, or never waited. */
+  waitOf(ticketId: string): WaitState | undefined { return this.waits.get(ticketId) }
+  /** Every ticket whose launch is held now, for the state API and the stall watch. */
+  waitingStates(): { ticketId: string; wait: WaitState }[] {
+    return [...this.waits].map(([ticketId, wait]) => ({ ticketId, wait }))
   }
   /** Marks a ticket failed after its launch fails; the ticket waits until new human input or an explicit retry arrives. */
   private launchFailed(ticketId: string, assignmentId: string, error: unknown): void {
@@ -667,23 +738,49 @@ export class DshExecutor implements Executor {
     // Without a pinned workspace, a Ticket that named no paths is read-only toward the shared tree: it runs in its own
     // directory, so it never waits for a workspace slot and never makes a code Ticket wait for it (011 Task center).
     if (!pinned && !claimsWorkspace(lease)) return { directory: fallback, peers: [] }
-    // A peer holds its lease while an assignment runs, from the placement until delivery ends it, so a ticket that is still
-    // starting is seen as a peer and two launches cannot claim one slot of a one-slot workspace at the same time.
-    const active: Active[] = this.host.store.tickets.open()
-      .filter(other => other.id !== ticket.id && this.placements.has(other.id) && runningAssignment(other))
-      .map(other => ({ workspace: this.placements.get(other.id)!, lease: other.execution?.lease ?? [] }))
+    // A worker that is starting holds its reservation before the launch awaits anything, and one that runs holds its slot,
+    // so two launches cannot claim one slot of a one-slot workspace, while a handed-off worker no longer holds the tree.
+    const active = this.workspaceHolders().filter(holder => holder.ticketId !== ticket.id)
     const chosen = placeTicket(pool, active, lease, pinned)
     if (!chosen) {
+      const pinnedExists = !!pinned && pool.some(workspace => workspace.id === pinned)
+      const scoped = pinnedExists ? active.filter(holder => holder.workspace === pinned) : active
       // An empty lease is the whole workspace, so it waits for that one workspace rather than for a free slot in any.
-      if (pinned && !lease.length) throw new Later('Waiting for the workspace to be free')
-      const waiting = conflicts(active, lease).length
-      throw new Later(waiting ? `Waiting for ${waiting} ticket(s) writing the same paths` : 'Waiting for a free workspace slot')
+      const exclusive = pinnedExists && !lease.length
+      const blocking = exclusive ? scoped : conflicts(scoped, lease)
+      const blockers = blocking.map(holder => ({ ticketId: holder.ticketId, title: this.host.store.tickets.get(holder.ticketId)?.title ?? '',
+        state: this.slots.held(holder.ticketId) ? 'starting' as const : 'running' as const }))
+      const message = exclusive ? 'Waiting for the workspace to be free'
+        : blocking.length ? `Waiting for ${blocking.length} ticket(s) writing the same paths` : 'Waiting for a free workspace slot'
+      this.recordWait(ticket.id, exclusive ? 'workspace-exclusive' : blocking.length ? 'lease-conflict' : 'workspace-slot', message, pinned, blockers)
+      throw new Later(message)
     }
     this.placements.set(ticket.id, chosen.id)
-    const peers = this.host.store.tickets.open()
-      .filter(other => other.id !== ticket.id && this.placements.get(other.id) === chosen.id && runningAssignment(other))
-      .map(other => ({ ticket_id: other.id, title: other.title, lease: other.execution?.lease ?? [] }))
+    const peers = active.filter(holder => holder.workspace === chosen.id)
+      .map(holder => ({ ticket_id: holder.ticketId, title: this.host.store.tickets.get(holder.ticketId)?.title ?? '', lease: holder.lease }))
     return { directory: chosen.directory, workspace: chosen, peers }
+  }
+  /**
+   * Holds a wake of a handed-off worker while a peer occupies a path its lease covers: the worker released the workspace
+   * with its slot, so the tree it resumes in may have an occupant that the lease must keep it apart from.
+   * @param ticket - The ticket whose worker is about to be woken.
+   * @throws Later while a peer's worker holds an overlapping path.
+   */
+  private assertWorkspaceFree(ticket: Ticket): void {
+    const pool = this.host.store.settings().executor.workspaces
+    if (!pool.length) return
+    const lease = ticket.execution?.lease ?? []
+    const pinned = ticket.execution?.workspace
+    if (!pinned && !claimsWorkspace(lease)) return
+    const workspace = this.placements.get(ticket.id) ?? pinned
+    const blocking = conflicts(this.workspaceHolders().filter(holder => holder.ticketId !== ticket.id
+      && (workspace === undefined || holder.workspace === workspace)), lease)
+    if (!blocking.length) return
+    const blockers = blocking.map(holder => ({ ticketId: holder.ticketId, title: this.host.store.tickets.get(holder.ticketId)?.title ?? '',
+      state: this.slots.held(holder.ticketId) ? 'starting' as const : 'running' as const }))
+    const message = `Waiting for ${blocking.length} ticket(s) writing the same paths`
+    this.recordWait(ticket.id, 'lease-conflict', message, workspace, blockers)
+    throw new Later(message)
   }
   private async launch(ticket: Ticket, assignment: Assignment): Promise<void> {
     const current = () => {

@@ -1,6 +1,6 @@
 /** Placement of Tickets into workspaces: slots, lease overlap, and the conflicts a queued Ticket reports. */
 import { describe, expect, it } from 'vitest'
-import { claimsWorkspace, conflicts, LeaseSchema, normalizePath, overlap, place, placeTicket, running, workspaceClient, WorkspaceSchema, type Active, type Workspace } from '../src/executor/workspace.ts'
+import { claimsWorkspace, conflicts, holders, LeaseSchema, normalizePath, overlap, place, placeTicket, running, workspaceClient, WorkspaceSchema, type Active, type Workspace } from '../src/executor/workspace.ts'
 import { ticketExecution } from '../src/executor/dsh.ts'
 import { SettingsSchema } from '../src/policy.ts'
 
@@ -82,6 +82,25 @@ describe('pool membership', () => {
   it('counts a leased path as a claim: only a Ticket with no pinned workspace needs one to enter the pool', () => {
     expect(claimsWorkspace([])).toBe(false)
     expect(claimsWorkspace(['Source/A/'])).toBe(true)
+  })
+})
+
+describe('workspace occupants', () => {
+  const placed = (id: string) => id === 'a' || id === 'b' ? 'one' : undefined
+  const tickets = [{ id: 'a', execution: { lease: ['Source/A/'] } }, { id: 'b', execution: { lease: [] } }, { id: 'c' }]
+  it('holds a workspace for the tickets whose worker still occupies it', () => {
+    expect(holders(tickets, placed, () => true)).toEqual([
+      { ticketId: 'a', workspace: 'one', lease: ['Source/A/'] },
+      { ticketId: 'b', workspace: 'one', lease: [] },
+    ])
+  })
+  it('frees the workspace of a worker that handed off, so a queued peer may place there', () => {
+    // `holds` is the worker's slot: a blocked or ready report frees it, and the placement alone keeps nobody out.
+    expect(holders(tickets, placed, ticket => ticket.id === 'b')).toEqual([{ ticketId: 'b', workspace: 'one', lease: [] }])
+    expect(holders(tickets, placed, () => false)).toEqual([])
+  })
+  it('ignores a ticket without a placement, however busy its worker is', () => {
+    expect(holders(tickets, () => undefined, () => true)).toEqual([])
   })
 })
 

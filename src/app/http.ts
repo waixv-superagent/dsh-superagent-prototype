@@ -67,7 +67,7 @@ export interface HttpHost {
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
   readonly engine: EngineForPeople
   readonly outbox: Pick<Outbox, 'status' | 'retry' | 'withdraw'>
-  readonly executor: Pick<DshExecutor, 'activeCount'>
+  readonly executor: Pick<DshExecutor, 'activeCount' | 'waitOf' | 'waitingStates'>
   /** What the outage recovery is doing, which `/state` carries for the status card and `dsh-superagent status`. */
   readonly watchdog: Pick<Watchdog, 'status'>
   /** The open Tickets the stall alert counts as stalled, which `/state` carries for the status card; absent on an older host. */
@@ -173,6 +173,8 @@ export function stateView(runtime: HttpHost) {
     // waits on it before restarting, so a restart does not break a P0 answer a person is waiting for (docs/006).
     active: { p0: runningP0(runtime.store) },
     masterId: runtime.masterId, paused: settings.paused, health: runtime.health, watchdog: runtime.watchdog.status(),
+    // What each queued Ticket waits for and who holds it, so a stalled launch names its blocker instead of "queued".
+    waiting: runtime.executor.waitingStates(),
     ...runtime.stallWatch ? { stall: runtime.stallWatch.status() } : {} }
 }
 const views = (runtime: HttpHost): ViewHost => ({ store: runtime.store, sources: runtime.sources, links: runtime.links() })
@@ -189,8 +191,9 @@ function ticketPage(runtime: HttpHost, id: string) {
   if (!detail || !ticket) throw new RouteError(404, 'Ticket not found')
   const repro = runtime.repro && ticket.execution?.verification ? ticketReproView(runtime, ticket) : undefined
   const acceptance = ticketAcceptance(runtime, ticket)
+  const wait = runtime.executor.waitOf(id)
   return { ...detail, environment: runtime.configured() ? runtime.ticketEnvironment(ticket) : [], ...acceptance ? { acceptance } : {},
-    ...repro ? { repro } : {} }
+    ...wait ? { wait } : {}, ...repro ? { repro } : {} }
 }
 /**
  * Where a delivered change lives and whether the editor a person is looking at has loaded it (docs/021, docs/009): the
